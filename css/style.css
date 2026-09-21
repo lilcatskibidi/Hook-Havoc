@@ -1,0 +1,113 @@
+@import url('https://fonts.googleapis.com/css2?family=Teko:wght@400;500;600;700&family=Work+Sans:wght@300;400;500;600;700;800;900&display=swap');
+
+* { box-sizing: border-box; }
+
+body {
+    font-family: 'Work Sans', sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    overflow: hidden;
+    background: #020617;
+    margin: 0; padding: 0;
+}
+
+.font-header { font-family: 'Teko', sans-serif; letter-spacing: 0.06em; }
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #0ea5e9, #0284c7); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #38bdf8; }
+
+.glass-panel {
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.88));
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.glass-panel-light {
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.75), rgba(51, 65, 85, 0.65));
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.neon-glow { box-shadow: 0 0 24px rgba(56, 189, 248, 0.5), 0 0 48px rgba(56, 189, 248, 0.2); }
+.neon-glow-amber { box-shadow: 0 0 24px rgba(251, 191, 36, 0.5), 0 0 48px rgba(251, 191, 36, 0.2); }
+
+.pulse-danger { animation: pulseDanger 0.6s infinite ease-in-out; }
+@keyframes pulseDanger { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.hud-shadow { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05) inset; }
+
+.stat-chip { transition: all 0.2s ease; }
+.stat-chip:hover { transform: translateY(-2px); filter: brightness(1.15); }
+
+.key {
+    background: #1e293b; padding: 2px 6px; border-radius: 4px;
+    color: #fff; border: 1px solid #334155; font-size: 10px; font-weight: 700;
+}
+
+.shop-item {
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative; overflow: hidden;
+}
+.shop-item::before {
+    content: ''; position: absolute; top: 0; left: -100%;
+    width: 100%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
+    transition: left 0.5s;
+}
+.shop-item:hover::before { left: 100%; }
+.shop-item:hover {
+    transform: translateX(4px);
+    border-color: rgba(56, 189, 248, 0.4);
+    box-shadow: 0 8px 32px rgba(56, 189, 248, 0.15);
+}
+
+.tab-btn { position: relative; transition: all 0.2s ease; }
+.tab-btn.active { color: #fbbf24; }
+.tab-btn.active::after {
+    content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, #fbbf24, transparent);
+    box-shadow: 0 0 12px #fbbf24;
+}
+
+.btn-buy {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    transition: all 0.2s ease;
+}
+.btn-buy:hover {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
+    transform: scale(1.05);
+    box-shadow: 0 0 20px rgba(251, 191, 36, 0.5);
+}
+.btn-buy:disabled { background: #334155; cursor: not-allowed; transform: none; box-shadow: none; opacity: 0.5; }
+
+.rarity-common    { border-left: 3px solid #94a3b8; }
+.rarity-rare      { border-left: 3px solid #38bdf8; }
+.rarity-epic      { border-left: 3px solid #a855f7; }
+.rarity-legendary { border-left: 3px solid #f59e0b; }
+
+.damage-flash { position: fixed; inset: 0; pointer-events: none; z-index: 100; opacity: 0; }
+.damage-flash.active { animation: damageFlash 0.4s ease-out; }
+@keyframes damageFlash {
+    0% { opacity: 1; background: radial-gradient(circle, transparent 30%, rgba(239,68,68,0.5) 100%); }
+    100% { opacity: 0; }
+}
+
+.weapon-slot { transition: all 0.2s ease; cursor: pointer; }
+.weapon-slot:hover { background: rgba(56, 189, 248, 0.15); transform: translateY(-2px); }
+.weapon-slot.active {
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(14, 165, 233, 0.15));
+    border-color: #38bdf8 !important;
+    box-shadow: 0 0 16px rgba(56, 189, 248, 0.4);
+}
+
+.catch-popup { animation: catchPop 1.5s ease-out forwards; }
+@keyframes catchPop {
+    0% { transform: scale(0.5) translateY(20px); opacity: 0; }
+    20% { transform: scale(1.1) translateY(0); opacity: 1; }
+    80% { transform: scale(1) translateY(0); opacity: 1; }
+    100% { transform: scale(1) translateY(-30px); opacity: 0; }
+}
