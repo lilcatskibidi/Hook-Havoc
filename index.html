@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aquatic Havoc — Deep Sea Hunter</title>
+    <link rel="icon" href="data:,">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/style.css">
@@ -14,7 +15,23 @@
         <canvas id="gameCanvas" class="w-full h-full block cursor-crosshair"></canvas>
         <div class="absolute inset-0 pointer-events-none" style="background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.4) 100%);"></div>
         <div id="damage-flash" class="damage-flash"></div>
-
+		        <!-- Boss HP bar -->
+        <div id="boss-bar" class="absolute top-4 left-1/2 -translate-x-1/2 w-[70%] max-w-3xl hidden z-20 pointer-events-none">
+            <div class="glass-panel rounded-2xl p-3 border-2 border-rose-500/60 shadow-2xl neon-glow-amber">
+                <div class="flex justify-between items-center mb-1">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-crown text-amber-400 animate-pulse"></i>
+                        <span id="boss-name" class="font-black text-white text-sm tracking-widest uppercase">BOSS</span>
+                    </div>
+                    <span id="boss-hp-text" class="text-xs font-black text-rose-300">0 / 0</span>
+                </div>
+                <div class="w-full h-4 bg-slate-950 rounded-full overflow-hidden border border-rose-500/40 relative">
+                    <div id="boss-hp-bar" class="h-full bg-gradient-to-r from-rose-600 via-red-500 to-amber-400 transition-all duration-200" style="width: 100%;"></div>
+                    <div class="absolute top-0 bottom-0 w-0.5 bg-white/50" style="left: 40%;"></div>
+                </div>
+                <div id="boss-phase-text" class="text-[10px] text-amber-300 font-bold mt-1 tracking-wider">PHASE 1</div>
+            </div>
+        </div>
         <!-- Top HUD -->
         <div class="absolute top-0 left-0 right-0 p-3 sm:p-4 pointer-events-none flex justify-between items-start z-10 gap-3 flex-wrap">
             <div class="flex flex-col gap-2 pointer-events-auto">
@@ -38,6 +55,10 @@
                         <span id="coins-display" class="text-amber-300">150</span>
                     </div>
                     <div class="stat-chip glass-panel px-3 py-1.5 rounded-xl flex items-center gap-2 text-sm font-bold hud-shadow">
+                        <i class="fa-solid fa-clover text-fuchsia-400"></i>
+                        <span id="luck-display" class="text-fuchsia-300">+0%</span>
+                    </div>
+                    <div class="stat-chip glass-panel px-3 py-1.5 rounded-xl flex items-center gap-2 text-sm font-bold hud-shadow">
                         <i class="fa-solid fa-fish text-sky-400"></i>
                         <span id="bucket-display" class="text-sky-300">0 / 15</span>
                     </div>
@@ -54,13 +75,16 @@
                     <div><span class="key">SPACE</span> Cast / Reel</div>
                     <div><span class="key">LMB</span> Shoot</div>
                     <div><span class="key">1-4</span> Weapon</div>
-                    <div><span class="key">Q/E</span> Zoom</div>
                     <div><span class="key">R</span> Reload</div>
+                    <div><span class="key">ESC</span> Menu</div>
                 </div>
                 <div class="text-[10px] text-slate-400">Shoot hooked fish to weaken · Drag them to shore!</div>
             </div>
 
             <div class="flex gap-2 pointer-events-auto">
+                <button id="btn-menu" class="glass-panel hover:bg-slate-800/80 w-11 h-11 rounded-xl text-slate-300 hover:text-white transition-all flex items-center justify-center font-bold shadow-md hud-shadow" title="Menu (ESC)">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
                 <button id="btn-audio" class="glass-panel hover:bg-slate-800/80 w-11 h-11 rounded-xl text-slate-300 hover:text-white transition-all flex items-center justify-center font-bold shadow-md hud-shadow">
                     <i id="audio-icon" class="fa-solid fa-volume-high"></i>
                 </button>
@@ -124,7 +148,7 @@
 
         <div id="catch-popup-container" class="absolute top-1/3 left-1/2 -translate-x-1/2 pointer-events-none z-20 flex flex-col items-center gap-2"></div>
 
-        <!-- Shop modal -->
+        <!-- ================= SHOP MODAL ================= -->
         <div id="shop-modal" class="absolute inset-0 bg-slate-950/90 backdrop-blur-lg flex items-center justify-center z-30 hidden pointer-events-auto p-3 sm:p-4">
             <div class="glass-panel w-full max-w-3xl h-[90%] rounded-3xl flex flex-col overflow-hidden border border-amber-500/30 shadow-2xl neon-glow-amber">
                 <div class="p-5 border-b border-slate-800/80 flex justify-between items-center bg-gradient-to-r from-slate-900/80 to-slate-800/60">
@@ -165,6 +189,64 @@
                 </div>
             </div>
         </div>
+
+        <!-- ================= MAIN MENU ================= -->
+        <div id="main-menu" class="absolute inset-0 bg-slate-950/95 backdrop-blur-xl flex items-center justify-center z-40 pointer-events-auto p-4">
+            <div class="glass-panel w-full max-w-md rounded-3xl overflow-hidden border border-sky-500/30 shadow-2xl neon-glow">
+                <div class="p-6 text-center border-b border-slate-800/80 bg-gradient-to-br from-sky-900/40 to-slate-900/40">
+                    <div class="w-20 h-20 mx-auto mb-3 rounded-3xl bg-gradient-to-br from-sky-500/30 to-cyan-600/20 text-sky-400 flex items-center justify-center text-4xl font-bold border border-sky-500/30 shadow-2xl">
+                        <i class="fa-solid fa-fish"></i>
+                    </div>
+                    <h1 class="font-header text-3xl text-white font-black tracking-tight">AQUATIC HAVOC</h1>
+                    <p class="text-xs text-sky-300 mt-1 tracking-[0.3em] font-bold">DEEP SEA HUNTER</p>
+                </div>
+
+                <!-- Menu button list -->
+                <div id="menu-buttons" class="p-4 flex flex-col gap-2">
+                    <button id="btn-start" class="menu-btn">
+                        <i class="fa-solid fa-play"></i> <span>Start New Game</span>
+                    </button>
+                    <button id="btn-load" class="menu-btn">
+                        <i class="fa-solid fa-folder-open"></i> <span>Continue</span>
+                    </button>
+                    <button id="btn-save-menu" class="menu-btn">
+                        <i class="fa-solid fa-floppy-disk"></i> <span>Save Game</span>
+                    </button>
+                    <button id="btn-about" class="menu-btn">
+                        <i class="fa-solid fa-circle-info"></i> <span>About</span>
+                    </button>
+                </div>
+
+                <!-- About panel (hidden by default) -->
+                <div id="menu-about" class="p-6 hidden">
+                    <h2 class="text-xl font-black text-white mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-anchor text-sky-400"></i> About
+                    </h2>
+                    <div class="text-sm text-slate-300 leading-relaxed space-y-3">
+                        <p>
+                            <span class="font-bold text-sky-300">Aquatic Havoc</span> is a hybrid fishing/action game
+                            where you cast, hook monsters, fight them underwater, drag them to shore,
+                            and finish them off before they tear your line.
+                        </p>
+                        <p class="text-slate-400 text-xs italic">
+                            Built with pure HTML, CSS (Tailwind) and vanilla JavaScript.
+                            No frameworks, no build step — just one canvas, one idea.
+                        </p>
+                        <div class="border-t border-slate-800 pt-3 mt-3">
+                            <p class="text-xs text-slate-400 uppercase tracking-widest mb-1">Made by</p>
+                            <p class="font-black text-fuchsia-300 text-lg">LILCAT</p>
+                        </div>
+                    </div>
+                    <button id="btn-about-back" class="menu-btn mt-4">
+                        <i class="fa-solid fa-arrow-left"></i> <span>Back</span>
+                    </button>
+                </div>
+
+                <div class="p-3 border-t border-slate-800/80 bg-slate-900/60 text-center text-[10px] text-slate-500 font-bold tracking-widest">
+                    v1.0 · MADE BY LILCAT
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="js/utils.js"></script>
@@ -178,6 +260,7 @@
     <script src="js/render.js"></script>
     <script src="js/fishing.js"></script>
     <script src="js/combat.js"></script>
+    <script src="js/save.js"></script>
     <script src="js/player.js"></script>
     <script src="js/shop.js"></script>
     <script src="js/main.js"></script>
