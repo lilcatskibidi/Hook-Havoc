@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aquatic Havoc — Deep Sea Hunter</title>
+    <link rel="icon" href="data:,">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="w-screen h-screen flex flex-col justify-center items-center text-white relative overflow-hidden">
+
+    <div id="game-container" class="relative w-full h-full max-w-[1600px] max-h-[950px] overflow-hidden shadow-2xl sm:rounded-2xl border border-slate-800/80 bg-slate-950 flex flex-col">
+        <canvas id="gameCanvas" class="w-full h-full block cursor-crosshair"></canvas>
+        <div class="absolute inset-0 pointer-events-none" style="background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.4) 100%);"></div>
+        <div id="damage-flash" class="damage-flash"></div>
+        
+        <!-- Boss HP bar -->
+        <div id="boss-bar" class="absolute top-4 left-1/2 -translate-x-1/2 w-[70%] max-w-3xl hidden z-20 pointer-events-none">
+            <div class="glass-panel rounded-2xl p-3 border-2 border-rose-500/60 shadow-2xl neon-glow-amber">
+                <div class="flex justify-between items-center mb-1">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-crown text-amber-400 animate-pulse"></i>
+                        <span id="boss-name" class="font-black text-white text-sm tracking-widest uppercase">BOSS</span>
+                    </div>
+                    <span id="boss-hp-text" class="text-xs font-black text-rose-300">0 / 0</span>
+                </div>
+                <div class="w-full h-4 bg-slate-950 rounded-full overflow-hidden border border-rose-500/40 relative">
+                    <div id="boss-hp-bar" class="h-full bg-gradient-to-r from-rose-600 via-red-500 to-amber-400 transition-all duration-200" style="width: 100%;"></div>
+                    <div class="absolute top-0 bottom-0 w-0.5 bg-white/50" style="left: 40%;"></div>
+                </div>
+                <div id="boss-phase-text" class="text-[10px] text-amber-300 font-bold mt-1 tracking-wider">PHASE 1</div>
+            </div>
+        </div>
+        
+        <!-- Top HUD -->
+        <div class="absolute top-0 left-0 right-0 p-3 sm:p-4 pointer-events-none flex justify-between items-start z-10 gap-3 flex-wrap">
+            <div class="flex flex-col gap-2 pointer-events-auto">
+                <div class="glass-panel px-4 py-2.5 rounded-2xl flex items-center gap-3 w-72 hud-shadow border-l-4 border-l-rose-500">
+                    <div class="w-9 h-9 rounded-xl bg-rose-500/20 flex items-center justify-center">
+                        <i class="fa-solid fa-heart text-rose-400 text-lg"></i>
+                    </div>
+                    <div class="flex-1">
+                        <div class="flex justify-between text-[10px] font-bold mb-1 tracking-wider">
+                            <span class="text-slate-400">VITALS</span>
+                            <span id="hp-text" class="text-emerald-400">100 / 100</span>
+                        </div>
+                        <div class="w-full h-3 bg-slate-900/80 rounded-full overflow-hidden border border-slate-700/60 relative">
+                            <div id="hp-bar" class="h-full rounded-full bg-gradient-to-r from-rose-500 via-red-400 to-emerald-400 transition-all duration-300" style="width: 100%;"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <div class="stat-chip glass-panel px-3 py-1.5 rounded-xl flex items-center gap-2 text-sm font-bold hud-shadow">
+                        <i class="fa-solid fa-coins text-amber-400"></i>
+                        <span id="coins-display" class="text-amber-300">150</span>
+                    </div>
+                    <div class="stat-chip glass-panel px-3 py-1.5 rounded-xl flex items-center gap-2 text-sm font-bold hud-shadow">
+                        <i class="fa-solid fa-clover text-fuchsia-400"></i>
+                        <span id="luck-display" class="text-fuchsia-300">+0%</span>
+                    </div>
+                    <div class="stat-chip glass-panel px-3 py-1.5 rounded-xl flex items-center gap-2 text-sm font-bold hud-shadow">
+                        <i class="fa-solid fa-fish text-sky-400"></i>
+                        <span id="bucket-display" class="text-sky-300">0 / 15</span>
+                    </div>
+                    <div class="stat-chip glass-panel px-3 py-1.5 rounded-xl flex items-center gap-2 text-sm font-bold hud-shadow">
+                        <i class="fa-solid fa-bolt text-yellow-400"></i>
+                        <span id="xp-display" class="text-yellow-300">Lv.1</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="hidden lg:flex flex-col items-center glass-panel px-5 py-2.5 rounded-2xl border border-sky-500/20 text-[11px] gap-1 pointer-events-auto hud-shadow">
+                <div class="flex gap-4 font-bold text-sky-300">
+                    <div><span class="key">WASD</span> Move</div>
+                    <div><span class="key">SPACE</span> Cast / Reel</div>
+                    <div><span class="key">LMB</span> Shoot</div>
+                    <div><span class="key">1-4</span> Weapon</div>
+                    <div><span class="key">R</span> Reload</div>
+                    <div><span class="key">ESC</span> Menu</div>
+                    <div><span class="key">H</span> Heal</div>
+                </div>
+                <div class="text-[10px] text-slate-400">Shoot hooked fish to weaken · Drag them to shore!</div>
+            </div>
+
+            <div class="flex gap-2 pointer-events-auto">
+                <button id="btn-menu" class="glass-panel hover:bg-slate-800/80 w-11 h-11 rounded-xl text-slate-300 hover:text-white transition-all flex items-center justify-center font-bold shadow-md hud-shadow" title="Menu (ESC)">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <button id="btn-audio" class="glass-panel hover:bg-slate-800/80 w-11 h-11 rounded-xl text-slate-300 hover:text-white transition-all flex items-center justify-center font-bold shadow-md hud-shadow">
+                    <i id="audio-icon" class="fa-solid fa-volume-high"></i>
+                </button>
+                <button id="btn-open-shop" class="glass-panel hover:bg-slate-800/80 px-4 py-2 rounded-xl text-amber-400 hover:text-amber-300 transition-all flex items-center gap-2 font-bold shadow-md hud-shadow border border-amber-500/30">
+                    <i class="fa-solid fa-store"></i>
+                    <span class="hidden sm:inline">Shop</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Status banner -->
+        <div id="status-banner" class="absolute bottom-24 left-1/2 -translate-x-1/2 glass-panel px-6 py-3 rounded-2xl font-bold text-sm text-center text-sky-100 border border-sky-500/30 shadow-2xl pointer-events-none transition-all duration-300 max-w-xl z-10">
+            <span class="text-amber-400 font-extrabold uppercase">Step 1:</span> Stand near water & Hold <span class="key">SPACE</span> to Cast!
+        </div>
+
+        <!-- Tension HUD -->
+        <div id="tension-hud" class="absolute top-24 left-1/2 -translate-x-1/2 glass-panel p-3 rounded-2xl flex flex-col items-center gap-1.5 shadow-2xl border border-sky-500/30 pointer-events-none hidden transition-all w-80 z-10 neon-glow">
+            <div class="flex justify-between w-full text-[10px] font-black tracking-widest">
+                <span class="text-slate-300">LINE TENSION</span>
+                <span id="tension-text" class="text-emerald-400">0%</span>
+            </div>
+            <div class="w-full h-3.5 bg-slate-900 rounded-full overflow-hidden border border-slate-700 relative">
+                <div id="tension-bar" class="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 w-0 transition-all duration-75"></div>
+            </div>
+            <div class="flex justify-between w-full text-[9px] font-semibold">
+                <span class="text-slate-500">Safe</span>
+                <span class="text-amber-400">Warning</span>
+                <span class="text-rose-500">Snap!</span>
+            </div>
+        </div>
+
+        <!-- Drag HUD -->
+        <div id="drag-hud" class="absolute top-48 left-1/2 -translate-x-1/2 glass-panel p-2.5 rounded-xl hidden z-10 w-72 border border-amber-500/40">
+            <div class="flex justify-between text-[10px] font-black tracking-widest mb-1">
+                <span class="text-amber-300">DRAGGING TO SHORE</span>
+                <span id="drag-dist" class="text-white">0%</span>
+            </div>
+            <div class="w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-700">
+                <div id="drag-bar" class="h-full bg-gradient-to-r from-amber-500 to-orange-500 w-0 transition-all"></div>
+            </div>
+        </div>
+
+        <!-- Weapon toolbar -->
+        <div id="weapon-toolbar" class="absolute bottom-6 left-6 glass-panel p-2 rounded-2xl flex gap-1.5 shadow-xl border border-slate-700/60 pointer-events-auto z-10 hud-shadow"></div>
+
+        <!-- Active weapon -->
+        <div class="absolute bottom-6 right-6 glass-panel p-3.5 rounded-2xl flex items-center gap-4 shadow-xl border border-slate-700/60 pointer-events-none z-10 hud-shadow">
+            <div id="weapon-icon-box" class="w-12 h-12 rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-600/60 flex items-center justify-center text-2xl text-amber-400 shadow-inner">
+                <i class="fa-solid fa-crosshair"></i>
+            </div>
+            <div>
+                <div id="weapon-name" class="font-header text-xl tracking-wide font-bold text-white leading-none">TAC-PISTOL</div>
+                <div id="weapon-ammo" class="text-xs font-semibold text-sky-400 mt-1">Infinite Ammo</div>
+                <div id="weapon-desc" class="text-[10px] text-slate-500 mt-0.5 max-w-[200px]"></div>
+            </div>
+        </div>
+
+        <div class="absolute bottom-6 left-1/2 -translate-x-1/2 glass-panel px-3 py-1.5 rounded-xl text-[10px] font-bold text-slate-400 pointer-events-none z-10 hud-shadow">
+            <i class="fa-solid fa-magnifying-glass mr-1"></i> ZOOM <span id="zoom-level" class="text-sky-300">1.0x</span>
+        </div>
+
+        <div id="catch-popup-container" class="absolute top-1/3 left-1/2 -translate-x-1/2 pointer-events-none z-20 flex flex-col items-center gap-2"></div>
+
+        <!-- ================= MULTIPLAYER HUD (In-Game) ================= -->
+        <div id="mp-hud" class="absolute top-4 right-4 glass-panel p-3 rounded-2xl shadow-xl border border-sky-500/30 hidden z-10 hud-shadow neon-glow w-72">
+            <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-users text-sky-400"></i>
+                    <span id="mp-status" class="text-xs font-bold text-sky-300">Disconnected</span>
+                </div>
+                <button id="mp-chat-toggle" class="text-slate-400 hover:text-white text-xs p-1" title="Chat">
+                    <i class="fa-solid fa-comments"></i>
+                </button>
+            </div>
+            
+            <!-- Heal button with cooldown -->
+            <div class="mb-2">
+                <button id="mp-heal-btn" class="w-full px-3 py-2 bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-400 hover:to-rose-500 text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg">
+                    <i class="fa-solid fa-heart-pulse mr-1"></i>Heal (3)
+                </button>
+                <div class="w-full h-1 bg-slate-800 rounded-full mt-1 overflow-hidden">
+                    <div id="mp-heal-cooldown" class="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all duration-100" style="width: 100%;"></div>
+                </div>
+                <div class="text-[9px] text-slate-400 text-right mt-0.5">Press <span class="key">H</span> to heal both players</div>
+            </div>
+            
+            <!-- Chat panel -->
+            <div id="mp-chat-panel" class="hidden border-t border-slate-700/50 pt-2 mt-2 max-h-40 overflow-y-auto">
+                <div id="mp-chat-messages" class="space-y-1 max-h-32 overflow-y-auto pr-1"></div>
+                <div class="flex gap-1 mt-2">
+                    <input type="text" id="mp-chat-input" class="flex-1 bg-slate-900/80 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500" placeholder="Press Enter to chat..." maxlength="100">
+                    <button id="mp-chat-send" class="px-2 py-1 bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-bold rounded-lg">Send</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= SHOP MODAL ================= -->
+        <div id="shop-modal" class="absolute inset-0 bg-slate-950/90 backdrop-blur-lg flex items-center justify-center z-30 hidden pointer-events-auto p-3 sm:p-4">
+            <div class="glass-panel w-full max-w-3xl h-[90%] rounded-3xl flex flex-col overflow-hidden border border-amber-500/30 shadow-2xl neon-glow-amber">
+                <div class="p-5 border-b border-slate-800/80 flex justify-between items-center bg-gradient-to-r from-slate-900/80 to-slate-800/60">
+                    <div class="flex items-center gap-3">
+                        <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500/30 to-amber-600/20 text-amber-400 flex items-center justify-center text-2xl font-bold border border-amber-500/30">
+                            <i class="fa-solid fa-store"></i>
+                        </div>
+                        <div>
+                            <h2 class="font-header text-2xl text-white font-bold leading-none">Harbor Outfitter & Armory</h2>
+                            <p class="text-xs text-slate-400 mt-0.5">Upgrade equipment, sell catches, dominate the deep</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <div class="hidden sm:flex items-center gap-2 glass-panel-light px-3 py-1.5 rounded-xl">
+                            <i class="fa-solid fa-coins text-amber-400"></i>
+                            <span id="shop-coins-display" class="text-amber-300 font-bold">150</span>
+                        </div>
+                        <button class="shop-close text-slate-400 hover:text-white p-2 text-2xl transition-all hover:rotate-90 duration-200">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="flex border-b border-slate-800/80 bg-slate-900/40 px-3 gap-1">
+                    <button id="tab-sell" class="tab-btn active py-3 px-4 font-bold text-sm text-slate-400">Sell</button>
+                    <button id="tab-weapons" class="tab-btn py-3 px-4 font-bold text-sm text-slate-400">Guns</button>
+                    <button id="tab-rods" class="tab-btn py-3 px-4 font-bold text-sm text-slate-400">Rods</button>
+                    <button id="tab-ammo" class="tab-btn py-3 px-4 font-bold text-sm text-slate-400">Ammo</button>
+                </div>
+                <div id="shop-content" class="flex-1 overflow-y-auto p-4 space-y-2"></div>
+                <div id="shop-footer" class="p-4 border-t border-slate-800/80 bg-slate-900/80 flex justify-between items-center">
+                    <div>
+                        <span class="text-[10px] text-slate-400 block uppercase tracking-wider">Bucket Loot Value</span>
+                        <span id="shop-total-val" class="font-header text-2xl text-amber-300 font-bold">0 Coins</span>
+                    </div>
+                    <button id="btn-sell-all" class="px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl transition-all shadow-lg active:scale-95 hover:shadow-amber-500/50">
+                        <i class="fa-solid fa-sack-dollar mr-1"></i> SELL ALL
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= MAIN MENU ================= -->
+        <div id="main-menu" class="absolute inset-0 bg-slate-950/95 backdrop-blur-xl flex items-center justify-center z-40 pointer-events-auto p-4">
+            <div class="glass-panel w-full max-w-md rounded-3xl overflow-hidden border border-sky-500/30 shadow-2xl neon-glow">
+                <div class="p-6 text-center border-b border-slate-800/80 bg-gradient-to-br from-sky-900/40 to-slate-900/40">
+                    <div class="w-20 h-20 mx-auto mb-3 rounded-3xl bg-gradient-to-br from-sky-500/30 to-cyan-600/20 text-sky-400 flex items-center justify-center text-4xl font-bold border border-sky-500/30 shadow-2xl">
+                        <i class="fa-solid fa-fish"></i>
+                    </div>
+                    <h1 class="font-header text-3xl text-white font-black tracking-tight">AQUATIC HAVOC</h1>
+                    <p class="text-xs text-sky-300 mt-1 tracking-[0.3em] font-bold">DEEP SEA HUNTER</p>
+                </div>
+
+                <!-- Main Menu Panel -->
+                <div id="mp-panel-main" class="mp-panel p-4 flex flex-col gap-2">
+                    <button id="btn-start" class="menu-btn">
+                        <i class="fa-solid fa-play"></i> <span>Start New Game</span>
+                    </button>
+                    <button id="btn-load" class="menu-btn">
+                        <i class="fa-solid fa-folder-open"></i> <span>Continue</span>
+                    </button>
+                    <button id="btn-save-menu" class="menu-btn">
+                        <i class="fa-solid fa-floppy-disk"></i> <span>Save Game</span>
+                    </button>
+                    <button id="btn-multiplayer" class="menu-btn border-l-4 border-l-sky-500">
+                        <i class="fa-solid fa-users"></i> <span>Multiplayer (LAN)</span>
+                    </button>
+                    <button id="btn-about" class="menu-btn">
+                        <i class="fa-solid fa-circle-info"></i> <span>About</span>
+                    </button>
+                </div>
+
+                <!-- Multiplayer Panel -->
+                <div id="mp-panel-multiplayer" class="mp-panel p-4 flex flex-col gap-3 hidden">
+                    <h3 class="text-center text-lg font-bold text-sky-300 mb-2">MULTIPLAYER (LAN)</h3>
+                    <p class="text-center text-xs text-slate-400 mb-4">Host a game or join a friend on the same network. Make sure the signaling server is running!</p>
+                    
+                    <button id="btn-host" class="menu-btn bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950">
+                        <i class="fa-solid fa-server mr-2"></i> <span>Host Game</span>
+                    </button>
+                    <button id="btn-join" class="menu-btn bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-400 hover:to-sky-500 text-white">
+                        <i class="fa-solid fa-sign-in-alt mr-2"></i> <span>Join Game</span>
+                    </button>
+                    <button id="btn-mp-back" class="menu-btn bg-slate-700/50 hover:bg-slate-600/50">
+                        <i class="fa-solid fa-arrow-left mr-2"></i> <span>Back</span>
+                    </button>
+                </div>
+
+                <!-- Join Room Panel -->
+                <div id="mp-panel-join" class="mp-panel p-4 flex flex-col gap-3 hidden">
+                    <h3 class="text-center text-lg font-bold text-sky-300 mb-2">JOIN ROOM</h3>
+                    <p class="text-center text-xs text-slate-400 mb-2">Enter the 4-character room code from the host</p>
+                    
+                    <div class="flex gap-2">
+                        <input type="text" id="join-room-code" class="flex-1 bg-slate-900/80 border border-slate-700 rounded-xl px-4 py-3 text-center text-xl font-black tracking-widest text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 uppercase" placeholder="ABCD" maxlength="4" style="letter-spacing: 0.5em;">
+                        <button id="btn-join-submit" class="menu-btn bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-400 hover:to-sky-500 text-white whitespace-nowrap">
+                            <i class="fa-solid fa-sign-in-alt mr-2"></i> Join
+                        </button>
+                    </div>
+                    
+                    <div id="mp-join-status" class="text-center text-sm font-bold text-sky-400 min-h-[1.25rem]"></div>
+                    
+                    <button id="btn-join-back" class="menu-btn bg-slate-700/50 hover:bg-slate-600/50">
+                        <i class="fa-solid fa-arrow-left mr-2"></i> <span>Back</span>
+                    </button>
+                </div>
+
+                <!-- Lobby Panel -->
+                <div id="mp-panel-lobby" class="mp-panel p-4 flex flex-col gap-3 hidden">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-lg font-bold text-sky-300">LOBBY</h3>
+                        <button id="btn-leave-lobby" class="text-rose-400 hover:text-rose-300 text-sm font-bold px-2 py-1">
+                            <i class="fa-solid fa-door-open mr-1"></i> Leave
+                        </button>
+                    </div>
+                    
+                    <div class="glass-panel-light p-4 rounded-xl text-center">
+                        <div class="flex items-center justify-center gap-2 mb-2">
+                            <i class="fa-solid fa-hashtag text-amber-400"></i>
+                            <span class="text-xs text-slate-400">ROOM CODE</span>
+                            <span id="mp-room-code" class="font-black text-xl text-amber-300 tracking-widest font-mono">----</span>
+                            <button id="btn-copy-room" class="text-slate-400 hover:text-white text-xs px-2 py-1" title="Copy to clipboard">
+                                <i class="fa-solid fa-copy"></i>
+                            </button>
+                        </div>
+                        <div id="mp-lobby-status" class="text-sm font-bold text-sky-400 min-h-[1.25rem]">Creating room...</div>
+                    </div>
+                    
+                    <div class="flex gap-2">
+                        <button id="btn-start-mp" class="menu-btn flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 disabled:opacity-50" disabled>
+                            <i class="fa-solid fa-rocket mr-2"></i> <span>Start Game</span>
+                        </button>
+                    </div>
+                    
+                    <div class="text-center text-[10px] text-slate-500 pt-2 border-t border-slate-800">
+                        <p>Host shares the room code · Max 2 players · LAN only</p>
+                        <p class="mt-1">Both computers must be on the same network</p>
+                    </div>
+                </div>
+
+                <!-- About panel (hidden by default) -->
+                <div id="menu-about" class="p-6 hidden">
+                    <h2 class="text-xl font-black text-white mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-anchor text-sky-400"></i> About
+                    </h2>
+                    <div class="text-sm text-slate-300 leading-relaxed space-y-3">
+                        <p>
+                            <span class="font-bold text-sky-300">Aquatic Havoc</span> is a hybrid fishing/action game
+                            where you cast, hook monsters, fight them underwater, drag them to shore,
+                            and finish them off before they tear your line.
+                        </p>
+                        <p class="text-slate-400 text-xs italic">
+                            Built with pure HTML, CSS (Tailwind) and vanilla JavaScript.
+                            No frameworks, no build step — just one canvas, one idea.
+                        </p>
+                        <div class="border-t border-slate-800 pt-3 mt-3">
+                            <p class="text-xs text-slate-400 uppercase tracking-widest mb-1">Made by</p>
+                            <p class="font-black text-fuchsia-300 text-lg">LILCAT</p>
+                        </div>
+                    </div>
+                    <button id="btn-about-back" class="menu-btn mt-4">
+                        <i class="fa-solid fa-arrow-left"></i> <span>Back</span>
+                    </button>
+                </div>
+
+                <div class="p-3 border-t border-slate-800/80 bg-slate-900/60 text-center text-[10px] text-slate-500 font-bold tracking-widest">
+                    v1.0 · MADE BY LILCAT
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/utils.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/audio.js"></script>
+    <script src="js/fishData.js"></script>
+    <script src="js/weapons.js"></script>
+    <script src="js/particles.js"></script>
+    <script src="js/camera.js"></script>
+    <script src="js/input.js"></script>
+    <script src="js/render.js"></script>
+    <script src="js/fishing.js"></script>
+    <script src="js/combat.js"></script>
+    <script src="js/save.js"></script>
+    <script src="js/player.js"></script>
+    <script src="js/shop.js"></script>
+    <script src="js/multiplayer.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

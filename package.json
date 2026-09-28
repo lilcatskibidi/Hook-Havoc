@@ -1,0 +1,24 @@
+{
+  "name": "aquatic-havoc",
+  "version": "1.0.0",
+  "description": "Aquatic Havoc — Deep Sea Hunter with LAN Multiplayer",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "build:itch": "node scripts/build-itch.mjs",
+    "check": "node scripts/check-load-order.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  },
+  "keywords": [
+    "game",
+    "multiplayer",
+    "fishing",
+    "lan"
+  ],
+  "author": "LILCAT",
+  "license": "MIT",
+  "type": "commonjs"
+}
