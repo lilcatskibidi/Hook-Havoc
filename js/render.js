@@ -1068,16 +1068,6 @@ const Render = {
                 break;
             }
 
-            case 'launcher': {
-                ctx.fillStyle = '#92400e'; ctx.fillRect(4, -8, 34, 16);
-                ctx.fillStyle = BLACK;     ctx.fillRect(4, -8, 34, 4);
-                ctx.fillStyle = '#dc2626';
-                ctx.beginPath(); ctx.arc(40, 0, 7, 0, Math.PI * 2); ctx.fill();
-                ctx.strokeStyle = BLACK; ctx.lineWidth = 1; ctx.stroke();
-                ctx.fillStyle = BLACK; ctx.fillRect(20, 6, 6, 10);
-                break;
-            }
-
             case 'coral_launcher': {
                 // Coral Mortar - organic coral weapon
                 ctx.fillStyle = '#0d9488'; ctx.fillRect(2, -8, 38, 16);
@@ -1285,6 +1275,7 @@ const Render = {
         }
 
         switch (species.shape) {
+            // Existing shapes
             case 'manta':      this._drawManta(ctx, s, col, acc); break;
             case 'ray':        this._drawRay(ctx, s, col, acc); break;
             case 'swordfish':  this._drawSwordfish(ctx, s, col, acc); break;
@@ -1300,6 +1291,38 @@ const Render = {
             case 'crab':       this._drawCrab(ctx, s, col, acc); break;
             case 'turtle':     this._drawTurtle(ctx, s, col, acc); break;
             case 'dragon':     this._drawDragon(ctx, s, col, acc); break;
+
+            // NEW SHAPES for expanded roster
+            case 'tuna':       this._drawTuna(ctx, s, col, acc); break;
+            case 'marlin':     this._drawMarlin(ctx, s, col, acc); break;
+            case 'snapper':    this._drawSnapper(ctx, s, col, acc); break;
+            case 'grouper':    this._drawGrouper(ctx, s, col, acc); break;
+            case 'flatfish':   this._drawFlatfish(ctx, s, col, acc); break;
+            case 'catfish':    this._drawCatfish(ctx, s, col, acc); break;
+            case 'sturgeon':   this._drawSturgeon(ctx, s, col, acc); break;
+            case 'oarfish':    this._drawOarfish(ctx, s, col, acc); break;
+            case 'squid':      this._drawSquid(ctx, s, col, acc); break;
+            case 'prehistoric': this._drawPrehistoric(ctx, s, col, acc); break;
+            case 'leviathan':  this._drawLeviathan(ctx, s, col, acc); break;
+            case 'serpent':    this._drawSerpent(ctx, s, col, acc); break;
+            case 'titan':      this._drawTitan(ctx, s, col, acc); break;
+            case 'bass':       this._drawBass(ctx, s, col, acc); break;
+            case 'trout':      this._drawTrout(ctx, s, col, acc); break;
+            case 'salmon':     this._drawSalmon(ctx, s, col, acc); break;
+            case 'pike':       this._drawPike(ctx, s, col, acc); break;
+            case 'carp':       this._drawCarp(ctx, s, col, acc); break;
+            case 'wrasse':     this._drawWrasse(ctx, s, col, acc); break;
+            case 'butterfly':  this._drawButterfly(ctx, s, col, acc); break;
+            case 'angelfish':  this._drawAngelfish(ctx, s, col, acc); break;
+            case 'clownfish':  this._drawClownfish(ctx, s, col, acc); break;
+            case 'seahorse':   this._drawSeahorse(ctx, s, col, acc); break;
+            case 'lionfish':   this._drawLionfish(ctx, s, col, acc); break;
+            case 'stonefish':  this._drawStonefish(ctx, s, col, acc); break;
+            case 'frogfish':   this._drawFrogfish(ctx, s, col, acc); break;
+            case 'anchovy':    this._drawAnchovy(ctx, s, col, acc); break;
+            case 'minnow':     this._drawMinnow(ctx, s, col, acc); break;
+            case 'goldfish':   this._drawGoldfish(ctx, s, col, acc); break;
+
             case 'oval':
             default:           this._drawOval(ctx, s, col, acc); break;
         }
@@ -1316,7 +1339,7 @@ const Render = {
     },
 
     // ============================================================
-    //  SHAPE DRAWERS
+    //  EXISTING SHAPE DRAWERS
     // ============================================================
     _drawRay(ctx, s, col, acc) {
         const t = performance.now() / 400;
@@ -1845,5 +1868,1510 @@ const Render = {
         ctx.quadraticCurveTo(-s * 2.2, Math.sin(t * 3) * s * 0.4, -s * 1.5, s * 0.15);
         ctx.closePath();
         ctx.fill();
+    },
+
+    // ============================================================
+    //  NEW SHAPE DRAWERS — EXPANDED ROSTER
+    // ============================================================
+
+    // --- TUNA (torpedo body, crescent tail, racing stripes) ---
+    _drawTuna(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.6, 0);
+        ctx.quadraticCurveTo(s * 0.8, -s * 0.85, -s * 0.3, -s * 0.7);
+        ctx.quadraticCurveTo(-s * 1.2, -s * 0.5, -s * 1.5, 0);
+        ctx.quadraticCurveTo(-s * 1.2, s * 0.5, -s * 0.3, s * 0.7);
+        ctx.quadraticCurveTo(s * 0.8, s * 0.85, s * 1.6, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.2, -s * 0.2);
+        ctx.quadraticCurveTo(0, -s * 0.75, -s * 1.3, -s * 0.15);
+        ctx.quadraticCurveTo(0, -s * 0.55, s * 1.2, -s * 0.2);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.4, 0);
+        ctx.quadraticCurveTo(-s * 2.2, -s * 1.1, -s * 2.6, -s * 0.9);
+        ctx.quadraticCurveTo(-s * 2.0, -s * 0.2, -s * 1.8, 0);
+        ctx.quadraticCurveTo(-s * 2.0, s * 0.2, -s * 2.6, s * 0.9);
+        ctx.quadraticCurveTo(-s * 2.2, s * 1.1, -s * 1.4, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(s * 0.3, s * 0.2);
+        ctx.lineTo(s * 0.5, s * 0.95);
+        ctx.lineTo(s * 0.9, s * 0.3);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(s * 0.3, -s * 0.6);
+        ctx.lineTo(s * 0.1, -s * 1.1);
+        ctx.lineTo(s * 0.5, -s * 0.7);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 1.0, -s * 0.15, s * 0.16, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 1.05, -s * 0.15, s * 0.08, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- MARLIN (long bill, high dorsal sail) ---
+    _drawMarlin(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 1.4, s * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.2, -s * 0.06);
+        ctx.lineTo(s * 3.0, 0);
+        ctx.lineTo(s * 1.2, s * 0.06);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(s * 0.6, -s * 0.5);
+        ctx.quadraticCurveTo(s * 0.0, -s * 1.9, -s * 0.6, -s * 0.5);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.4, 0);
+        ctx.quadraticCurveTo(-s * 2.2, -s * 1.0, -s * 2.7, -s * 0.8);
+        ctx.quadraticCurveTo(-s * 2.0, 0, -s * 2.7, s * 0.8);
+        ctx.quadraticCurveTo(-s * 2.2, s * 1.0, -s * 1.4, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(s * 0.4, s * 0.3);
+        ctx.lineTo(s * 0.6, s * 1.0);
+        ctx.lineTo(s * 1.0, s * 0.3);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.8, -s * 0.12, s * 0.14, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.83, -s * 0.12, s * 0.06, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- SNAPPER (deep-bodied, big eye, forked tail) ---
+    _drawSnapper(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.1, 0);
+        ctx.quadraticCurveTo(s * 0.7, -s * 0.95, -s * 0.3, -s * 0.9);
+        ctx.quadraticCurveTo(-s * 1.1, -s * 0.6, -s * 1.2, 0);
+        ctx.quadraticCurveTo(-s * 1.1, s * 0.6, -s * 0.3, s * 0.9);
+        ctx.quadraticCurveTo(s * 0.7, s * 0.95, s * 1.1, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.4, -s * 0.8);
+        ctx.quadraticCurveTo(-s * 0.1, -s * 1.5, -s * 0.6, -s * 0.75);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.1, 0);
+        ctx.lineTo(-s * 1.9, -s * 0.85);
+        ctx.lineTo(-s * 1.6, 0);
+        ctx.lineTo(-s * 1.9, s * 0.85);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.4, s * 0.75);
+        ctx.quadraticCurveTo(-s * 0.6, s * 1.3, -s * 0.9, s * 0.65);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.65, -s * 0.2, s * 0.2, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.68, -s * 0.2, s * 0.1, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- GROUPER (massive mouth, bulky body) ---
+    _drawGrouper(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 1.3, s * 0.95, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(2, s * 0.1);
+        ctx.beginPath();
+        ctx.moveTo(s * 0.2, s * 0.25);
+        ctx.quadraticCurveTo(s * 0.85, s * 0.35, s * 1.15, s * 0.15);
+        ctx.stroke();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.3, -s * 0.85);
+        ctx.quadraticCurveTo(0, -s * 1.6, -s * 0.5, -s * 0.8);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.ellipse(-s * 1.45, 0, s * 0.4, s * 0.7, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.ellipse(s * 0.5, s * 0.5, s * 0.35, s * 0.5, Math.PI * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.7, -s * 0.3, s * 0.15, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.72, -s * 0.3, s * 0.07, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- FLATFISH (flat, both eyes on one side, wavy margin) ---
+    _drawFlatfish(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.3, 0);
+        ctx.quadraticCurveTo(s * 0.8, -s * 1.1, -s * 0.2, -s * 0.95);
+        ctx.quadraticCurveTo(-s * 1.0, -s * 0.6, -s * 1.3, 0);
+        ctx.quadraticCurveTo(-s * 1.0, s * 0.6, -s * 0.2, s * 0.95);
+        ctx.quadraticCurveTo(s * 0.8, s * 1.1, s * 1.3, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(1.5, s * 0.08);
+        ctx.beginPath();
+        for (let i = 0; i < 12; i++) {
+            const a = (i / 12) * Math.PI * 2;
+            const r = s * 1.05 + Math.sin(i * 2) * s * 0.08;
+            if (i === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+            else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+        }
+        ctx.closePath();
+        ctx.stroke();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.3, -s * 0.35, s * 0.14, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 0.55, -s * 0.3, s * 0.14, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.3, -s * 0.35, s * 0.07, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 0.55, -s * 0.3, s * 0.07, 0, Math.PI * 2); ctx.fill();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.2, 0);
+        ctx.lineTo(-s * 1.6, -s * 0.4);
+        ctx.lineTo(-s * 1.6, s * 0.4);
+        ctx.closePath();
+        ctx.fill();
+    },
+
+    // --- CATFISH (whiskers, flat head, long body) ---
+    _drawCatfish(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 1.3, s * 0.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.ellipse(s * 0.9, 0, s * 0.6, s * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(1.5, s * 0.06);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(s * 1.3, -s * 0.2);
+        ctx.quadraticCurveTo(s * 2.0, -s * 0.6, s * 2.3, -s * 0.4);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(s * 1.3, -s * 0.1);
+        ctx.quadraticCurveTo(s * 1.9, -s * 0.2, s * 2.2, s * 0.1);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(s * 1.3, s * 0.2);
+        ctx.quadraticCurveTo(s * 1.9, s * 0.5, s * 2.1, s * 0.7);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(s * 1.3, s * 0.3);
+        ctx.quadraticCurveTo(s * 1.7, s * 0.7, s * 1.9, s * 0.9);
+        ctx.stroke();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.3, -s * 0.55);
+        ctx.quadraticCurveTo(0, -s * 1.2, -s * 0.4, -s * 0.5);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.2, 0);
+        ctx.lineTo(-s * 2.0, -s * 0.7);
+        ctx.lineTo(-s * 1.7, 0);
+        ctx.lineTo(-s * 2.0, s * 0.7);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 1.0, -s * 0.2, s * 0.1, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 1.02, -s * 0.2, s * 0.05, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- STURGEON (armored scutes, long snout, ancient) ---
+    _drawSturgeon(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.6, 0);
+        ctx.quadraticCurveTo(s * 0.8, -s * 0.65, -s * 0.5, -s * 0.6);
+        ctx.quadraticCurveTo(-s * 1.3, -s * 0.4, -s * 1.5, 0);
+        ctx.quadraticCurveTo(-s * 1.3, s * 0.4, -s * 0.5, s * 0.6);
+        ctx.quadraticCurveTo(s * 0.8, s * 0.65, s * 1.6, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        for (let i = 0; i < 5; i++) {
+            const px = -s * 0.9 + i * s * 0.45;
+            ctx.beginPath();
+            ctx.moveTo(px, -s * 0.55);
+            ctx.lineTo(px + s * 0.15, -s * 0.75);
+            ctx.lineTo(px + s * 0.3, -s * 0.55);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.4, -s * 0.15);
+        ctx.lineTo(s * 2.4, 0);
+        ctx.lineTo(s * 1.4, s * 0.15);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(1, s * 0.04);
+        ctx.beginPath();
+        ctx.moveTo(s * 1.5, s * 0.1);
+        ctx.quadraticCurveTo(s * 1.9, s * 0.3, s * 2.0, s * 0.5);
+        ctx.stroke();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.4, 0);
+        ctx.quadraticCurveTo(-s * 2.0, -s * 1.0, -s * 2.4, -s * 0.8);
+        ctx.quadraticCurveTo(-s * 1.9, -s * 0.2, -s * 1.8, 0);
+        ctx.quadraticCurveTo(-s * 2.0, s * 0.5, -s * 2.2, s * 0.7);
+        ctx.quadraticCurveTo(-s * 1.8, s * 0.4, -s * 1.4, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 1.0, -s * 0.15, s * 0.1, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 1.02, -s * 0.15, s * 0.05, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- OARFISH (ribbon body, crest, long) ---
+    _drawOarfish(ctx, s, col, acc) {
+        const t = performance.now() / 500;
+
+        ctx.strokeStyle = col;
+        ctx.lineWidth = Math.max(4, s * 0.45);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(s * 1.5, 0);
+        for (let i = 0; i <= 8; i++) {
+            const px = s * 1.5 - i * s * 0.45;
+            const py = Math.sin(t * 2 + i * 0.8) * s * 0.3;
+            ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(2, s * 0.15);
+        ctx.beginPath();
+        ctx.moveTo(s * 1.4, -s * 0.1);
+        for (let i = 0; i <= 6; i++) {
+            const px = s * 1.4 - i * s * 0.4;
+            const py = Math.sin(t * 2 + i * 0.8) * s * 0.3 - s * 0.1;
+            ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+
+        ctx.fillStyle = '#dc2626';
+        ctx.beginPath();
+        ctx.moveTo(s * 1.0, -s * 0.2);
+        ctx.quadraticCurveTo(s * 1.2, -s * 1.2, s * 1.6, -s * 0.9);
+        ctx.quadraticCurveTo(s * 1.4, -s * 0.4, s * 1.4, -s * 0.15);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(s * 1.5, 0, s * 0.35, s * 0.3, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 1.6, -s * 0.08, s * 0.1, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 1.62, -s * 0.08, s * 0.05, 0, Math.PI * 2); ctx.fill();
+
+        ctx.fillStyle = '#dc2626';
+        ctx.beginPath();
+        ctx.moveTo(s * 1.3, s * 0.15);
+        ctx.lineTo(s * 1.5, s * 0.5);
+        ctx.lineTo(s * 1.5, s * 0.2);
+        ctx.closePath();
+        ctx.fill();
+    },
+
+    // --- SQUID (mantle, tentacles, big eyes) ---
+    _drawSquid(ctx, s, col, acc) {
+        const t = performance.now() / 400;
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(2, s * 0.12);
+        ctx.lineCap = 'round';
+        for (let i = 0; i < 8; i++) {
+            const a = (i / 8) * Math.PI * 1.2 - Math.PI * 0.6;
+            const wave = Math.sin(t * 3 + i) * s * 0.2;
+            ctx.beginPath();
+            ctx.moveTo(-s * 0.2, 0);
+            ctx.quadraticCurveTo(
+                -s * 0.8 + Math.cos(a) * s * 0.3,
+                Math.sin(a) * s * 0.5 + wave,
+                -s * 1.5 + Math.cos(a) * s * 0.5,
+                Math.sin(a) * s * 0.9 + wave
+            );
+            ctx.stroke();
+        }
+        ctx.lineWidth = Math.max(1.5, s * 0.08);
+        for (let i = 0; i < 2; i++) {
+            const dir = i === 0 ? -1 : 1;
+            ctx.beginPath();
+            ctx.moveTo(-s * 0.2, 0);
+            ctx.quadraticCurveTo(
+                -s * 1.2, dir * s * 0.6 + Math.sin(t * 2 + i) * s * 0.3,
+                -s * 2.2, dir * s * 0.3 + Math.sin(t * 2.5 + i) * s * 0.4
+            );
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.2, 0);
+        ctx.quadraticCurveTo(s * 0.8, -s * 0.9, -s * 0.2, -s * 0.7);
+        ctx.quadraticCurveTo(-s * 0.6, 0, -s * 0.2, s * 0.7);
+        ctx.quadraticCurveTo(s * 0.8, s * 0.9, s * 1.2, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.8, -s * 0.2);
+        ctx.quadraticCurveTo(0, -s * 0.6, -s * 0.3, 0);
+        ctx.quadraticCurveTo(0, -s * 0.3, s * 0.8, -s * 0.2);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.5, -s * 0.35, s * 0.25, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 0.5, s * 0.35, s * 0.25, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.55, -s * 0.35, s * 0.12, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 0.55, s * 0.35, s * 0.12, 0, Math.PI * 2); ctx.fill();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.1, -s * 0.1);
+        ctx.lineTo(s * 1.7, -s * 0.6);
+        ctx.lineTo(s * 1.7, s * 0.6);
+        ctx.lineTo(s * 1.1, s * 0.1);
+        ctx.closePath();
+        ctx.fill();
+    },
+
+    // --- PREHISTORIC (massive jaws, armored, ancient) ---
+    _drawPrehistoric(ctx, s, col, acc) {
+        const t = performance.now() / 600;
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.8, 0);
+        ctx.quadraticCurveTo(s * 0.8, -s * 1.0, -s * 0.6, -s * 0.85);
+        ctx.quadraticCurveTo(-s * 1.5, -s * 0.6, -s * 1.6, 0);
+        ctx.quadraticCurveTo(-s * 1.5, s * 0.6, -s * 0.6, s * 0.85);
+        ctx.quadraticCurveTo(s * 0.8, s * 1.0, s * 1.8, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        for (let i = 0; i < 6; i++) {
+            const px = -s * 1.0 + i * s * 0.5;
+            ctx.beginPath();
+            ctx.moveTo(px, -s * 0.75);
+            ctx.lineTo(px + s * 0.2, -s * 0.95);
+            ctx.lineTo(px + s * 0.4, -s * 0.75);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.moveTo(s * 1.5, -s * 0.5);
+        ctx.quadraticCurveTo(s * 2.3, -s * 0.7, s * 2.6, -s * 0.3);
+        ctx.lineTo(s * 1.5, -s * 0.2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(s * 1.5, s * 0.5);
+        ctx.quadraticCurveTo(s * 2.3, s * 0.7, s * 2.6, s * 0.3);
+        ctx.lineTo(s * 1.5, s * 0.2);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#f8fafc';
+        for (let i = 0; i < 5; i++) {
+            const tx = s * 1.6 + i * s * 0.2;
+            const ty = -s * 0.35;
+            ctx.beginPath();
+            ctx.moveTo(tx, ty);
+            ctx.lineTo(tx + s * 0.1, ty + s * 0.25);
+            ctx.lineTo(tx + s * 0.2, ty);
+            ctx.closePath();
+            ctx.fill();
+        }
+        for (let i = 0; i < 5; i++) {
+            const tx = s * 1.6 + i * s * 0.2;
+            const ty = s * 0.35;
+            ctx.beginPath();
+            ctx.moveTo(tx, ty);
+            ctx.lineTo(tx + s * 0.1, ty - s * 0.25);
+            ctx.lineTo(tx + s * 0.2, ty);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.3, -s * 0.9);
+        ctx.lineTo(s * 0.0, -s * 1.7);
+        ctx.lineTo(s * 0.5, -s * 0.95);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.5, 0);
+        ctx.quadraticCurveTo(-s * 2.3, -s * 1.3, -s * 2.8, -s * 1.1);
+        ctx.quadraticCurveTo(-s * 2.1, -s * 0.2, -s * 1.9, 0);
+        ctx.quadraticCurveTo(-s * 2.1, s * 0.2, -s * 2.8, s * 1.1);
+        ctx.quadraticCurveTo(-s * 2.3, s * 1.3, -s * 1.5, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#dc2626';
+        ctx.beginPath(); ctx.arc(s * 1.2, -s * 0.25, s * 0.1, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 1.22, -s * 0.25, s * 0.05, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- LEVIATHAN (island-sized, multiple fins, terror) ---
+    _drawLeviathan(ctx, s, col, acc) {
+        const t = performance.now() / 500;
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 2.0, 0);
+        ctx.quadraticCurveTo(s * 0.8, -s * 1.3, -s * 0.8, -s * 1.0);
+        ctx.quadraticCurveTo(-s * 1.8, -s * 0.7, -s * 2.0, 0);
+        ctx.quadraticCurveTo(-s * 1.8, s * 0.7, -s * 0.8, s * 1.0);
+        ctx.quadraticCurveTo(s * 0.8, s * 1.3, s * 2.0, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.ellipse(s * 0.3, s * 0.3, s * 1.2, s * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        for (let i = 0; i < 3; i++) {
+            const px = -s * 0.3 + i * s * 0.6;
+            ctx.beginPath();
+            ctx.moveTo(px, -s * 0.9);
+            ctx.lineTo(px + s * 0.1, -s * 1.8);
+            ctx.lineTo(px + s * 0.3, -s * 0.9);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.8, 0);
+        ctx.quadraticCurveTo(-s * 2.8, -s * 1.5, -s * 3.5, -s * 1.2);
+        ctx.quadraticCurveTo(-s * 2.5, -s * 0.3, -s * 2.3, 0);
+        ctx.quadraticCurveTo(-s * 2.5, s * 0.3, -s * 3.5, s * 1.2);
+        ctx.quadraticCurveTo(-s * 2.8, s * 1.5, -s * 1.8, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.ellipse(s * 0.8, s * 0.7, s * 0.7, s * 0.3, Math.PI * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(s * 0.8, -s * 0.7, s * 0.7, s * 0.3, -Math.PI * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(s * 1.8, 0, s * 0.6, s * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.moveTo(s * 2.2, -s * 0.15);
+        ctx.quadraticCurveTo(s * 2.8, -s * 0.3, s * 2.9, 0);
+        ctx.quadraticCurveTo(s * 2.8, s * 0.3, s * 2.2, s * 0.15);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#f8fafc';
+        for (let i = 0; i < 4; i++) {
+            const tx = s * 2.3 + i * s * 0.15;
+            ctx.beginPath();
+            ctx.moveTo(tx, -s * 0.12);
+            ctx.lineTo(tx + s * 0.05, s * 0.0);
+            ctx.lineTo(tx + s * 0.1, -s * 0.12);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.shadowColor = '#dc2626';
+        ctx.shadowBlur = 15;
+        ctx.fillStyle = '#dc2626';
+        ctx.beginPath(); ctx.arc(s * 1.8, -s * 0.25, s * 0.15, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 1.82, -s * 0.25, s * 0.07, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- SERPENT (long snake-like, many coils) ---
+    _drawSerpent(ctx, s, col, acc) {
+        const t = performance.now() / 400;
+
+        ctx.strokeStyle = col;
+        ctx.lineWidth = Math.max(5, s * 0.5);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(s * 1.5, 0);
+        for (let i = 0; i <= 10; i++) {
+            const px = s * 1.5 - i * s * 0.35;
+            const py = Math.sin(t * 2 + i * 0.7) * s * 0.5;
+            ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(2, s * 0.2);
+        ctx.beginPath();
+        ctx.moveTo(s * 1.4, -s * 0.15);
+        for (let i = 0; i <= 8; i++) {
+            const px = s * 1.4 - i * s * 0.35;
+            const py = Math.sin(t * 2 + i * 0.7) * s * 0.5 - s * 0.15;
+            ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(s * 1.5, 0, s * 0.45, s * 0.35, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.moveTo(s * 1.8, -s * 0.1);
+        ctx.lineTo(s * 2.3, -s * 0.15);
+        ctx.lineTo(s * 2.3, s * 0.15);
+        ctx.lineTo(s * 1.8, s * 0.1);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#f8fafc';
+        ctx.beginPath();
+        ctx.moveTo(s * 2.0, -s * 0.1);
+        ctx.lineTo(s * 2.1, s * 0.05);
+        ctx.lineTo(s * 2.15, -s * 0.1);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(s * 2.0, s * 0.1);
+        ctx.lineTo(s * 2.1, -s * 0.05);
+        ctx.lineTo(s * 2.15, s * 0.1);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath(); ctx.arc(s * 1.7, -s * 0.15, s * 0.1, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 1.72, -s * 0.15, s * 0.05, 0, Math.PI * 2); ctx.fill();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.3, -s * 0.35);
+        ctx.quadraticCurveTo(s * 1.5, -s * 1.0, s * 1.8, -s * 0.5);
+        ctx.quadraticCurveTo(s * 1.7, -s * 0.3, s * 1.5, -s * 0.25);
+        ctx.closePath();
+        ctx.fill();
+    },
+
+    // --- TITAN (world-ending, cosmic, huge) ---
+    _drawTitan(ctx, s, col, acc) {
+        const t = performance.now() / 700;
+
+        ctx.save();
+        ctx.globalAlpha = 0.3;
+        const auraGrad = ctx.createRadialGradient(0, 0, s * 0.5, 0, 0, s * 2.5);
+        auraGrad.addColorStop(0, col);
+        auraGrad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = auraGrad;
+        ctx.beginPath(); ctx.arc(0, 0, s * 2.5, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 2.0, s * 1.0, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        for (let i = 0; i < 12; i++) {
+            const a = (i / 12) * Math.PI * 2;
+            const r = s * (0.5 + Math.random() * 0.8);
+            const px = Math.cos(a) * r;
+            const py = Math.sin(a) * r * 0.5;
+            ctx.beginPath();
+            ctx.arc(px, py, s * 0.06, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.fillStyle = acc;
+        for (let i = 0; i < 5; i++) {
+            const px = -s * 0.8 + i * s * 0.5;
+            ctx.beginPath();
+            ctx.moveTo(px, -s * 0.9);
+            ctx.quadraticCurveTo(px + s * 0.15, -s * 2.2, px + s * 0.4, -s * 0.9);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.8, 0);
+        ctx.quadraticCurveTo(-s * 2.8, -s * 1.4, -s * 3.5, -s * 1.0);
+        ctx.quadraticCurveTo(-s * 2.5, 0, -s * 3.5, s * 1.0);
+        ctx.quadraticCurveTo(-s * 2.8, s * 1.4, -s * 1.8, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(s * 1.8, 0, s * 0.7, s * 0.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.shadowColor = '#fbbf24';
+        ctx.shadowBlur = 20;
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath(); ctx.arc(s * 1.8, -s * 0.25, s * 0.15, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 1.8, s * 0.25, s * 0.15, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 2.1, 0, s * 0.2, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0;
+    },
+
+    // --- BASS (deep body, big mouth, aggressive) ---
+    _drawBass(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.2, 0);
+        ctx.quadraticCurveTo(s * 0.6, -s * 0.95, -s * 0.3, -s * 0.85);
+        ctx.quadraticCurveTo(-s * 1.1, -s * 0.6, -s * 1.2, 0);
+        ctx.quadraticCurveTo(-s * 1.1, s * 0.6, -s * 0.3, s * 0.85);
+        ctx.quadraticCurveTo(s * 0.6, s * 0.95, s * 1.2, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(1, s * 0.06);
+        ctx.beginPath();
+        ctx.moveTo(s * 1.0, 0);
+        ctx.quadraticCurveTo(0, -s * 0.15, -s * 1.0, 0);
+        ctx.stroke();
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(2, s * 0.1);
+        ctx.beginPath();
+        ctx.moveTo(s * 0.4, s * 0.2);
+        ctx.quadraticCurveTo(s * 0.9, s * 0.4, s * 1.1, s * 0.15);
+        ctx.stroke();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.4, -s * 0.8);
+        ctx.lineTo(s * 0.2, -s * 1.4);
+        ctx.lineTo(s * 0.0, -s * 0.85);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.1, -s * 0.85);
+        ctx.quadraticCurveTo(-s * 0.4, -s * 1.3, -s * 0.7, -s * 0.75);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.1, 0);
+        ctx.lineTo(-s * 1.8, -s * 0.7);
+        ctx.lineTo(-s * 1.6, 0);
+        ctx.lineTo(-s * 1.8, s * 0.7);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.7, -s * 0.25, s * 0.16, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.73, -s * 0.25, s * 0.08, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- TROUT (streamlined, spotted, forked tail) ---
+    _drawTrout(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 1.3, s * 0.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        for (let i = 0; i < 15; i++) {
+            const px = (Math.random() - 0.5) * s * 2.0;
+            const py = (Math.random() - 0.5) * s * 0.8;
+            ctx.beginPath();
+            ctx.arc(px, py, s * 0.04, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.strokeStyle = '#f472b6';
+        ctx.lineWidth = Math.max(1.5, s * 0.08);
+        ctx.beginPath();
+        ctx.moveTo(s * 1.0, -s * 0.05);
+        ctx.quadraticCurveTo(0, -s * 0.15, -s * 1.0, -s * 0.05);
+        ctx.stroke();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.5, -s * 0.5);
+        ctx.lineTo(-s * 0.6, -s * 0.7);
+        ctx.lineTo(-s * 0.3, -s * 0.5);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.2, 0);
+        ctx.lineTo(-s * 1.8, -s * 0.6);
+        ctx.lineTo(-s * 1.6, 0);
+        ctx.lineTo(-s * 1.8, s * 0.6);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.75, -s * 0.15, s * 0.15, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.78, -s * 0.15, s * 0.07, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- SALMON (torpedo, hooked jaw when spawning) ---
+    _drawSalmon(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.4, 0);
+        ctx.quadraticCurveTo(s * 0.6, -s * 0.75, -s * 0.3, -s * 0.65);
+        ctx.quadraticCurveTo(-s * 1.1, -s * 0.45, -s * 1.3, 0);
+        ctx.quadraticCurveTo(-s * 1.1, s * 0.45, -s * 0.3, s * 0.65);
+        ctx.quadraticCurveTo(s * 0.6, s * 0.75, s * 1.4, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        for (let i = 0; i < 10; i++) {
+            const px = (Math.random() - 0.5) * s * 1.8;
+            const py = (Math.random() - 0.5) * s * 0.7;
+            ctx.beginPath();
+            ctx.arc(px, py, s * 0.04, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(2, s * 0.1);
+        ctx.beginPath();
+        ctx.moveTo(s * 0.8, s * 0.1);
+        ctx.quadraticCurveTo(s * 1.2, s * 0.3, s * 1.3, -s * 0.1);
+        ctx.stroke();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.2, -s * 0.6);
+        ctx.quadraticCurveTo(-s * 0.1, -s * 1.1, -s * 0.4, -s * 0.55);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.2, 0);
+        ctx.lineTo(-s * 1.9, -s * 0.7);
+        ctx.lineTo(-s * 1.6, 0);
+        ctx.lineTo(-s * 1.9, s * 0.7);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.85, -s * 0.18, s * 0.14, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.88, -s * 0.18, s * 0.07, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- PIKE (long, toothy, ambush predator) ---
+    _drawPike(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.6, 0);
+        ctx.quadraticCurveTo(s * 0.5, -s * 0.6, -s * 0.5, -s * 0.55);
+        ctx.quadraticCurveTo(-s * 1.4, -s * 0.4, -s * 1.5, 0);
+        ctx.quadraticCurveTo(-s * 1.4, s * 0.4, -s * 0.5, s * 0.55);
+        ctx.quadraticCurveTo(s * 0.5, s * 0.6, s * 1.6, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        for (let i = 0; i < 12; i++) {
+            const px = (Math.random() - 0.5) * s * 2.0;
+            const py = (Math.random() - 0.5) * s * 0.6;
+            ctx.beginPath();
+            ctx.ellipse(px, py, s * 0.06, s * 0.04, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.4, -s * 0.15);
+        ctx.lineTo(s * 2.2, 0);
+        ctx.lineTo(s * 1.4, s * 0.15);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#f8fafc';
+        for (let i = 0; i < 4; i++) {
+            const tx = s * 1.5 + i * s * 0.15;
+            ctx.beginPath();
+            ctx.moveTo(tx, s * 0.05);
+            ctx.lineTo(tx + s * 0.04, s * 0.2);
+            ctx.lineTo(tx + s * 0.08, s * 0.05);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.5, -s * 0.5);
+        ctx.lineTo(-s * 0.7, -s * 0.95);
+        ctx.lineTo(-s * 0.9, -s * 0.45);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.4, 0);
+        ctx.lineTo(-s * 2.0, -s * 0.65);
+        ctx.lineTo(-s * 1.8, 0);
+        ctx.lineTo(-s * 2.0, s * 0.65);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath(); ctx.arc(s * 1.0, -s * 0.2, s * 0.12, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 1.02, -s * 0.2, s * 0.06, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- CARP (deep body, barbels, large scales) ---
+    _drawCarp(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 1.2, s * 0.85, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(0.8, s * 0.04);
+        for (let i = 0; i < 4; i++) {
+            for (let j = 0; j < 3; j++) {
+                const px = -s * 0.8 + i * s * 0.5;
+                const py = -s * 0.5 + j * s * 0.5;
+                ctx.beginPath();
+                ctx.arc(px, py, s * 0.2, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(1.5, s * 0.06);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(s * 1.0, s * 0.15);
+        ctx.quadraticCurveTo(s * 1.4, s * 0.4, s * 1.5, s * 0.6);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(s * 1.0, s * 0.25);
+        ctx.quadraticCurveTo(s * 1.3, s * 0.5, s * 1.4, s * 0.7);
+        ctx.stroke();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.4, -s * 0.75);
+        ctx.quadraticCurveTo(-s * 0.2, -s * 1.3, -s * 0.8, -s * 0.7);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.1, 0);
+        ctx.lineTo(-s * 1.8, -s * 0.75);
+        ctx.lineTo(-s * 1.6, 0);
+        ctx.lineTo(-s * 1.8, s * 0.75);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.7, -s * 0.2, s * 0.15, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.73, -s * 0.2, s * 0.07, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- WRASSE (elongated, colorful, pointed snout) ---
+    _drawWrasse(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.4, 0);
+        ctx.quadraticCurveTo(s * 0.6, -s * 0.65, -s * 0.3, -s * 0.6);
+        ctx.quadraticCurveTo(-s * 1.1, -s * 0.4, -s * 1.2, 0);
+        ctx.quadraticCurveTo(-s * 1.1, s * 0.4, -s * 0.3, s * 0.6);
+        ctx.quadraticCurveTo(s * 0.6, s * 0.65, s * 1.4, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        for (let i = 0; i < 6; i++) {
+            ctx.beginPath();
+            ctx.moveTo(-s * 0.6 + i * s * 0.35, -s * 0.5);
+            ctx.lineTo(-s * 0.5 + i * s * 0.35, 0);
+            ctx.lineTo(-s * 0.6 + i * s * 0.35, s * 0.5);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.2, -s * 0.15);
+        ctx.lineTo(s * 1.8, 0);
+        ctx.lineTo(s * 1.2, s * 0.15);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.6, -s * 0.55);
+        ctx.quadraticCurveTo(0, -s * 1.0, -s * 0.8, -s * 0.5);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.1, 0);
+        ctx.quadraticCurveTo(-s * 1.8, -s * 0.6, -s * 1.9, 0);
+        ctx.quadraticCurveTo(-s * 1.8, s * 0.6, -s * 1.1, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.85, -s * 0.18, s * 0.13, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.88, -s * 0.18, s * 0.06, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- BUTTERFLYFISH (disc body, long snout, stripes) ---
+    _drawButterfly(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 1.0, s * 1.0, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        for (let i = 0; i < 4; i++) {
+            ctx.beginPath();
+            ctx.moveTo(-s * 0.5 + i * s * 0.4, -s * 0.9);
+            ctx.lineTo(-s * 0.35 + i * s * 0.4, 0);
+            ctx.lineTo(-s * 0.5 + i * s * 0.4, s * 0.9);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.9, -s * 0.1);
+        ctx.lineTo(s * 1.5, 0);
+        ctx.lineTo(s * 0.9, s * 0.1);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.5, -s * 0.9);
+        ctx.quadraticCurveTo(0, -s * 1.4, -s * 0.5, -s * 0.9);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.9, 0);
+        ctx.lineTo(-s * 1.3, -s * 0.5);
+        ctx.lineTo(-s * 1.3, s * 0.5);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.4, -s * 0.2, s * 0.12, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.42, -s * 0.2, s * 0.06, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- ANGELFISH (tall disc, trailing fins, majestic) ---
+    _drawAngelfish(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(s * 1.0, 0);
+        ctx.quadraticCurveTo(s * 0.6, -s * 1.2, -s * 0.2, -s * 1.3);
+        ctx.quadraticCurveTo(-s * 0.8, -s * 0.8, -s * 1.0, 0);
+        ctx.quadraticCurveTo(-s * 0.8, s * 0.8, -s * 0.2, s * 1.3);
+        ctx.quadraticCurveTo(s * 0.6, s * 1.2, s * 1.0, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        for (let i = 0; i < 3; i++) {
+            ctx.beginPath();
+            ctx.moveTo(-s * 0.4 + i * s * 0.45, -s * 1.1);
+            ctx.lineTo(-s * 0.25 + i * s * 0.45, 0);
+            ctx.lineTo(-s * 0.4 + i * s * 0.45, s * 1.1);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(s * 0.3, -s * 1.0);
+        ctx.quadraticCurveTo(-s * 0.2, -s * 2.0, -s * 0.6, -s * 1.8);
+        ctx.quadraticCurveTo(-s * 0.3, -s * 1.3, -s * 0.2, -s * 1.0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(s * 0.3, s * 1.0);
+        ctx.quadraticCurveTo(-s * 0.2, s * 2.0, -s * 0.6, s * 1.8);
+        ctx.quadraticCurveTo(-s * 0.3, s * 1.3, -s * 0.2, s * 1.0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.9, 0);
+        ctx.lineTo(-s * 1.3, -s * 0.6);
+        ctx.lineTo(-s * 1.3, s * 0.6);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.4, -s * 0.25, s * 0.14, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.43, -s * 0.25, s * 0.07, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- CLOWNFISH (orange with white stripes, rounded) ---
+    _drawClownfish(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 1.1, s * 0.7, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.ellipse(s * 0.5, 0, s * 0.12, s * 0.65, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(-s * 0.1, 0, s * 0.15, s * 0.7, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(-s * 0.7, 0, s * 0.1, s * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = Math.max(1, s * 0.05);
+        ctx.beginPath();
+        ctx.ellipse(s * 0.5, 0, s * 0.12, s * 0.65, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.ellipse(-s * 0.1, 0, s * 0.15, s * 0.7, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.ellipse(-s * 0.7, 0, s * 0.1, s * 0.55, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.3, -s * 0.65);
+        ctx.quadraticCurveTo(0, -s * 1.1, -s * 0.4, -s * 0.6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(s * 0.2, s * 0.4, s * 0.25, s * 0.15, Math.PI * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(-s * 1.2, 0, s * 0.25, s * 0.45, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.75, -s * 0.15, s * 0.15, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.78, -s * 0.15, s * 0.08, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- SEAHORSE (upright, curled tail, tube snout) ---
+    _drawSeahorse(ctx, s, col, acc) {
+        const t = performance.now() / 600;
+
+        ctx.strokeStyle = col;
+        ctx.lineWidth = Math.max(4, s * 0.35);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(0, -s * 1.2);
+        ctx.quadraticCurveTo(s * 0.4, -s * 0.8, s * 0.1, -s * 0.3);
+        ctx.quadraticCurveTo(-s * 0.2, s * 0.2, s * 0.1, s * 0.6);
+        ctx.quadraticCurveTo(s * 0.3, s * 1.0, -s * 0.1, s * 1.1);
+        ctx.stroke();
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(0, -s * 1.3, s * 0.3, s * 0.35, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(s * 0.2, -s * 1.4);
+        ctx.lineTo(s * 0.8, -s * 1.3);
+        ctx.lineTo(s * 0.8, -s * 1.2);
+        ctx.lineTo(s * 0.2, -s * 1.25);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.1, -s * 1.6);
+        ctx.lineTo(s * 0.1, -s * 2.0);
+        ctx.lineTo(s * 0.2, -s * 1.55);
+        ctx.closePath();
+        ctx.fill();
+
+        const flutter = Math.sin(t * 8) * s * 0.1;
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.2, -s * 0.6);
+        ctx.quadraticCurveTo(-s * 0.7 + flutter, -s * 0.3, -s * 0.2, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.ellipse(s * 0.15, -s * 0.7, s * 0.15, s * 0.08, Math.PI * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.05, -s * 1.4, s * 0.1, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.07, -s * 1.4, s * 0.05, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- LIONFISH (fan-like fins, venomous spines) ---
+    _drawLionfish(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 1.0, s * 0.7, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        for (let i = 0; i < 5; i++) {
+            ctx.beginPath();
+            ctx.moveTo(-s * 0.6 + i * s * 0.3, -s * 0.65);
+            ctx.lineTo(-s * 0.45 + i * s * 0.3, 0);
+            ctx.lineTo(-s * 0.6 + i * s * 0.3, s * 0.65);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(1.5, s * 0.06);
+        for (let side = -1; side <= 1; side += 2) {
+            for (let i = 0; i < 7; i++) {
+                const a = -Math.PI * 0.3 + (i / 6) * Math.PI * 0.6;
+                ctx.beginPath();
+                ctx.moveTo(s * 0.2 * side, 0);
+                ctx.quadraticCurveTo(
+                    Math.cos(a) * s * 0.8 * side,
+                    Math.sin(a) * s * 0.8,
+                    Math.cos(a) * s * 1.4 * side,
+                    Math.sin(a) * s * 1.4
+                );
+                ctx.stroke();
+            }
+        }
+
+        for (let i = 0; i < 8; i++) {
+            const px = -s * 0.7 + i * s * 0.2;
+            ctx.beginPath();
+            ctx.moveTo(px, -s * 0.6);
+            ctx.quadraticCurveTo(px - s * 0.1, -s * 1.3, px + s * 0.1, -s * 1.5);
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.0, 0);
+        ctx.lineTo(-s * 1.6, -s * 0.7);
+        ctx.lineTo(-s * 1.4, 0);
+        ctx.lineTo(-s * 1.6, s * 0.7);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.6, -s * 0.2, s * 0.13, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.63, -s * 0.2, s * 0.06, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- STONEFISH (lumpy, camouflaged, venomous) ---
+    _drawStonefish(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 1.2, s * 0.9, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        for (let i = 0; i < 10; i++) {
+            const px = (Math.random() - 0.5) * s * 2.0;
+            const py = (Math.random() - 0.5) * s * 1.5;
+            ctx.beginPath();
+            ctx.arc(px, py, s * 0.1 + Math.random() * s * 0.1, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = Math.max(2, s * 0.1);
+        ctx.beginPath();
+        ctx.arc(s * 0.6, s * 0.15, s * 0.25, Math.PI * 0.1, Math.PI * 0.9);
+        ctx.stroke();
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(2, s * 0.08);
+        for (let i = 0; i < 6; i++) {
+            const px = -s * 0.5 + i * s * 0.25;
+            ctx.beginPath();
+            ctx.moveTo(px, -s * 0.8);
+            ctx.lineTo(px, -s * 1.3);
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(s * 0.4, s * 0.7, s * 0.4, s * 0.2, Math.PI * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.ellipse(-s * 1.3, 0, s * 0.3, s * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath(); ctx.arc(s * 0.7, -s * 0.3, s * 0.1, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.72, -s * 0.3, s * 0.05, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- FROGFISH (lumpy, lure, walking fins) ---
+    _drawFrogfish(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 1.1, s * 0.8, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        for (let i = 0; i < 8; i++) {
+            const px = (Math.random() - 0.5) * s * 1.8;
+            const py = (Math.random() - 0.5) * s * 1.3;
+            ctx.beginPath();
+            ctx.arc(px, py, s * 0.08, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = Math.max(2, s * 0.12);
+        ctx.beginPath();
+        ctx.arc(s * 0.6, 0, s * 0.35, -Math.PI * 0.4, Math.PI * 0.4);
+        ctx.stroke();
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(1.5, s * 0.06);
+        ctx.beginPath();
+        ctx.moveTo(s * 0.2, -s * 0.7);
+        ctx.quadraticCurveTo(s * 0.8, -s * 1.5, s * 1.2, -s * 1.0);
+        ctx.stroke();
+
+        ctx.shadowColor = '#fbbf24';
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath();
+        ctx.arc(s * 1.2, -s * 1.0, s * 0.12, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.ellipse(s * 0.3, s * 0.6, s * 0.15, s * 0.3, Math.PI * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(-s * 0.2, s * 0.6, s * 0.15, s * 0.3, -Math.PI * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.ellipse(-s * 1.2, 0, s * 0.25, s * 0.45, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.5, -s * 0.3, s * 0.12, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.53, -s * 0.3, s * 0.06, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- ANCHOVY (tiny, silver, schooling) ---
+    _drawAnchovy(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 1.0, s * 0.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(1, s * 0.08);
+        ctx.beginPath();
+        ctx.moveTo(s * 0.8, 0);
+        ctx.lineTo(-s * 0.8, 0);
+        ctx.stroke();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.1, -s * 0.35);
+        ctx.lineTo(-s * 0.1, -s * 0.6);
+        ctx.lineTo(-s * 0.3, -s * 0.35);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.9, 0);
+        ctx.lineTo(-s * 1.4, -s * 0.4);
+        ctx.lineTo(-s * 1.2, 0);
+        ctx.lineTo(-s * 1.4, s * 0.4);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.6, -s * 0.1, s * 0.1, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- MINNOW (tiny, simple, silver) ---
+    _drawMinnow(ctx, s, col, acc) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 0.9, s * 0.35, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(0.8, s * 0.06);
+        ctx.beginPath();
+        ctx.moveTo(s * 0.7, 0);
+        ctx.lineTo(-s * 0.7, 0);
+        ctx.stroke();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.1, -s * 0.3);
+        ctx.lineTo(-s * 0.1, -s * 0.55);
+        ctx.lineTo(-s * 0.3, -s * 0.3);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.8, 0);
+        ctx.lineTo(-s * 1.2, -s * 0.35);
+        ctx.lineTo(-s * 1.1, 0);
+        ctx.lineTo(-s * 1.2, s * 0.35);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.5, -s * 0.08, s * 0.08, 0, Math.PI * 2); ctx.fill();
+    },
+
+    // --- GOLDFISH (fancy, flowing fins, bright) ---
+    _drawGoldfish(ctx, s, col, acc) {
+        const t = performance.now() / 500;
+
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, s * 1.1, s * 0.8, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.ellipse(s * 0.2, s * 0.2, s * 0.6, s * 0.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = acc;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.4, -s * 0.7);
+        ctx.quadraticCurveTo(s * 0.0 + Math.sin(t * 3) * s * 0.15, -s * 1.6, -s * 0.5, -s * 0.7);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.0, 0);
+        ctx.quadraticCurveTo(-s * 1.8 + Math.sin(t * 2) * s * 0.2, -s * 1.0, -s * 2.0, -s * 0.3);
+        ctx.quadraticCurveTo(-s * 1.6, -s * 0.1, -s * 1.4, 0);
+        ctx.quadraticCurveTo(-s * 1.6, s * 0.1, -s * 2.0, s * 0.3);
+        ctx.quadraticCurveTo(-s * 1.8 + Math.sin(t * 2) * s * 0.2, s * 1.0, -s * 1.0, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(s * 0.3, s * 0.4);
+        ctx.quadraticCurveTo(s * 0.0 + Math.sin(t * 4) * s * 0.15, s * 1.2, s * 0.6, s * 0.8);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(s * 0.7, -s * 0.2, s * 0.2, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 0.73, -s * 0.2, s * 0.1, 0, Math.PI * 2); ctx.fill();
     }
 };
