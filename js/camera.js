@@ -6,7 +6,9 @@ const Camera = {
         cam.zoom = Utils.smooth(cam.zoom, cam.targetZoom, CONFIG.CAMERA_ZOOM_SPEED, delta);
 
         if (state.keys['q']) cam.targetZoom = Math.max(CONFIG.CAMERA_ZOOM_MIN, cam.targetZoom - 1.5 * delta);
-        if (state.keys['e']) cam.targetZoom = Math.min(CONFIG.CAMERA_ZOOM_MAX, cam.targetZoom + 1.5 * delta);
+        // NOTE: 'e' is the interact key (shops) — zoom via mouse wheel or Z/X
+        if (state.keys['z']) cam.targetZoom = Math.min(CONFIG.CAMERA_ZOOM_MAX, cam.targetZoom + 1.5 * delta);
+        if (state.keys['x']) cam.targetZoom = Math.max(CONFIG.CAMERA_ZOOM_MIN, cam.targetZoom - 1.5 * delta);
 
         if (state.screenShake > 0) {
             state.screenShake *= Math.pow(0.85, delta * 60);

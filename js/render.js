@@ -16,6 +16,7 @@ const Render = {
         this.drawHookedFish(state, ctx);
         this.drawLandMonsters(state, ctx);
         this.drawEnemies(state, ctx);
+        this.drawShopZones(state, ctx);
         this.drawBullets(state, ctx);
         this.drawPlayer(state, ctx);
         this.drawParticles(state, ctx);
@@ -23,6 +24,7 @@ const Render = {
 
         ctx.restore();
 
+        this.drawBossArrow(state, ctx);
         this.drawCrosshair(state, ctx);
         const zoomEl = document.getElementById('zoom-level');
         if (zoomEl) zoomEl.innerText = state.camera.zoom.toFixed(1) + 'x';
@@ -806,11 +808,119 @@ const Render = {
             ctx.fillStyle = '#fbbf24';
             ctx.strokeStyle = 'rgba(0,0,0,0.8)';
             ctx.lineWidth = 2;
-            const label = e.enemyType === 'seagull' ? 'Seagull' : 
-                         e.enemyType === 'jumpingFish' ? 'Jumping Fish' : 'Beach Crab';
+            const label = e.enemyType === 'seagull' ? 'Seagull (loot!)' :
+                         e.enemyType === 'jumpingFish' ? `${(e.species && e.species.name) || 'Jumping Fish'} (loot!)` : 'Beach Crab (loot!)';
             ctx.strokeText(label, e.x, e.y - 35);
             ctx.fillText(label, e.x, e.y - 35);
         });
+    },
+
+    // ============================================================
+    //  WORLD SHOP / CASINO ZONES — walk in, press E
+    //  SHOP circle = Beach Shop (shop modal opens on Beach tab).
+    // ============================================================
+    getShopZones(state) {
+        const B = CONFIG.WORLD;
+        const x = state.waterBoundaryX - 140;
+        const clampY = (y) => Utils.clamp(y, B.MIN_Y + 120, B.MAX_Y - 120);
+        return [
+            { id: 'shop',   x, y: clampY(B.MIN_Y + 560),  radius: 90, color: '#f59e0b', label: 'SHOP',   icon: '🏪' },
+            { id: 'casino', x, y: clampY(B.MIN_Y + 1560), radius: 90, color: '#e879f9', label: 'CASINO', icon: '🎰' },
+        ];
+    },
+
+    nearestShopZone(state) {
+        const p = state.player;
+        let best = null, bestD = Infinity;
+        for (const z of this.getShopZones(state)) {
+            const d = Math.hypot(p.x - z.x, p.y - z.y);
+            if (d < bestD) { bestD = d; best = z; }
+        }
+        return best ? { zone: best, dist: bestD } : null;
+    },
+
+    drawShopZones(state, ctx) {
+        const t = state.time;
+        const p = state.player;
+        for (const z of this.getShopZones(state)) {
+            const near = Math.hypot(p.x - z.x, p.y - z.y) < z.radius + 50;
+            // Base pad
+            ctx.save();
+            ctx.globalAlpha = near ? 0.35 : 0.18;
+            ctx.fillStyle = z.color;
+            ctx.beginPath(); ctx.arc(z.x, z.y, z.radius, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 1;
+            // Two pulsing rings
+            for (let k = 0; k < 2; k++) {
+                const phase = ((t * 0.7 + k * 0.5) % 1);
+                const r = z.radius * (0.55 + phase * 0.65);
+                ctx.globalAlpha = (1 - phase) * (near ? 0.9 : 0.5);
+                ctx.strokeStyle = z.color;
+                ctx.lineWidth = near ? 4 : 2.5;
+                ctx.beginPath(); ctx.arc(z.x, z.y, r, 0, Math.PI * 2); ctx.stroke();
+            }
+            ctx.globalAlpha = 1;
+            // Solid rim
+            ctx.strokeStyle = z.color;
+            ctx.lineWidth = 3;
+            ctx.setLineDash([12, 8]);
+            ctx.lineDashOffset = -t * 40;
+            ctx.beginPath(); ctx.arc(z.x, z.y, z.radius, 0, Math.PI * 2); ctx.stroke();
+            ctx.setLineDash([]);
+            // Label
+            ctx.textAlign = 'center';
+            ctx.font = 'black 26px Work Sans';
+            ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+            ctx.strokeText(`${z.icon} ${z.label}`, z.x, z.y - 8);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(`${z.icon} ${z.label}`, z.x, z.y - 8);
+            ctx.font = 'bold 15px Work Sans';
+            const hint = near ? 'Press E!' : 'Walk in + Press E';
+            ctx.lineWidth = 4;
+            ctx.strokeText(hint, z.x, z.y + 22);
+            ctx.fillStyle = near ? '#fef08a' : z.color;
+            ctx.fillText(hint, z.x, z.y + 22);
+            ctx.restore();
+        }
+    },
+
+    // Screen-space arrow pointing at the live boss when off-screen
+    drawBossArrow(state, ctx) {
+        const boss = state.activeBoss;
+        if (!boss || boss.hp <= 0) return;
+        if (state.monstersOnLand && !state.monstersOnLand.includes(boss)) return;
+        const canvas = ctx.canvas;
+        const cam = state.camera;
+        const sx = (boss.x - cam.x) * cam.zoom + canvas.width / 2;
+        const sy = (boss.y - cam.y) * cam.zoom + canvas.height / 2;
+        const margin = 70;
+        if (sx > margin && sx < canvas.width - margin && sy > margin && sy < canvas.height - margin) return;
+        const cx = canvas.width / 2, cy = canvas.height / 2;
+        const a = Math.atan2(sy - cy, sx - cx);
+        const ax = cx + Math.cos(a) * (Math.min(canvas.width, canvas.height) / 2 - margin);
+        const ay = cy + Math.sin(a) * (Math.min(canvas.width, canvas.height) / 2 - margin);
+        const dist = Math.round(Math.hypot(boss.x - state.player.x, boss.y - state.player.y));
+        const pulse = 1 + Math.sin(state.time * 6) * 0.12;
+        ctx.save();
+        ctx.translate(ax, ay);
+        ctx.rotate(a);
+        ctx.scale(pulse, pulse);
+        ctx.fillStyle = '#ef4444';
+        ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(22, 0); ctx.lineTo(-10, -14); ctx.lineTo(-4, 0); ctx.lineTo(-10, 14);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.restore();
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.font = 'black 13px Work Sans';
+        ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+        const label = `BOSS ${dist}m`;
+        ctx.strokeText(label, ax, ay + 30);
+        ctx.fillStyle = '#f87171';
+        ctx.fillText(label, ax, ay + 30);
+        ctx.restore();
     },
 
     drawBullets(state, ctx) {
@@ -1293,6 +1403,7 @@ const Render = {
         const s = size * (isInflated ? 1.4 : 1);
         const col = species.color;
         const acc = species.accent;
+        this._cur = species;
 
         if (glow > 0) {
             ctx.shadowColor = col;
@@ -1362,6 +1473,45 @@ const Render = {
 
             case 'oval':
             default:           this._drawOval(ctx, s, col, acc); break;
+        }
+
+        // Per-catch variation: random dot pattern clipped to the body core
+        if (species.pattern && species.pattern.dots && species.pattern.dots.length) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.ellipse(0, 0, s * 0.95, s * 0.6, 0, 0, Math.PI * 2);
+            ctx.clip();
+            ctx.fillStyle = acc;
+            ctx.globalAlpha = 0.55;
+            for (const d of species.pattern.dots) {
+                ctx.beginPath();
+                ctx.arc(d.dx * s, d.dy * s, Math.max(1.5, d.r * s), 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+
+        // Shiny: gold aura + orbiting sparkles, worth 3x
+        if (species.shiny) {
+            const t = performance.now() / 300;
+            ctx.save();
+            ctx.strokeStyle = '#fde047';
+            ctx.lineWidth = 3;
+            ctx.shadowColor = '#fde047';
+            ctx.shadowBlur = 22;
+            ctx.beginPath();
+            ctx.arc(0, 0, s * 1.35, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#fef9c3';
+            for (let i = 0; i < 3; i++) {
+                const a = t + (i / 3) * Math.PI * 2;
+                const px = Math.cos(a) * s * 1.35;
+                const py = Math.sin(a) * s * 1.35;
+                const r = 2 + Math.abs(Math.sin(t * 2 + i)) * 2;
+                ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.restore();
         }
 
         if (isRaging) {
@@ -1644,17 +1794,59 @@ const Render = {
     },
 
     _drawEel(ctx, s, col, acc) {
-        ctx.fillStyle = col;
-        ctx.beginPath(); ctx.ellipse(0, 0, s * 1.6, s * 0.6, 0, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = acc;
-        ctx.beginPath(); ctx.ellipse(0, 0, s * 1.2, s * 0.35, 0, 0, Math.PI * 2); ctx.fill();
+        // Long snake-like body: wavy segments + pointed head + dorsal spikes
+        const t = performance.now() / 350;
+        ctx.strokeStyle = col;
+        ctx.lineCap = 'round';
+        ctx.lineWidth = Math.max(4, s * 0.55);
         ctx.beginPath();
-        ctx.moveTo(-s * 1.5, 0); ctx.lineTo(-s * 2.2, -s * 0.6); ctx.lineTo(-s * 2.2, s * 0.6);
-        ctx.closePath(); ctx.fill();
-        ctx.fillStyle = '#fff';
-        ctx.beginPath(); ctx.arc(s * 0.9, -s * 0.15, s * 0.15, 0, Math.PI * 2); ctx.fill();
+        for (let i = 0; i <= 8; i++) {
+            const px = s * 1.6 - i * s * 0.42;
+            const py = Math.sin(t + i * 0.8) * s * 0.28;
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+        // Belly highlight
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(2, s * 0.22);
+        ctx.beginPath();
+        for (let i = 0; i <= 8; i++) {
+            const px = s * 1.6 - i * s * 0.42;
+            const py = Math.sin(t + i * 0.8) * s * 0.28 + s * 0.14;
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+        // Dorsal spikes
+        ctx.fillStyle = acc;
+        for (let i = 1; i <= 5; i++) {
+            const px = s * 1.6 - i * s * 0.55;
+            const py = Math.sin(t + i * 0.8) * s * 0.28 - s * 0.35;
+            ctx.beginPath();
+            ctx.moveTo(px - s * 0.12, py + s * 0.2);
+            ctx.lineTo(px, py - s * 0.15);
+            ctx.lineTo(px + s * 0.12, py + s * 0.2);
+            ctx.closePath(); ctx.fill();
+        }
+        // Head
+        const hy = Math.sin(t) * s * 0.28;
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.ellipse(s * 1.7, hy, s * 0.5, s * 0.34, 0, 0, Math.PI * 2); ctx.fill();
+        // Forked tongue
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = Math.max(1.5, s * 0.06);
+        ctx.beginPath();
+        ctx.moveTo(s * 2.15, hy);
+        ctx.lineTo(s * 2.5, hy - s * 0.1);
+        ctx.moveTo(s * 2.15, hy);
+        ctx.lineTo(s * 2.5, hy + s * 0.1);
+        ctx.stroke();
+        // Eyes
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath(); ctx.arc(s * 1.8, hy - s * 0.14, s * 0.11, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#000';
-        ctx.beginPath(); ctx.arc(s * 0.92, -s * 0.15, s * 0.07, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 1.82, hy - s * 0.14, s * 0.055, 0, Math.PI * 2); ctx.fill();
     },
 
     _drawPuffer(ctx, s, col, acc, isInflated) {
@@ -1682,19 +1874,93 @@ const Render = {
     },
 
     _drawShark(ctx, s, col, acc) {
+        // Pointed snout, gill slits, pectoral fins, tall heterocercal tail.
+        // Reads apart from the tuna silhouette on purpose.
         ctx.fillStyle = col;
-        ctx.beginPath(); ctx.ellipse(0, 0, s * 1.5, s * 0.7, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(s * 1.9, 0);                       // nose tip
+        ctx.quadraticCurveTo(s * 1.0, -s * 0.75, -s * 0.6, -s * 0.62);
+        ctx.quadraticCurveTo(-s * 1.3, -s * 0.5, -s * 1.5, 0);
+        ctx.quadraticCurveTo(-s * 1.3, s * 0.5, -s * 0.6, s * 0.62);
+        ctx.quadraticCurveTo(s * 1.0, s * 0.75, s * 1.9, 0);
+        ctx.closePath();
+        ctx.fill();
+        // Pale belly
+        ctx.fillStyle = 'rgba(241,245,249,0.85)';
+        ctx.beginPath();
+        ctx.moveTo(s * 1.8, s * 0.08);
+        ctx.quadraticCurveTo(s * 0.6, s * 0.6, -s * 0.8, s * 0.45);
+        ctx.quadraticCurveTo(s * 0.4, s * 0.3, s * 1.8, s * 0.08);
+        ctx.closePath();
+        ctx.fill();
+        // Gill slits
+        ctx.strokeStyle = 'rgba(15,23,42,0.7)';
+        ctx.lineWidth = Math.max(1.5, s * 0.05);
+        for (let i = 0; i < 3; i++) {
+            const gx = s * (0.75 - i * 0.16);
+            ctx.beginPath();
+            ctx.moveTo(gx, -s * 0.42);
+            ctx.quadraticCurveTo(gx - s * 0.08, 0, gx, s * 0.42);
+            ctx.stroke();
+        }
+        // Dorsal fin
         ctx.fillStyle = acc;
         ctx.beginPath();
-        ctx.moveTo(-s * 0.1, -s * 0.6); ctx.lineTo(s * 0.4, -s * 1.4); ctx.lineTo(s * 0.6, -s * 0.6);
+        ctx.moveTo(-s * 0.1, -s * 0.55);
+        ctx.lineTo(s * 0.35, -s * 1.5);
+        ctx.lineTo(s * 0.6, -s * 0.55);
+        ctx.closePath(); ctx.fill();
+        // Pectoral fins (shark-only trait)
+        ctx.beginPath();
+        ctx.moveTo(s * 0.5, s * 0.35);
+        ctx.lineTo(s * 0.1, s * 1.15);
+        ctx.lineTo(s * 0.75, s * 0.5);
         ctx.closePath(); ctx.fill();
         ctx.beginPath();
-        ctx.moveTo(-s * 1.4, 0); ctx.lineTo(-s * 2.1, -s * 0.8); ctx.lineTo(-s * 1.8, 0); ctx.lineTo(-s * 2.1, s * 0.8);
+        ctx.moveTo(s * 0.5, -s * 0.35);
+        ctx.lineTo(s * 0.1, -s * 1.15);
+        ctx.lineTo(s * 0.75, -s * 0.5);
         ctx.closePath(); ctx.fill();
+        // Heterocercal tail: big upper lobe
+        ctx.beginPath();
+        ctx.moveTo(-s * 1.4, 0);
+        ctx.lineTo(-s * 2.0, -s * 1.3);
+        ctx.lineTo(-s * 1.75, -s * 0.15);
+        ctx.lineTo(-s * 2.0, s * 0.55);
+        ctx.lineTo(-s * 1.6, s * 0.1);
+        ctx.closePath(); ctx.fill();
+        // Tiger stripes
+        if (this._cur && this._cur.tigerStripes) {
+            ctx.strokeStyle = 'rgba(10,10,12,0.75)';
+            ctx.lineWidth = Math.max(2, s * 0.09);
+            for (let i = 0; i < 5; i++) {
+                const bx = s * (0.5 - i * 0.32);
+                ctx.beginPath();
+                ctx.moveTo(bx, -s * 0.6);
+                ctx.quadraticCurveTo(bx - s * 0.12, 0, bx, s * 0.6);
+                ctx.stroke();
+            }
+        }
+        // Angry eye + toothy grin
         ctx.fillStyle = '#fff';
-        ctx.beginPath(); ctx.arc(s * 0.9, -s * 0.2, s * 0.15, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = '#dc2626';
-        ctx.beginPath(); ctx.arc(s * 0.95, -s * 0.2, s * 0.08, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 1.25, -s * 0.18, s * 0.15, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(s * 1.3, -s * 0.18, s * 0.07, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#7f1d1d';
+        ctx.lineWidth = Math.max(1.5, s * 0.05);
+        ctx.beginPath();
+        ctx.moveTo(s * 1.35, s * 0.22);
+        ctx.quadraticCurveTo(s * 1.0, s * 0.34, s * 0.7, s * 0.26);
+        ctx.stroke();
+        ctx.fillStyle = '#f8fafc';
+        for (let i = 0; i < 3; i++) {
+            const tx = s * (1.25 - i * 0.15);
+            ctx.beginPath();
+            ctx.moveTo(tx, s * 0.27);
+            ctx.lineTo(tx - s * 0.04, s * 0.36);
+            ctx.lineTo(tx + s * 0.04, s * 0.36);
+            ctx.closePath(); ctx.fill();
+        }
     },
 
     _drawKraken(ctx, s, col, acc) {
@@ -1959,6 +2225,23 @@ const Render = {
         ctx.beginPath(); ctx.arc(s * 1.0, -s * 0.15, s * 0.16, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#000';
         ctx.beginPath(); ctx.arc(s * 1.05, -s * 0.15, s * 0.08, 0, Math.PI * 2); ctx.fill();
+
+        // Finlets: the unmistakable tuna trait (sharks don't have these)
+        ctx.fillStyle = acc;
+        for (let i = 0; i < 4; i++) {
+            const fx = -s * 0.55 - i * s * 0.22;
+            const fh = s * (0.22 - i * 0.03);
+            ctx.beginPath();
+            ctx.moveTo(fx, -s * 0.62);
+            ctx.lineTo(fx - s * 0.08, -s * 0.62 - fh);
+            ctx.lineTo(fx - s * 0.16, -s * 0.62);
+            ctx.closePath(); ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(fx, s * 0.62);
+            ctx.lineTo(fx - s * 0.08, s * 0.62 + fh);
+            ctx.lineTo(fx - s * 0.16, s * 0.62);
+            ctx.closePath(); ctx.fill();
+        }
     },
 
     // --- MARLIN (long bill, high dorsal sail) ---

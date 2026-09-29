@@ -7,15 +7,27 @@ const Input = {
     if (e.key === '3') Player.selectWeapon(state, 2);
     if (e.key === '4') Player.selectWeapon(state, 3);
     if (e.key.toLowerCase() === 'r') WeaponSystem.reload(state);
+    if (e.key.toLowerCase() === 'j') {
+        if (typeof FishIndex !== 'undefined' && !state.paused) FishIndex.toggleInGame();
+    }
     if (e.code === 'Space') { e.preventDefault(); Fishing.onSpaceDown(state); }
     if (e.key.toLowerCase() === 'e') {
-        // Open beach shop if near shore
-        if (typeof Shop !== 'undefined' && state.player.x >= state.waterBoundaryX - 100) {
-            const beachTab = document.getElementById('tab-beach');
-            if (beachTab) {
-                beachTab.click();
-                document.getElementById('btn-open-shop').click();
+        // World SHOP / CASINO zones (double-circle pads on the beach).
+        // SHOP circle = beach shop (same shop, Beach tab).
+        if (typeof Render !== 'undefined' && Render.nearestShopZone) {
+            const near = Render.nearestShopZone(state);
+            if (near && near.dist < near.zone.radius + 30) {
+                if (near.zone.id === 'casino') {
+                    if (typeof Casino !== 'undefined') Casino.open();
+                } else {
+                    if (typeof Shop !== 'undefined') Shop.openBeach(state);
+                }
+                return;
             }
+        }
+        // Fallback: near shore opens the beach shop
+        if (typeof Shop !== 'undefined' && state.player.x >= state.waterBoundaryX - 100) {
+            Shop.openBeach(state);
         }
     }
 });

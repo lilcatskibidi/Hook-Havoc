@@ -17,10 +17,15 @@ const SaveSystem = {
             weaponAmmo: { ...p.weaponAmmo },
             unlockedRods: [...p.unlockedRods],
             equippedRodId: p.equippedRod ? p.equippedRod.id : 'rod_starter',
-            bucket: p.bucket.map(f => ({ id: f.id })),
+            bucket: p.bucket.map(f => ({ id: f.id, name: f.name, value: f.value, size: f.size, shiny: !!f.shiny, color: f.color, rarity: f.rarity })),
             bucketCapacity: p.bucketCapacity,
             // Fish index - track caught fish
             caughtFish: p.caughtFish ? [...new Set(p.caughtFish.map(f => f.id))] : [],
+            casinoTokens: p.casinoTokens || 0,
+            casinoLifetimeWinnings: p.casinoLifetimeWinnings || 0,
+            ownedArmor: p.ownedArmor ? [...p.ownedArmor] : ['vest_light'],
+            equippedArmor: p.equippedArmor ? { ...p.equippedArmor } : {},
+            beachShopUnlocked: !!p.beachShopUnlocked,
             x: p.x,
             y: p.y
         };
@@ -106,7 +111,21 @@ const SaveSystem = {
 
         if (Array.isArray(data.bucket)) {
             p.bucket = data.bucket
-                .map(f => FISH_SPECIES.find(s => s.id === f.id))
+                .map(f => {
+                    const base = FISH_SPECIES.find(s => s.id === f.id);
+                    if (!base) return f.shiny || (f.value && f.name) ? f : null;
+                    // Restore per-catch shiny/value overrides on a clone
+                    if (f.shiny || (typeof f.value === 'number' && f.value !== base.value)) {
+                        const c = Object.assign({}, base);
+                        if (f.name) c.name = f.name;
+                        if (typeof f.value === 'number') c.value = f.value;
+                        if (typeof f.size === 'number') c.size = f.size;
+                        if (f.shiny) c.shiny = true;
+                        if (f.color) c.color = f.color;
+                        return c;
+                    }
+                    return base;
+                })
                 .filter(Boolean);
         }
         if (typeof data.bucketCapacity === 'number') p.bucketCapacity = data.bucketCapacity;
@@ -122,6 +141,29 @@ const SaveSystem = {
         } else {
             p.caughtFish = [];
         }
+
+        if (typeof data.casinoTokens === 'number') p.casinoTokens = Math.max(0, Math.floor(data.casinoTokens));
+        if (typeof data.casinoLifetimeWinnings === 'number') p.casinoLifetimeWinnings = Math.max(0, Math.floor(data.casinoLifetimeWinnings));
+        if (Array.isArray(data.ownedArmor) && data.ownedArmor.length) {
+            const valid = new Set(ARMOR.map(a => a.id));
+            p.ownedArmor = data.ownedArmor.filter(id => valid.has(id));
+            if (!p.ownedArmor.includes('vest_light')) p.ownedArmor.unshift('vest_light');
+        } else if (!p.ownedArmor) p.ownedArmor = ['vest_light'];
+        if (data.equippedArmor && typeof data.equippedArmor === 'object') {
+            p.equippedArmor = {};
+            ['head', 'chest', 'hands', 'feet'].forEach(slot => {
+                const id = data.equippedArmor[slot];
+                if (id && (p.ownedArmor || []).includes(id)) p.equippedArmor[slot] = id;
+            });
+        }
+        if (typeof Shop !== 'undefined' && Shop.applyArmorStats) {
+            try { Shop.applyArmorStats(state); } catch (e) {}
+        }
+        if (typeof Casino !== 'undefined' && state.player) {
+            Casino.tokens = p.casinoTokens || 0;
+            try { Casino.updateTokenDisplay(); } catch (e) {}
+        }
+        if (typeof data.beachShopUnlocked === 'boolean') p.beachShopUnlocked = data.beachShopUnlocked;
 
         return true;
     },

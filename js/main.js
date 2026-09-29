@@ -558,7 +558,8 @@ const UI = {
 
         const phase = ratio > 0.4 ? 'PHASE 1' : 'PHASE 2 — ENRAGED';
         if (phaseEl) {
-            phaseEl.innerText = phase;
+            const dist = Math.round(Math.hypot(boss.x - state.player.x, boss.y - state.player.y));
+            phaseEl.innerText = `${phase} · 📍 ${dist}m — follow the red arrow!`;
             phaseEl.className = ratio > 0.4
                 ? 'text-[10px] text-amber-300 font-bold mt-1 tracking-wider'
                 : 'text-[10px] text-rose-400 font-black mt-1 tracking-wider animate-pulse';
@@ -697,6 +698,7 @@ const state = {
     paused: true,
 
     remotePlayer: null,
+    remotePlayers: {},
     multiplayer: null
 };
 
@@ -791,14 +793,16 @@ const MultiplayerUI = {
 
         this.showPanel('lobby');
         this.setLobbyStatus('Creating room...');
+        this.renderLobbyPlayers(1, true);
 
         try {
             const roomCode = await window.Multiplayer.createRoom();
             this.setLobbyStatus(`Room created: ${roomCode} - Waiting for player...`);
             const codeEl = $('mp-room-code');
             if (codeEl) codeEl.innerText = roomCode;
+            // Start stays disabled until Player 2 joins
             const startBtn = $('btn-start-mp');
-            if (startBtn) startBtn.disabled = false;
+            if (startBtn) startBtn.disabled = true;
         } catch (e) {
             this.setLobbyStatus(`Failed: ${e.message}`, 'rose');
             this.showPanel('multiplayer');
@@ -826,9 +830,63 @@ const MultiplayerUI = {
             if (codeEl) codeEl.innerText = roomCode.toUpperCase();
             const startBtn = $('btn-start-mp');
             if (startBtn) startBtn.disabled = true;
+            const cnt = (window.Multiplayer && window.Multiplayer._lobbyCount) || 2;
+            this.renderLobbyPlayers(cnt, false);
         } catch (e) {
             this.setJoinStatus(`Failed: ${e.message}`, 'rose');
         }
+    },
+
+    renderLobbyPlayers(count, isHost) {
+        const list = $('mp-lobby-players');
+        const countEl = $('mp-lobby-count');
+        count = Math.min(4, Math.max(1, count));
+        if (countEl) countEl.innerText = `${count} / 4`;
+        if (!list) return;
+        const row = (name, badge, badgeCls, dot) => `
+            <div class="flex items-center gap-2 glass-panel px-3 py-2 rounded-xl">
+                <span class="w-2 h-2 rounded-full ${dot}"></span>
+                <i class="fa-solid fa-user text-slate-400 text-xs"></i>
+                <span class="text-xs font-bold text-white flex-1">${name}</span>
+                <span class="px-1.5 py-0.5 rounded text-[9px] font-black ${badgeCls}">${badge}</span>
+            </div>`;
+        let html = row(
+            isHost ? 'Player 1 (You)' : 'Player 1 (Host)',
+            isHost ? 'HOST · YOU' : 'HOST',
+            'bg-amber-500/20 text-amber-300 border border-amber-500/30',
+            'bg-emerald-400 animate-pulse'
+        );
+        for (let i = 2; i <= 4; i++) {
+            const filled = i <= count;
+            const you = filled && !isHost && i === count;
+            html += row(
+                filled ? (you ? `Player ${i} (You)` : `Player ${i}`) : `Player ${i}`,
+                filled ? (you ? 'YOU' : 'JOINED') : 'WAITING...',
+                filled
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    : 'bg-slate-700/60 text-slate-400 border border-slate-600',
+                filled ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+            );
+        }
+        list.innerHTML = html;
+    },
+
+    showLoading(text, sub) {
+        const ov = $('mp-loading-overlay');
+        if (!ov) return;
+        const t = $('mp-loading-text');
+        const s = $('mp-loading-sub');
+        if (t && text) t.innerText = text;
+        if (s && sub) s.innerText = sub;
+        ov.classList.remove('hidden');
+        ov.classList.add('flex');
+    },
+
+    hideLoading() {
+        const ov = $('mp-loading-overlay');
+        if (!ov) return;
+        ov.classList.add('hidden');
+        ov.classList.remove('flex');
     },
 
     setLobbyStatus(msg, theme = 'sky') {
@@ -862,24 +920,27 @@ const MultiplayerUI = {
     },
 
     leaveLobby() {
+        this.hideLoading();
         if (window.Multiplayer) window.Multiplayer.leaveRoom();
         this.showPanel('multiplayer');
     },
 
-    startMultiplayerGame() {
+    async startMultiplayerGame() {
         if (!window.Multiplayer || !window.Multiplayer.isHost) return;
+        // Loading on the host screen while the client is pulled in
+        this.showLoading('STARTING...', 'Waiting for Player 2');
         if (typeof MainMenu !== 'undefined') MainMenu.hide();
         this.showInGameHUD();
-        // Signal client to start game - wait for data channel to be ready
-        const sendStart = () => {
-            if (window.Multiplayer && window.Multiplayer.sendGameStart) {
-                window.Multiplayer.sendGameStart();
-            } else {
-                setTimeout(sendStart, 100);
-            }
-        };
-        sendStart();
-        UI.updateStatusBanner('Multiplayer game started!', 'Start', 'emerald');
+        // Host sim stays authoritative — start pushing world state now
+        if (window.Multiplayer.startStateSync) window.Multiplayer.startStateSync();
+        const acked = await window.Multiplayer.sendGameStartWithRetry();
+        this.hideLoading();
+        if (acked) {
+            this.setLobbyStatus('Player 2 is in!', 'emerald');
+            UI.updateStatusBanner('Player 2 joined the hunt!', 'Start', 'emerald');
+        } else {
+            UI.updateStatusBanner('Started without Player 2 ack — they may still be loading', 'Start', 'amber');
+        }
     },
 
     showInGameHUD() {
@@ -893,6 +954,7 @@ const MultiplayerUI = {
     },
 
     forceExitMultiplayer() {
+        this.hideLoading();
         if (window.Multiplayer) {
             window.Multiplayer.cleanup();
         }
@@ -932,15 +994,19 @@ const MultiplayerUI = {
     },
 
     onPlayerJoined() {
-        this.setLobbyStatus('Player joined! Ready to start.', 'emerald');
+        const cnt = (window.Multiplayer && window.Multiplayer._lobbyCount) || 2;
+        this.setLobbyStatus(`Player joined! (${cnt}/4) Ready to start.`, 'emerald');
+        this.renderLobbyPlayers(cnt, true);
         const startBtn = $('btn-start-mp');
         if (startBtn) startBtn.disabled = false;
     },
 
     onPlayerLeft() {
-        this.setLobbyStatus('Player left. Waiting for new player...', 'rose');
+        const cnt = (window.Multiplayer && window.Multiplayer._lobbyCount) || 1;
+        this.setLobbyStatus(`Player left. (${cnt}/4) Waiting for players...`, 'rose');
+        this.renderLobbyPlayers(cnt, true);
         const startBtn = $('btn-start-mp');
-        if (startBtn) startBtn.disabled = true;
+        if (startBtn) startBtn.disabled = cnt < 2;
     }
 };
 
@@ -949,20 +1015,23 @@ const MultiplayerUI = {
 // ==========================================
 const FishIndex = {
     currentFilter: 'all',
-    
+    ingameFilter: 'all',
+
     init(state) {
         this.state = state;
         this.bindEvents();
     },
-    
+
     bindEvents() {
         const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
-        
+
         on('btn-fish-index', () => this.show());
         on('btn-fish-index-back', () => this.hide());
         on('btn-achievements', () => this.showAchievements());
-        
-        // Filter buttons
+        on('btn-open-index', () => this.openInGame());
+        on('btn-index-close', () => this.closeInGame());
+
+        // Menu filter buttons
         document.querySelectorAll('.fish-filter-btn').forEach(btn => {
             btn.onclick = () => {
                 this.currentFilter = btn.dataset.filter;
@@ -978,6 +1047,104 @@ const FishIndex = {
                 this.renderGrid();
             };
         });
+
+        // In-game modal filter buttons
+        document.querySelectorAll('.index-filter-btn').forEach(btn => {
+            btn.onclick = () => {
+                this.ingameFilter = btn.dataset.filter;
+                document.querySelectorAll('.index-filter-btn').forEach(b => {
+                    b.classList.toggle('active', b === btn);
+                    b.classList.toggle('bg-fuchsia-500', b === btn);
+                    b.classList.toggle('text-white', b === btn);
+                    if (b !== btn) {
+                        b.classList.add('bg-slate-800/50');
+                        b.classList.remove('bg-fuchsia-500', 'text-white');
+                    }
+                });
+                this.renderInGame();
+            };
+        });
+    },
+
+    // ---- In-game modal (no need to visit the menu) ----
+    openInGame() {
+        const modal = $('index-modal');
+        if (!modal) return;
+        try { audio.playUIClick(); } catch (e) {}
+        this.renderInGame();
+        modal.classList.remove('hidden');
+    },
+
+    closeInGame() {
+        const modal = $('index-modal');
+        if (modal) modal.classList.add('hidden');
+    },
+
+    toggleInGame() {
+        const modal = $('index-modal');
+        if (!modal) return;
+        if (modal.classList.contains('hidden')) this.openInGame();
+        else this.closeInGame();
+    },
+
+    renderInGame() {
+        const grid = $('index-grid-ingame');
+        if (!grid) return;
+        const caught = (this.state.player.caughtFish || []).filter(f => FISH_SPECIES.some(s => s.id === f.id));
+        const caughtIds = new Set(caught.map(f => f.id));
+        const species = this._filteredSpecies(this.ingameFilter, caughtIds);
+        grid.innerHTML = species.map(fish => this._cardHTML(fish, caughtIds.has(fish.id))).join('');
+        this._paintModels(grid);
+        const total = FISH_SPECIES.filter(f => !f.isBoss).length;
+        const countEl = $('index-count-ingame');
+        const progressEl = $('index-progress-ingame');
+        if (countEl) countEl.innerText = `${caught.length} / ${total}`;
+        if (progressEl) progressEl.style.width = `${total > 0 ? (caught.length / total * 100).toFixed(1) : 0}%`;
+    },
+
+    _filteredSpecies(filter, caughtIds) {
+        let species = FISH_SPECIES.filter(f => !f.isBoss);
+        if (filter && filter !== 'all') species = species.filter(f => f.rarity === filter);
+        const rarityOrder = { common: 1, rare: 2, epic: 3, legendary: 4, mythic: 5, boss: 6 };
+        species.sort((a, b) => {
+            const aCaught = caughtIds.has(a.id);
+            const bCaught = caughtIds.has(b.id);
+            if (aCaught !== bCaught) return aCaught ? -1 : 1;
+            return (rarityOrder[a.rarity] || 0) - (rarityOrder[b.rarity] || 0);
+        });
+        return species;
+    },
+
+    _cardHTML(fish, isCaught) {
+        return `
+            <div class="fish-index-card relative glass-panel p-3 rounded-xl border-2 ${!isCaught ? 'border-slate-700/60 opacity-50' : ''} transition-all hover:scale-[1.02] cursor-pointer"
+                 data-fish-id="${fish.id}"
+                 style="${!isCaught ? 'filter: grayscale(1);' : ''}">
+                <div class="w-full aspect-square relative mb-2">
+                    <canvas class="w-full h-full" data-fish-model="${fish.id}" width="80" height="80"></canvas>
+                    ${!isCaught ? '<div class="absolute inset-0 bg-slate-900/80 flex items-center justify-center"><i class="fa-solid fa-question text-2xl text-slate-600"></i></div>' : ''}
+                    <div class="absolute top-1 right-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${this._getRarityBadgeClass(fish.rarity)}">${fish.rarity}</div>
+                </div>
+                <div class="text-center">
+                    <div class="font-bold text-xs text-white truncate">${isCaught ? fish.name : '???'}</div>
+                    <div class="text-[9px] text-slate-400">${isCaught ? fish.value + ' coins' : 'Undiscovered'}</div>
+                </div>
+            </div>
+        `;
+    },
+
+    _paintModels(grid) {
+        setTimeout(() => {
+            grid.querySelectorAll('canvas[data-fish-model]').forEach(canvas => {
+                const fishId = canvas.dataset.fishModel;
+                const fish = FISH_SPECIES.find(f => f.id === fishId);
+                if (fish) {
+                    const ctx = canvas.getContext('2d');
+                    const size = Math.min(canvas.width, canvas.height) * 0.4;
+                    Render.drawFishModel(ctx, canvas.width / 2, canvas.height / 2, size, fish, { angle: -0.3 });
+                }
+            });
+        }, 0);
     },
     
     show() {
@@ -1008,7 +1175,7 @@ const FishIndex = {
     },
     
     updateProgress() {
-        const caught = this.state.player.caughtFish || [];
+        const caught = (this.state.player.caughtFish || []).filter(f => FISH_SPECIES.some(s => s.id === f.id));
         const total = FISH_SPECIES.filter(f => !f.isBoss).length;
         const countEl = $('fish-index-count');
         const progressEl = $('fish-index-progress');
@@ -1020,59 +1187,13 @@ const FishIndex = {
     renderGrid() {
         const grid = $('fish-index-grid');
         if (!grid) return;
-        
-        const caught = this.state.player.caughtFish || [];
+
+        const caught = (this.state.player.caughtFish || []).filter(f => FISH_SPECIES.some(s => s.id === f.id));
         const caughtIds = new Set(caught.map(f => f.id));
-        
-        // Filter species
-        let species = FISH_SPECIES.filter(f => !f.isBoss);
-        
-        if (this.currentFilter !== 'all') {
-            species = species.filter(f => f.rarity === this.currentFilter);
-        }
-        
-        // Sort: caught first, then by rarity order
-        const rarityOrder = { common: 1, rare: 2, epic: 3, legendary: 4, mythic: 5, boss: 6 };
-        species.sort((a, b) => {
-            const aCaught = caughtIds.has(a.id);
-            const bCaught = caughtIds.has(b.id);
-            if (aCaught !== bCaught) return aCaught ? -1 : 1;
-            return (rarityOrder[a.rarity] || 0) - (rarityOrder[b.rarity] || 0);
-        });
-        
-        grid.innerHTML = species.map(fish => {
-            const isCaught = caughtIds.has(fish.id);
-            const rarityColor = CONFIG.RARITY_COLORS[fish.rarity] || '#cbd5e1';
-            
-            return `
-                <div class="fish-index-card relative glass-panel p-3 rounded-xl border-2 ${isCaught ? `border-${this._getTailwindColor(fish.rarity)}-500/60` : 'border-slate-700/60'} ${!isCaught ? 'opacity-50 grayscale' : ''} transition-all hover:scale-[1.02] cursor-pointer" 
-                     data-fish-id="${fish.id}"
-                     style="${!isCaught ? 'filter: grayscale(1);' : ''}">
-                    <div class="w-full aspect-square relative mb-2">
-                        <canvas class="w-full h-full" data-fish-model="${fish.id}" width="80" height="80"></canvas>
-                        ${!isCaught ? '<div class="absolute inset-0 bg-slate-900/80 flex items-center justify-center"><i class="fa-solid fa-question text-2xl text-slate-600"></i></div>' : ''}
-                        <div class="absolute top-1 right-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${this._getRarityBadgeClass(fish.rarity)}">${fish.rarity}</div>
-                    </div>
-                    <div class="text-center">
-                        <div class="font-bold text-xs text-white truncate">${fish.name}</div>
-                        <div class="text-[9px] text-slate-400">${fish.value} coins</div>
-                    </div>
-                </div>
-            `;
-        }).join('');
-        
-        // Render fish models on canvases
-        setTimeout(() => {
-            grid.querySelectorAll('canvas[data-fish-model]').forEach(canvas => {
-                const fishId = canvas.dataset.fishModel;
-                const fish = FISH_SPECIES.find(f => f.id === fishId);
-                if (fish) {
-                    const ctx = canvas.getContext('2d');
-                    const size = Math.min(canvas.width, canvas.height) * 0.4;
-                    Render.drawFishModel(ctx, canvas.width / 2, canvas.height / 2, size, fish, { angle: -0.3 });
-                }
-            });
-        }, 0);
+        const species = this._filteredSpecies(this.currentFilter, caughtIds);
+
+        grid.innerHTML = species.map(fish => this._cardHTML(fish, caughtIds.has(fish.id))).join('');
+        this._paintModels(grid);
     },
     
     _getTailwindColor(rarity) {
@@ -1210,6 +1331,16 @@ const MainMenu = {
                     shop.classList.add('hidden');
                     return;
                 }
+                const indexModal = $('index-modal');
+                if (indexModal && !indexModal.classList.contains('hidden')) {
+                    indexModal.classList.add('hidden');
+                    return;
+                }
+                const casinoModal = $('casino-modal');
+                if (casinoModal && !casinoModal.classList.contains('hidden')) {
+                    casinoModal.classList.add('hidden');
+                    return;
+                }
                 const menu = $('main-menu');
                 if (menu && !menu.classList.contains('hidden')) {
                     const main = $('mp-panel-main');
@@ -1270,6 +1401,14 @@ if (typeof EnemySpawner !== 'undefined') EnemySpawner.init(state);
 // Init Achievements
 if (typeof Achievements !== 'undefined') Achievements.init(state);
 
+// Init AntiCheat (console tamper guard)
+if (typeof AntiCheat !== 'undefined') AntiCheat.init(state);
+
+// Apply armor stats from save
+if (typeof Shop !== 'undefined' && Shop.applyArmorStats) {
+    try { Shop.applyArmorStats(state); } catch (e) {}
+}
+
 // Init Multiplayer UI
 if (typeof MultiplayerUI !== 'undefined') MultiplayerUI.init(state);
 
@@ -1294,16 +1433,25 @@ if (typeof Multiplayer !== 'undefined') {
             MultiplayerUI.onPlayerLeft();
         },
         onGameStart: () => {
-            // Client receives game start signal
-            if (typeof MainMenu !== 'undefined') MainMenu.hide();
-            if (typeof MultiplayerUI !== 'undefined') MultiplayerUI.showInGameHUD();
-            UI.updateStatusBanner('Multiplayer game started!', 'Start', 'emerald');
-            
-            // Request initial state sync from host
-            if (window.Multiplayer && window.Multiplayer.dataChannel && 
-                window.Multiplayer.dataChannel.readyState === 'open') {
-                window.Multiplayer.dataChannel.send(JSON.stringify({ type: 'syncRequest' }));
+            // Client receives game start signal: loading on ALL screens,
+            // then enter the game and pull the host's world state.
+            if (typeof MultiplayerUI !== 'undefined') {
+                MultiplayerUI.showLoading('JOINING...', 'Syncing with host');
             }
+            setTimeout(() => {
+                if (typeof MainMenu !== 'undefined') MainMenu.hide();
+                if (typeof MultiplayerUI !== 'undefined') {
+                    MultiplayerUI.showInGameHUD();
+                    MultiplayerUI.hideLoading();
+                }
+                UI.updateStatusBanner('Multiplayer game started!', 'Start', 'emerald');
+
+                // Ack so the host's loading screen can clear
+                if (window.Multiplayer) {
+                    if (window.Multiplayer.sendGameStartAck) window.Multiplayer.sendGameStartAck();
+                    if (window.Multiplayer.sendSyncRequest) window.Multiplayer.sendSyncRequest();
+                }
+            }, 1500);
         },
         onError: (msg) => {
             UI.updateStatusBanner(msg, 'Error', 'rose');
@@ -1373,8 +1521,10 @@ function mainLoop(time) {
                     x: state.player.x,
                     y: state.player.y,
                     hp: state.player.hp,
+                    maxHp: state.player.maxHp,
                     facing: state.player.facing,
-                    activeSlot: state.player.activeSlot
+                    activeSlot: state.player.activeSlot,
+                    equippedWeapons: [...state.player.equippedWeapons]
                 }
             };
             state.multiplayer.sendInput(input);
@@ -1389,8 +1539,11 @@ function mainLoop(time) {
         Render.drawWorld(state, ctx);
     }
 
-    // Render remote player
-    if (typeof Multiplayer !== 'undefined' && state.multiplayer && state.multiplayer.isConnected) {
+    // Render remote players (either side) whenever snapshots exist —
+    // no longer gated on the WebRTC flag, so signaling fallback works too
+    const hasRemotes = state.remotePlayer ||
+        (state.remotePlayers && Object.keys(state.remotePlayers).length > 0);
+    if (typeof Multiplayer !== 'undefined' && state.multiplayer && hasRemotes) {
         if (typeof Multiplayer.renderRemotePlayer === 'function') {
             Multiplayer.renderRemotePlayer(ctx);
         }
@@ -1399,12 +1552,21 @@ function mainLoop(time) {
     UI.updateBossBar(state);
     UI.renderStatusEffectsHUD(state);
 
-    // Beach shop indicator
+    // World SHOP / CASINO zone prompt (double-circle pads on the beach)
     const beachIndicator = $('beach-shop-indicator');
     if (beachIndicator) {
-        const nearShore = state.player.x >= state.waterBoundaryX - 100;
-        if (nearShore && !state.player.beachShopUnlocked) {
+        let prompt = null;
+        if (typeof Render !== 'undefined' && Render.nearestShopZone) {
+            const near = Render.nearestShopZone(state);
+            if (near && near.dist < near.zone.radius + 60) {
+                prompt = near.zone.id === 'casino' ? 'CASINO' : 'SHOP';
+            }
+        }
+        if (!prompt && state.player.x >= state.waterBoundaryX - 100 && !state.player.beachShopUnlocked) prompt = 'SHOP';
+        if (prompt) {
             beachIndicator.classList.remove('hidden');
+            const label = beachIndicator.querySelector('span');
+            if (label) label.innerHTML = `Press <kbd class="bg-slate-800 px-2 py-1 rounded text-xs">E</kbd> to open ${prompt}`;
         } else {
             beachIndicator.classList.add('hidden');
         }

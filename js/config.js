@@ -105,13 +105,18 @@ const CONFIG = {
         magma_shotgun:   24,
         sonic_pistol:    50
     },
-    // Rarity colors
+    //  FX — global particle density (0-1). Lowers visual clutter so
+    // enemy projectiles stay readable. Does not touch damage.
+    FX_DENSITY: 0.55,
+
+    //  Rarity colors
     RARITY_COLORS: {
         common:    '#94a3b8',
         rare:      '#38bdf8',
         epic:      '#a855f7',
         legendary: '#f59e0b',
-        mythic:    '#e879f9'
+        mythic:    '#e879f9',
+        boss:      '#ef4444'
     },
 
     // Enemy Types Configuration

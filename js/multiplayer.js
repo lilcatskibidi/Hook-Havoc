@@ -55,6 +55,13 @@ const Multiplayer = {
     pendingInputs: [],
     lastSentState: 0,
     stateSendInterval: null,
+
+    // Lobby / room (up to 4 players, star topology via host)
+    _lobbyCount: 1,
+    hostPeers: null,      // host-only: clientId -> snapshot
+    hostPeerOrder: null,  // host-only: join order for Player 2/3/4 labels
+    _lastGameStateTs: 0,
+    _lastInputSent: 0,
     
     // Healing system
     healCooldown: 0,
@@ -243,6 +250,9 @@ const Multiplayer = {
                     this.isHost = true;
                     this.roomCode = msg.roomCode || msg.code;
                     this.localClientId = this.signalingWs.clientId;
+                    this._lobbyCount = msg.count || 1;
+                    this.hostPeers = {};
+                    this.hostPeerOrder = [];
                     this.setupPeerConnection(true);
                     this.updateStatus(`Room created: ${this.roomCode} (Share this code)`);
                     if (this._createRoomResolve) {
@@ -259,6 +269,7 @@ const Multiplayer = {
                     this.roomCode = msg.roomCode || msg.code;
                     this.localClientId = this.signalingWs.clientId;
                     this.remoteClientId = msg.hostId;
+                    this._lobbyCount = msg.count || 2;
                     this.setupPeerConnection(false);
                     this.updateStatus(`Joined room: ${this.roomCode}`);
                     if (this._joinRoomResolve) {
@@ -267,17 +278,34 @@ const Multiplayer = {
                     }
                 }
                 break;
-                
+
             case 'playerJoined':
+                if (msg.count) this._lobbyCount = msg.count;
+                else this._lobbyCount = Math.min(4, this._lobbyCount + 1);
                 if (this.isHost) {
-                    this.remoteClientId = msg.playerId;
+                    this.remoteClientId = this.remoteClientId || msg.playerId;
                     this.onPlayerJoined(msg.playerId);
-                    // Create offer for new player - small delay to let client set up peer connection
-                    setTimeout(() => this.createOffer(), 300);
+                    // Single WebRTC attempt for the first peer only — extra
+                    // players sync via the signaling relay (no mesh needed)
+                    if (this._lobbyCount <= 2) {
+                        setTimeout(() => this.createOffer(), 300);
+                    }
+                } else {
+                    this.onPlayerJoined(msg.playerId);
                 }
                 break;
                 
             case 'playerLeft':
+                if (msg.count) this._lobbyCount = msg.count;
+                else this._lobbyCount = Math.max(1, this._lobbyCount - 1);
+                if (this.isHost && this.hostPeers && msg.playerId) {
+                    delete this.hostPeers[msg.playerId];
+                    if (this.hostPeerOrder) this.hostPeerOrder = this.hostPeerOrder.filter(id => id !== msg.playerId);
+                    if (this.state) {
+                        if (this.state.remotePlayers) delete this.state.remotePlayers[msg.playerId];
+                        if (this.state.remotePlayer && this.state.remotePlayer._pid === msg.playerId) this.state.remotePlayer = null;
+                    }
+                }
                 if (msg.playerId === this.remoteClientId) {
                     this.handleRemoteDisconnect();
                 }
@@ -343,6 +371,20 @@ const Multiplayer = {
                 // Host signaled game start
                 if (!this.isHost) {
                     this.onGameStart();
+                }
+                break;
+
+            case 'gameStartAck':
+                // Client confirmed it entered the game
+                if (this.isHost && this._startAckResolve) {
+                    this._startAckResolve();
+                }
+                break;
+
+            case 'syncRequest':
+                // Client wants a full snapshot — host only
+                if (this.isHost) {
+                    this.sendLocalState();
                 }
                 break;
                 
@@ -472,10 +514,13 @@ const Multiplayer = {
                 this.onChatMessage(this.remoteClientId, msg.message, false);
                 break;
             case 'syncRequest':
-                this.sendLocalState();
+                if (this.isHost) this.sendLocalState();
                 break;
             case 'gameStart':
                 if (this.onGameStart) this.onGameStart();
+                break;
+            case 'gameStartAck':
+                if (this.isHost && this._startAckResolve) this._startAckResolve();
                 break;
         }
     },
@@ -558,21 +603,30 @@ const Multiplayer = {
         }
     },
     
-    // Send local game state to peer
+    // Send local game state to peer (host -> client).
+    // Prefers the WebRTC data channel, falls back to the signaling
+    // server (throttled) so sync works even without WebRTC.
     sendLocalState() {
-        if (!this.dataChannel || this.dataChannel.readyState !== 'open') return;
-        
         const p = this.state.player;
         const f = this.state.fishing;
-        
-        // Only send essential state for synchronization
+        const R1 = (v) => Math.round((v || 0) * 10) / 10;
+        const RI = (v) => Math.round(v || 0);
+
+        // Lobby snapshots: host + every known peer (clients render all)
+        const players = [this._packPlayer(p, this.localClientId || 'host', 'Host')];
+        for (const [pid, rp] of Object.entries(this.hostPeers || {})) {
+            if (rp && typeof rp.x === 'number') players.push(this._packPlayer(rp, pid, rp.label || 'Player ?'));
+        }
+
+        // Only send essential state for synchronization (quantized)
         const gameState = {
+            players,
             // Host player state (authoritative)
             player: {
-                x: p.x,
-                y: p.y,
-                hp: p.hp,
-                maxHp: p.maxHp,
+                x: RI(p.x),
+                y: RI(p.y),
+                hp: RI(p.hp),
+                maxHp: RI(p.maxHp),
                 facing: p.facing,
                 activeSlot: p.activeSlot,
                 weaponRecoil: p.weaponRecoil,
@@ -594,41 +648,41 @@ const Multiplayer = {
                 mode: f.mode,
                 castPower: f.castPower,
                 castDir: f.castDir,
-                bobber: { x: f.bobber.x, y: f.bobber.y },
-                lineTension: f.lineTension,
+                bobber: { x: RI(f.bobber.x), y: RI(f.bobber.y) },
+                lineTension: R1(f.lineTension),
                 hookedFish: f.hookedFish ? {
                     species: f.hookedFish.species,
-                    x: f.hookedFish.x,
-                    y: f.hookedFish.y,
-                    hp: f.hookedFish.hp,
-                    maxHp: f.hookedFish.maxHp,
-                    stamina: f.hookedFish.stamina,
-                    staminaMax: f.hookedFish.staminaMax,
+                    x: RI(f.hookedFish.x),
+                    y: RI(f.hookedFish.y),
+                    hp: RI(f.hookedFish.hp),
+                    maxHp: RI(f.hookedFish.maxHp),
+                    stamina: R1(f.hookedFish.stamina),
+                    staminaMax: R1(f.hookedFish.staminaMax),
                     dragState: f.hookedFish.dragState,
-                    rotation: f.hookedFish.rotation,
+                    rotation: R1(f.hookedFish.rotation),
                     isDead: f.hookedFish.isDead
                 } : null,
-                biteTimer: f.biteTimer,
-                waitingTime: f.waitingTime
+                biteTimer: RI(f.biteTimer),
+                waitingTime: RI(f.waitingTime)
             },
             // World state
             monstersOnLand: this.state.monstersOnLand.map(m => ({
                 id: m.id,
                 species: m.species,
-                x: m.x,
-                y: m.y,
-                hp: m.hp,
-                maxHp: m.maxHp,
+                x: RI(m.x),
+                y: RI(m.y),
+                hp: RI(m.hp),
+                maxHp: RI(m.maxHp),
                 aiState: m.aiState,
                 isCharging: m.isCharging,
                 phase: m.phase,
                 isEnraged: m.isEnraged
             })),
-            bullets: this.state.bullets.filter(b => b.owner === 'player').map(b => ({
-                x: b.x,
-                y: b.y,
-                vx: b.vx,
-                vy: b.vy,
+            bullets: this.state.bullets.filter(b => b.owner === 'player').slice(-80).map(b => ({
+                x: RI(b.x),
+                y: RI(b.y),
+                vx: RI(b.vx),
+                vy: RI(b.vy),
                 damage: b.damage,
                 type: b.type,
                 pierce: b.pierce,
@@ -637,70 +691,127 @@ const Multiplayer = {
             })),
             groundLoot: this.state.groundLoot.map(l => ({
                 species: l.species,
-                x: l.x,
-                y: l.y
+                x: RI(l.x),
+                y: RI(l.y)
             })),
             groundHazards: this.state.groundHazards.map(h => ({
-                x: h.x,
-                y: h.y,
-                radius: h.radius,
-                duration: h.duration,
+                x: RI(h.x),
+                y: RI(h.y),
+                radius: RI(h.radius),
+                duration: R1(h.duration),
                 type: h.type,
                 damagePerSec: h.damagePerSec,
                 color: h.color
             })),
             delayedBlasts: this.state.delayedBlasts.map(b => ({
-                x: b.x,
-                y: b.y,
-                radius: b.radius,
+                x: RI(b.x),
+                y: RI(b.y),
+                radius: RI(b.radius),
                 damage: b.damage,
-                timer: b.timer,
+                timer: R1(b.timer),
                 color: b.color,
                 leaveHazard: b.leaveHazard,
                 hazardType: b.hazardType
             })),
-            camera: {
-                x: this.state.camera.x,
-                y: this.state.camera.y,
-                zoom: this.state.camera.zoom
-            },
             waterBoundaryX: this.state.waterBoundaryX,
-            time: this.state.time,
-            screenShake: this.state.screenShake,
+            time: R1(this.state.time),
+            screenShake: RI(this.state.screenShake),
             activeBoss: this.state.activeBoss ? {
                 id: this.state.activeBoss.id,
                 species: this.state.activeBoss.species,
-                x: this.state.activeBoss.x,
-                y: this.state.activeBoss.y,
-                hp: this.state.activeBoss.hp,
-                maxHp: this.state.activeBoss.maxHp,
+                x: RI(this.state.activeBoss.x),
+                y: RI(this.state.activeBoss.y),
+                hp: RI(this.state.activeBoss.hp),
+                maxHp: RI(this.state.activeBoss.maxHp),
                 phase: this.state.activeBoss.phase
             } : null,
             timestamp: Date.now()
         };
-        
-        this.dataChannel.send(JSON.stringify({
+
+        const payload = JSON.stringify({
             type: 'gameState',
             state: gameState
-        }));
-        
+        });
+
+        const dcOpen = this.dataChannel && this.dataChannel.readyState === 'open';
+        const wsOpen = this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN;
+        if (dcOpen) {
+            try { this.dataChannel.send(payload); } catch (e) {}
+        }
+        // 3-4 player rooms: some peers only have the relay — broadcast there
+        // too (clients dedupe by timestamp). Otherwise WS is just a fallback.
+        const needRelay = (this._lobbyCount || 1) > 2;
+        if (wsOpen && (needRelay || !dcOpen)) {
+            const now = Date.now();
+            if (needRelay || now - (this._lastFallbackSync || 0) > 150) {
+                this._lastFallbackSync = now;
+                try { this.signalingWs.send(payload); } catch (e) {}
+            }
+        }
+
         this.lastSentState = Date.now();
+    },
+
+    // Client -> host ack that it entered the game (both channels)
+    sendGameStartAck() {
+        const ack = JSON.stringify({ type: 'gameStartAck' });
+        if (this.dataChannel && this.dataChannel.readyState === 'open') {
+            try { this.dataChannel.send(ack); } catch (e) {}
+        }
+        if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
+            try { this.signalingWs.send(ack); } catch (e) {}
+        }
+    },
+
+    // Client -> host full-state request (both channels)
+    sendSyncRequest() {
+        const req = JSON.stringify({ type: 'syncRequest' });
+        if (this.dataChannel && this.dataChannel.readyState === 'open') {
+            try { this.dataChannel.send(req); } catch (e) {}
+        }
+        if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
+            try { this.signalingWs.send(req); } catch (e) {}
+        }
     },
     
     // Handle incoming game state (client receives from host)
     handleGameState(remoteState) {
         if (this.isHost) return; // Host doesn't receive state
-        
+        if (!remoteState) return;
+
+        // Drop stale duplicates (dual DC+relay delivery in 3-4p rooms)
+        const ts = remoteState.timestamp || 0;
+        if (ts && ts <= (this._lastGameStateTs || 0)) return;
+        this._lastGameStateTs = ts;
+
         this.remotePlayerState = remoteState;
-        
+
         // Apply remote state to local game (interpolation would be better but this works for LAN)
         this.applyRemoteState(remoteState);
     },
-    
+
     // Apply remote state to local game
     applyRemoteState(remoteState) {
-        // Update remote player visualization
-        this.state.remotePlayer = remoteState.player;
+        // Lobby roster: everyone the host knows about, minus self
+        if (!this.state.remotePlayers) this.state.remotePlayers = {};
+        if (Array.isArray(remoteState.players)) {
+            const seen = {};
+            for (const pl of remoteState.players) {
+                if (!pl || pl.id === this.localClientId) continue;
+                seen[pl.id] = true;
+                const cur = this.state.remotePlayers[pl.id] || {};
+                Object.assign(cur, pl, { _pid: pl.id });
+                this.state.remotePlayers[pl.id] = cur;
+            }
+            for (const id of Object.keys(this.state.remotePlayers)) {
+                if (!seen[id]) delete this.state.remotePlayers[id];
+            }
+            const first = Object.values(this.state.remotePlayers)[0] || null;
+            this.state.remotePlayer = first; // legacy single view
+        } else {
+            // Legacy host payload without roster
+            this.state.remotePlayer = remoteState.player;
+        }
         
         // For non-host, we don't override local player but we sync world state
         if (!this.isHost) {
@@ -807,31 +918,73 @@ const Multiplayer = {
         return null;
     },
     
-    // Send player input to host
+    // Send player input to host (client only) — throttled to ~15Hz
     sendInput(input) {
         if (this.isHost) return; // Host handles input locally
-        
+
+        const now = Date.now();
+        if (now - (this._lastInputSent || 0) < 66) return;
+        this._lastInputSent = now;
         if (this.dataChannel && this.dataChannel.readyState === 'open') {
-            this.dataChannel.send(JSON.stringify({
-                type: 'playerInput',
-                input: input
-            }));
+            try { this.dataChannel.send(JSON.stringify({ type: 'playerInput', input })); } catch (e) {}
         } else if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
-            // Fallback to signaling server
-            this.signalingWs.send(JSON.stringify({
-                type: 'playerInput',
-                input: input
-            }));
+            // Signaling fallback — throttled to ~10Hz
+            const now = Date.now();
+            if (now - (this._lastInputFallback || 0) > 100) {
+                this._lastInputFallback = now;
+                try { this.signalingWs.send(JSON.stringify({ type: 'playerInput', input })); } catch (e) {}
+            }
         }
     },
     
-    // Handle player input (host receives from client)
+    // Handle player input (host receives from each client).
+    // Positions every remote player so the host sees the whole lobby.
     handlePlayerInput(playerId, input) {
-        // Apply input to remote player simulation
-        if (this.state.remotePlayer) {
-            // Store for rendering remote player
-            this.state.remotePlayer.input = input;
+        if (!input) return;
+        if (!this.hostPeers) this.hostPeers = {};
+        if (!Array.isArray(this.hostPeerOrder)) this.hostPeerOrder = [];
+        const pid = playerId || 'peer';
+        if (!this.hostPeers[pid]) {
+            this.hostPeerOrder.push(pid);
         }
+        const rp = this.hostPeers[pid] || {};
+        if (input.player && typeof input.player.x === 'number') {
+            rp.x = input.player.x;
+            rp.y = input.player.y;
+            if (typeof input.player.hp === 'number') rp.hp = input.player.hp;
+            if (typeof input.player.maxHp === 'number') rp.maxHp = input.player.maxHp;
+            if (typeof input.player.facing !== 'undefined') rp.facing = input.player.facing;
+            if (typeof input.player.activeSlot !== 'undefined') rp.activeSlot = input.player.activeSlot;
+            if (input.player.equippedWeapons) rp.equippedWeapons = input.player.equippedWeapons;
+        }
+        if (input.mouse) rp.input = input;
+        else if (input.mouseX !== undefined) rp.input = input;
+        rp._pid = pid;
+        // Player 2/3/4 by join order (host is Player 1)
+        const idx = this.hostPeerOrder.indexOf(pid);
+        rp.label = idx >= 0 ? `Player ${idx + 2}` : 'Player ?';
+        this.hostPeers[pid] = rp;
+        // Legacy single-remote view + new map
+        if (this.state) {
+            if (!this.state.remotePlayers) this.state.remotePlayers = {};
+            this.state.remotePlayers[pid] = rp;
+            if (!this.state.remotePlayer) this.state.remotePlayer = rp;
+        }
+    },
+
+    // Compact player snapshot for the wire (quantized to cut bandwidth)
+    _packPlayer(p, id, label) {
+        return {
+            id,
+            label,
+            x: Math.round(p.x || 0),
+            y: Math.round(p.y || 0),
+            hp: Math.round(p.hp || 0),
+            maxHp: Math.round(p.maxHp || 100),
+            facing: p.facing || 1,
+            activeSlot: p.activeSlot || 0,
+            equippedWeapons: p.equippedWeapons || []
+        };
     },
     
     // Request heal for a player
@@ -923,27 +1076,51 @@ const Multiplayer = {
         }
     },
     
-    // Send game start signal (host only)
+    // Send game start signal (host only) — both channels so the client
+    // gets it even when the WebRTC data channel isn't open yet.
     sendGameStart() {
         if (!this.isHost) return;
-        const startData = { type: 'gameStart' };
-        
+        const startData = JSON.stringify({ type: 'gameStart' });
+
         if (this.dataChannel && this.dataChannel.readyState === 'open') {
-            this.dataChannel.send(JSON.stringify(startData));
-        } else if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
-            this.signalingWs.send(JSON.stringify(startData));
+            try { this.dataChannel.send(startData); } catch (e) {}
         }
+        if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
+            try { this.signalingWs.send(startData); } catch (e) {}
+        }
+    },
+
+    // Host: send gameStart a few times until the client acks (or timeout).
+    // Resolves true on ack, false on timeout — game starts either way.
+    sendGameStartWithRetry(retries = 4, intervalMs = 500, timeoutMs = 5000) {
+        return new Promise((resolve) => {
+            let done = false;
+            const finish = (acked) => {
+                if (done) return;
+                done = true;
+                clearInterval(timer);
+                clearTimeout(timer2);
+                this._startAckResolve = null;
+                resolve(acked);
+            };
+            this._startAckResolve = () => finish(true);
+            const timer = setInterval(() => {
+                if (done) return;
+                this.sendGameStart();
+            }, intervalMs);
+            const timer2 = setTimeout(() => finish(false), timeoutMs);
+            this.sendGameStart();
+        });
     },
     
     // Start periodic state synchronization (host only)
     startStateSync() {
         if (!this.isHost) return;
-        
+        if (this.stateSendInterval) return; // already running
+
         this.stateSendInterval = setInterval(() => {
-            if (this.isConnected) {
-                this.sendLocalState();
-            }
-        }, 50); // 20 updates per second
+            this.sendLocalState();
+        }, 80); // ~12 updates per second (was 20 — host lag fix)
     },
     
     // Stop state synchronization
@@ -967,15 +1144,20 @@ const Multiplayer = {
         this.onStatusChange(message);
     },
     
-    // Handle remote disconnect
+    // Handle remote disconnect (one peer; keep the session if others remain)
     handleRemoteDisconnect() {
-        this.isConnected = false;
+        const peersLeft = this.isHost
+            ? Object.keys(this.hostPeers || {}).length
+            : Math.max(0, this._lobbyCount - 1);
         this.remoteClientId = null;
         this.remotePlayerState = null;
-        this.updateStatus('Other player disconnected');
-        
-        // Remove remote player visual
-        this.state.remotePlayer = null;
+        if (peersLeft <= 0) {
+            this.isConnected = false;
+            this.updateStatus('Other player disconnected');
+            if (this.state) this.state.remotePlayer = null;
+        } else {
+            this.updateStatus(`A player disconnected (${peersLeft} still here)`);
+        }
     },
     
     // Handle disconnect
@@ -1027,7 +1209,14 @@ const Multiplayer = {
         this.localClientId = null;
         this.remoteClientId = null;
         this.remotePlayerState = null;
-        this.state.remotePlayer = null;
+        this._lobbyCount = 1;
+        this.hostPeers = {};
+        this.hostPeerOrder = [];
+        this._lastGameStateTs = 0;
+        if (this.state) {
+            this.state.remotePlayer = null;
+            this.state.remotePlayers = {};
+        }
         
         this.updateStatus('Left multiplayer session');
     },
@@ -1038,74 +1227,103 @@ const Multiplayer = {
             isHost: this.isHost,
             isConnected: this.isConnected,
             roomCode: this.roomCode,
+            playerCount: this._lobbyCount || 1,
             healsRemaining: this.sharedHeals - this.healsUsed,
             healCooldown: this.healCooldown
         };
     },
     
-    // Render remote player
+    // Render remote players — screen space (called after drawWorld's
+    // ctx.restore(), so world coords must be projected through the camera).
     renderRemotePlayer(ctx) {
-        if (!this.state.remotePlayer || !this.isConnected) return;
-        
-        const rp = this.state.remotePlayer;
+        if (!this.state) return;
+        const map = this.state.remotePlayers && Object.keys(this.state.remotePlayers).length
+            ? this.state.remotePlayers
+            : (this.state.remotePlayer ? { solo: this.state.remotePlayer } : null);
+        if (!map) return;
+        for (const rp of Object.values(map)) {
+            this._drawRemotePlayer(ctx, rp);
+        }
+    },
+
+    _drawRemotePlayer(ctx, rp) {
+        if (!rp || typeof rp.x !== 'number') return;
+
+        const canvas = ctx.canvas;
         const cam = this.state.camera;
-        
+        // Cheap smoothing between 12Hz snapshots (no extra bandwidth)
+        if (typeof rp.rx !== 'number') { rp.rx = rp.x; rp.ry = rp.y; }
+        rp.rx += (rp.x - rp.rx) * 0.35;
+        rp.ry += (rp.y - rp.ry) * 0.35;
+        const sx = (rp.rx - cam.x) * cam.zoom + canvas.width / 2;
+        const sy = (rp.ry - cam.y) * cam.zoom + canvas.height / 2;
+        const margin = 60;
+        if (sx < -margin || sx > canvas.width + margin || sy < -margin || sy > canvas.height + margin) return;
+
+        const sc = cam.zoom;
         ctx.save();
-        ctx.translate(rp.x, rp.y);
-        
-        // Determine aim angle from input or mouse
+        ctx.translate(sx, sy);
+
+        // Aim angle from input or mouse
         let aimAngle = 0;
         if (rp.input) {
-            aimAngle = Math.atan2(rp.input.mouseY - rp.y, rp.input.mouseX - rp.x);
+            const ix = rp.input.mouseX !== undefined ? rp.input.mouseX : (rp.input.mouse && rp.input.mouse.worldX);
+            const iy = rp.input.mouseY !== undefined ? rp.input.mouseY : (rp.input.mouse && rp.input.mouse.worldY);
+            if (typeof ix === 'number' && typeof iy === 'number') {
+                aimAngle = Math.atan2(iy - rp.y, ix - rp.x);
+            }
         }
-        ctx.rotate(aimAngle);
-        
-        // Draw player shadow
+
+        // Shadow
         ctx.fillStyle = 'rgba(0,0,0,0.3)';
         ctx.beginPath();
-        ctx.ellipse(2, 4, 16, 11, 0, 0, Math.PI * 2);
+        ctx.ellipse(2 * sc, 4 * sc, 16 * sc, 11 * sc, 0, 0, Math.PI * 2);
         ctx.fill();
-        
-        // Draw player body (different color for remote)
-        const g = ctx.createRadialGradient(-4, -4, 2, 0, 0, 16);
-        g.addColorStop(0, '#f472b6'); // Pink for remote player
+
+        // Body (pink = remote player)
+        const g = ctx.createRadialGradient(-4 * sc, -4 * sc, 2, 0, 0, 16 * sc);
+        g.addColorStop(0, '#f472b6');
         g.addColorStop(1, '#be185d');
         ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(0, 0, 16, 0, Math.PI * 2);
+        ctx.arc(0, 0, 16 * sc, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = '#f472b6';
         ctx.lineWidth = 2;
         ctx.stroke();
-        
-        // Draw weapon
+
+        // Gun rotated toward aim
+        ctx.save();
+        ctx.rotate(aimAngle);
         const w = rp.equippedWeapons && rp.equippedWeapons[rp.activeSlot];
         if (w) {
-            const weaponDef = WEAPONS.find(wd => wd.id === w);
-            if (weaponDef && typeof Render !== 'undefined' && Render.drawGun) {
-                Render.drawGun(ctx, rp, weaponDef);
-            }
+            ctx.strokeStyle = '#e5e7eb';
+            ctx.lineWidth = 4 * sc;
+            ctx.beginPath();
+            ctx.moveTo(10 * sc, 0);
+            ctx.lineTo(30 * sc, 0);
+            ctx.stroke();
         }
-        
         ctx.restore();
-        
-        // Draw name tag
+        ctx.restore();
+
+        // Name tag + HP bar (screen space)
         ctx.save();
         ctx.font = 'bold 12px Work Sans';
         ctx.textAlign = 'center';
         ctx.fillStyle = '#f472b6';
         ctx.strokeStyle = 'rgba(0,0,0,0.8)';
         ctx.lineWidth = 3;
-        const name = this.isHost ? 'Player 2' : 'Host';
-        ctx.strokeText(name, rp.x, rp.y - 35);
-        ctx.fillText(name, rp.x, rp.y - 35);
-        
-        // HP bar
-        const barW = 50;
+        const name = rp.label || (this.isHost ? 'Player 2' : 'Host');
+        ctx.strokeText(name, sx, sy - 35 * sc);
+        ctx.fillText(name, sx, sy - 35 * sc);
+
+        const barW = 50 * sc;
+        const hpRatio = Math.max(0, Math.min(1, (rp.hp || 1) / (rp.maxHp || 100)));
         ctx.fillStyle = 'rgba(15,23,42,0.9)';
-        ctx.fillRect(rp.x - barW / 2, rp.y - 45, barW, 5);
+        ctx.fillRect(sx - barW / 2, sy - 45 * sc, barW, 5);
         ctx.fillStyle = '#34d399';
-        ctx.fillRect(rp.x - barW / 2, rp.y - 45, (rp.hp / rp.maxHp) * barW, 5);
+        ctx.fillRect(sx - barW / 2, sy - 45 * sc, hpRatio * barW, 5);
         ctx.restore();
     }
 };

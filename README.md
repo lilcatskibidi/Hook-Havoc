@@ -4,7 +4,7 @@ A hybrid fishing/action game with **LAN multiplayer support** using WebRTC.
 
 ## Features
 - Single player fishing & combat
-- **LAN Multiplayer (2 players)** - Host/Join via room codes
+- **LAN Multiplayer (up to 4 players)** - Host/Join via room codes
 - **Shared Healing System** - Heal your partner (3 heals per session, 10s cooldown)
 - Real-time game state synchronization
 - In-game chat
@@ -102,7 +102,7 @@ Open `index.html` in a browser (Chrome/Edge/Firefox) on **both computers**.
 
 ### "Room not found" / "Room is full"
 - Room codes are 4 characters, case-insensitive
-- Max 2 players per room
+- Max 4 players per room
 - Codes expire after host leaves or 1 minute of inactivity
 
 ### High latency / Disconnections

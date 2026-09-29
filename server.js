@@ -194,9 +194,31 @@ function handleMessage(clientId, msg) {
             relayChat(clientId, msg);
             break;
 
+        // Lobby -> in-game transition + sync handshake.
+        // Relayed to room peers so the game starts even if the
+        // WebRTC data channel isn't open yet.
+        case 'gameStart':
+        case 'gameStartAck':
+        case 'syncRequest':
+            relayToRoom(clientId, { type: msg.type, from: clientId });
+            break;
+
         default:
             console.warn(`Unknown message type from ${clientId}:`, msg.type);
     }
+}
+
+// Broadcast a payload to every other member of the sender's room
+function relayToRoom(fromId, payload) {
+    const client = clients.get(fromId);
+    if (!client || !client.roomId) return;
+    const room = rooms.get(client.roomId);
+    if (!room) return;
+    room.clients.forEach(toId => {
+        if (toId === fromId) return;
+        const to = clients.get(toId);
+        if (to) safeSend(to.ws, payload);
+    });
 }
 
 // --- Room management --------------------------------------------------------
@@ -226,7 +248,8 @@ function createRoom(clientId) {
         created: true,
         roomCode,
         code: roomCode,
-        isHost: true
+        isHost: true,
+        count: 1
     });
 
     console.log(`[R] Room ${roomCode} created by ${clientId}`);
@@ -248,8 +271,8 @@ function joinRoom(clientId, rawCode) {
         return;
     }
 
-    if (room.clients.size >= 2) {
-        safeSend(client.ws, { type: 'error', message: 'Room is full (max 2 players)' });
+    if (room.clients.size >= 4) {
+        safeSend(client.ws, { type: 'error', message: 'Room is full (max 4 players)' });
         return;
     }
 
@@ -259,9 +282,14 @@ function joinRoom(clientId, rawCode) {
     client.roomId = roomCode;
     client.isHost = false;
 
-    // Notify host
+    // Notify host + existing members
     const host = clients.get(room.hostId);
-    if (host) safeSend(host.ws, { type: 'playerJoined', joined: true, peerJoined: true, playerId: clientId });
+    if (host) safeSend(host.ws, { type: 'playerJoined', joined: true, peerJoined: true, playerId: clientId, count: room.clients.size });
+    room.clients.forEach(otherId => {
+        if (otherId === clientId || otherId === room.hostId) return;
+        const other = clients.get(otherId);
+        if (other) safeSend(other.ws, { type: 'playerJoined', joined: true, peerJoined: true, playerId: clientId, count: room.clients.size });
+    });
 
     // Acknowledge joiner (multiple aliases for compatibility)
     safeSend(client.ws, {
@@ -270,7 +298,8 @@ function joinRoom(clientId, rawCode) {
         roomCode: room.id,
         code: room.id,
         isHost: false,
-        hostId: room.hostId
+        hostId: room.hostId,
+        count: room.clients.size
     });
 
     console.log(`[R] ${clientId} joined room ${roomCode}`);
@@ -302,9 +331,11 @@ function leaveRoom(clientId) {
         rooms.delete(room.id);
         console.log(`[R] Room ${room.id} closed (host left)`);
     } else {
-        // Client leaving → notify host
-        const host = clients.get(room.hostId);
-        if (host) safeSend(host.ws, { type: 'playerLeft', left: true, peerLeft: true, playerId: clientId });
+        // Client leaving → notify everyone left in the room
+        room.clients.forEach(otherId => {
+            const other = clients.get(otherId);
+            if (other) safeSend(other.ws, { type: 'playerLeft', left: true, peerLeft: true, playerId: clientId, count: room.clients.size });
+        });
         console.log(`[R] ${clientId} left room ${room.id}`);
     }
 

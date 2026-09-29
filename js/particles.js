@@ -1,5 +1,13 @@
 const Particles = {
+    _density() {
+        try {
+            const d = (typeof CONFIG !== 'undefined' && CONFIG.FX_DENSITY) || 1;
+            return Math.max(0.15, Math.min(1, d));
+        } catch (e) { return 1; }
+    },
+
     spawnBloodImpact(state, x, y, color, count = 8) {
+        count = Math.max(2, Math.round(count * this._density()));
         for (let i = 0; i < count; i++) {
             state.particles.push({
                 x, y,
@@ -12,6 +20,7 @@ const Particles = {
     },
 
     spawnWaterSplashes(state, x, y, count = 3) {
+        count = Math.max(1, Math.round(count * this._density()));
         for (let i = 0; i < count; i++) {
             state.particles.push({
                 x, y,
@@ -24,6 +33,7 @@ const Particles = {
     },
 
     spawnParticles(state, x, y, color, count = 8, opts = {}) {
+        count = Math.max(1, Math.round(count * this._density()));
         for (let i = 0; i < count; i++) {
             const a = Math.random() * Math.PI * 2;
             const s = 80 + Math.random() * 200;
@@ -52,6 +62,7 @@ const Particles = {
 
     // NEW: Lightning/chain effect
     spawnLightning(state, x1, y1, x2, y2, color = '#38bdf8', segments = 8) {
+        segments = Math.max(3, Math.round(segments * this._density()));
         for (let i = 0; i < segments; i++) {
             const t = i / (segments - 1);
             const x = x1 + (x2 - x1) * t + (Math.random() - 0.5) * 20;

@@ -180,7 +180,16 @@ const Achievements = {
                 this.unlock('casino_bankrupt');
             }
         }
+        // Lifetime winnings tracker (shown in shop casino tab)
+        if (type === 'win' && state && state.player) {
+            state.player.casinoLifetimeWinnings = (state.player.casinoLifetimeWinnings || 0) + amount;
+        }
     },
+
+    // Compat wrappers used by Casino UI
+    onCasinoWin(state, amount) { try { this.checkCasino(state, 'win', amount); } catch (e) {} },
+    onCasinoLoss(state, amount) { try { this.checkCasino(state, 'lose', amount); } catch (e) {} },
+    onJackpot(state) { try { this.checkCasino(state, 'jackpot', 0); } catch (e) {} },
     
     checkSurvival(state, timeAlive) {
         if (timeAlive >= 3600 && !this.unlocked.has('no_death_1hr')) { // 1 hour

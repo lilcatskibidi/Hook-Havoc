@@ -104,41 +104,66 @@ const EnemySpawner = {
         });
     },
     
+    // Shared damage-over-time from gun effects (burn / poison) + stun.
+    // Returns true if the tick killed the enemy.
+    tickStatus(e, delta) {
+        let died = false;
+        if (e.burnTimer > 0) {
+            e.burnTimer -= delta;
+            e.hp -= (e.burnDps || 12) * delta;
+            if (Math.random() < 0.25 && this.state) {
+                Particles.spawnParticles(this.state, e.x, e.y, '#f97316', 1, { size: 3 });
+            }
+        }
+        if (e.poisonTimer > 0) {
+            e.poisonTimer -= delta;
+            e.hp -= (e.poisonDps || 10) * delta;
+        }
+        if (e.freezeTimer > 0) e.freezeTimer -= delta;
+        if (e.stunTimer > 0) e.stunTimer -= delta;
+        e.hitFlash = Math.max(0, (e.hitFlash || 0) - delta);
+        if (e.hp <= 0 && !e._dead) {
+            e._dead = true;
+            this.onEnemyKilled(e);
+            died = true;
+        }
+        return died;
+    },
+
     spawnJumpingFish() {
         if (!this.state.enemies) this.state.enemies = [];
         if (this.countEnemies('jumpingFish') >= CONFIG.ENEMIES.JUMPING_FISH.maxCount) return;
-        
+
         const p = this.state.player;
+        const B = CONFIG.WORLD;
         const waterX = this.state.waterBoundaryX;
-        
-        // Spawn from water, jump towards player
-        const x = waterX + 50 + Math.random() * 200;
-        const y = p.y + (Math.random() - 0.5) * 300;
-        
+
+        // Beached flopper: spawns DIRECTLY on land near the player — no
+        // fishing required. It flops toward the player and stays until killed.
         const cfg = CONFIG.ENEMIES.JUMPING_FISH;
-        // Pick a random fish species for visual
-        const species = FISH_SPECIES[Math.floor(Math.random() * FISH_SPECIES.length)];
-        
+        const base = FISH_SPECIES[Math.floor(Math.random() * FISH_SPECIES.length)];
+        const species = (typeof makeCatchInstance === 'function') ? makeCatchInstance(base, 0) : Object.assign({}, base);
+        const x = Utils.clamp(p.x + (Math.random() < 0.5 ? -1 : 1) * (90 + Math.random() * 120), B.MIN_X + 30, waterX - 30);
+        const y = Utils.clamp(p.y + (Math.random() - 0.5) * 240, B.MIN_Y + 30, B.MAX_Y - 30);
+
         this.state.enemies.push({
             id: Date.now() + Math.random(),
             enemyType: 'jumpingFish',
             species: species,
             x, y,
             vx: 0, vy: 0,
-            hp: cfg.baseHp,
-            maxHp: cfg.baseHp,
+            hp: Math.max(60, (species.maxHp || cfg.baseHp) * 0.4),
+            maxHp: Math.max(60, (species.maxHp || cfg.baseHp) * 0.4),
             damage: cfg.damage,
-            jumpSpeed: cfg.jumpSpeed,
-            jumpHeight: cfg.jumpHeight,
-            landTime: cfg.landTime,
-            landTimer: 0,
-            state: 'inWater', // inWater, jumping, onLand, returning
-            jumpTargetX: p.x,
-            jumpTargetY: p.y,
-            score: cfg.score,
+            state: 'onLand', // always starts beached on land now
+            landTimer: 60,   // flops back after 60s if ignored
+            hopTimer: 0.5,
+            hitCd: 0,
+            score: Math.max(20, Math.round((species.value || 100) * 0.3)),
             xp: cfg.xp,
             hitFlash: 0,
         });
+        Particles.showFloatingText(this.state, `🐟 ${species.name} flopped ashore!`, x, y - 40, species.color || '#38bdf8');
     },
     
     spawnBeachCrab() {
@@ -179,8 +204,9 @@ const EnemySpawner = {
         
         this.state.enemies.forEach(e => {
             if (e.enemyType !== 'seagull') return;
-            
-            e.hitFlash = Math.max(0, e.hitFlash - delta);
+            if (this.tickStatus(e, delta)) return;
+            if (e.stunTimer > 0) return;
+
             e.diveTimer -= delta;
             
             const dx = p.x - e.x;
@@ -262,98 +288,48 @@ const EnemySpawner = {
         if (!this.state.enemies) return;
         const p = this.state.player;
         const waterX = this.state.waterBoundaryX;
-        
-        this.state.enemies.forEach(e => {
-            if (e.enemyType !== 'jumpingFish') return;
-            
-            e.hitFlash = Math.max(0, e.hitFlash - delta);
-            
+        const B = CONFIG.WORLD;
+
+        for (let idx = this.state.enemies.length - 1; idx >= 0; idx--) {
+            const e = this.state.enemies[idx];
+            if (e.enemyType !== 'jumpingFish') continue;
+            if (this.tickStatus(e, delta)) continue;
+            if (e.stunTimer > 0) continue;
+
             const dx = p.x - e.x;
             const dy = p.y - e.y;
-            const dist = Math.hypot(dx, dy);
-            
-            switch (e.state) {
-                case 'inWater':
-                    // Swim in water, occasionally jump
-                    e.x += (Math.random() - 0.5) * 50 * delta;
-                    e.y += (Math.random() - 0.5) * 50 * delta;
-                    
-                    // Jump towards player
-                    if (e.x > waterX && dist < 400 && Math.random() < 0.01) {
-                        e.state = 'jumping';
-                        e.jumpTargetX = p.x;
-                        e.jumpTargetY = p.y;
-                    }
-                    break;
-                    
-                case 'jumping':
-                    // Arc jump towards player
-                    const jdx = e.jumpTargetX - e.x;
-                    const jdy = e.jumpTargetY - e.y;
-                    const jdist = Math.hypot(jdx, jdy);
-                    
-                    if (jdist > 0) {
-                        e.vx += (jdx / jdist) * e.jumpSpeed * delta;
-                        e.vy += (jdy / jdist) * e.jumpSpeed * delta;
-                    }
-                    
-                    // Arc height
-                    const progress = 1 - jdist / Math.hypot(e.jumpTargetX - (e.x - e.vx * delta), e.jumpTargetY - (e.y - e.vy * delta));
-                    if (progress < 0.5) {
-                        e.vy -= e.jumpHeight * delta * 4;
-                    } else {
-                        e.vy += e.jumpHeight * delta * 4;
-                    }
-                    
-                    // Landed
-                    if (e.x <= waterX + 20 && e.vy > 0) {
-                        e.state = 'onLand';
-                        e.landTimer = e.landTime;
-                        e.x = waterX - 10;
-                    }
-                    break;
-                    
-                case 'onLand':
-                    e.landTimer -= delta;
-                    // Flop towards player
-                    if (dist > 0 && dist < 200) {
-                        e.vx += (dx / dist) * 50 * delta;
-                        e.vy += (dy / dist) * 50 * delta;
-                    }
-                    
-                    // Attack player
-                    if (dist < 30) {
-                        this.hitPlayer(e);
-                    }
-                    
-                    // Return to water
-                    if (e.landTimer <= 0) {
-                        e.state = 'returning';
-                    }
-                    break;
-                    
-                case 'returning':
-                    // Jump back to water
-                    const rdx = waterX + 100 - e.x;
-                    const rdy = 0;
-                    const rdist = Math.hypot(rdx, rdy);
-                    
-                    if (rdist > 0) {
-                        e.vx += (rdx / rdist) * e.jumpSpeed * delta;
-                        e.vy += (rdy / rdist) * e.jumpSpeed * delta;
-                    }
-                    
-                    if (e.x >= waterX) {
-                        this.state.enemies = this.state.enemies.filter(en => en !== e);
-                    }
-                    break;
+            const dist = Math.hypot(dx, dy) || 1;
+            const slowMult = e.freezeTimer > 0 ? 0.3 : 1.0;
+
+            // Flop-hop toward the player
+            e.hopTimer -= delta;
+            if (e.hopTimer <= 0) {
+                e.hopTimer = 0.7 + Math.random() * 0.5;
+                e.vx += (dx / dist) * 220 * slowMult;
+                e.vy += (dy / dist) * 220 * slowMult;
+                if (typeof Particles !== 'undefined') Particles.spawnParticles(this.state, e.x, e.y, '#fef3c7', 3, { size: 2 });
             }
-            
+
+            e.hitCd = Math.max(0, (e.hitCd || 0) - delta);
+            if (dist < 32 && e.hitCd <= 0) {
+                this.hitPlayer(e);
+                e.hitCd = 0.8;
+            }
+
             e.x += e.vx * delta;
             e.y += e.vy * delta;
-            e.vx *= 0.98;
-            e.vy *= 0.98;
-        });
+            e.vx *= 0.90;
+            e.vy *= 0.90;
+            e.x = Utils.clamp(e.x, B.MIN_X + 20, waterX - 15);
+            e.y = Utils.clamp(e.y, B.MIN_Y + 20, B.MAX_Y - 20);
+
+            // Flops back to sea if ignored too long
+            e.landTimer -= delta;
+            if (e.landTimer <= 0) {
+                Particles.showFloatingText(this.state, 'Fish flopped back to sea...', e.x, e.y - 30, '#94a3b8');
+                this.state.enemies = this.state.enemies.filter(en => en !== e);
+            }
+        }
     },
     
     updateBeachCrabs(delta) {
@@ -362,8 +338,9 @@ const EnemySpawner = {
         
         this.state.enemies.forEach(e => {
             if (e.enemyType !== 'beachCrab') return;
-            
-            e.hitFlash = Math.max(0, e.hitFlash - delta);
+            if (this.tickStatus(e, delta)) return;
+            if (e.stunTimer > 0) return;
+
             e.burrowTimer -= delta;
             
             const dx = p.x - e.x;
@@ -449,36 +426,55 @@ const EnemySpawner = {
     
     hitPlayer(enemy) {
         const p = this.state.player;
-        if (p.hp <= 0) return;
-        
-        p.hp -= enemy.damage;
-        this.state.screenShake = 8;
-        try { audio.playHurt(); } catch (e) {}
-        UI.triggerDamageFlash();
-        Particles.showFloatingText(this.state, `-${enemy.damage}`, p.x, p.y - 30, '#f87171');
-        Player.refreshHUD(this.state);
-        
-        if (p.hp <= 0) {
-            Player.die(this.state);
+        if (p.hp <= 0 || p.isDead) return;
+
+        // Armor / umbrella aware (same mitigation as land monsters)
+        let dealt = enemy.damage;
+        if (typeof Combat !== 'undefined' && Combat.damagePlayer) {
+            dealt = Combat.damagePlayer(this.state, enemy.damage, { knockback: 0 });
+        } else {
+            p.hp -= enemy.damage;
+            Player.refreshHUD(this.state);
+            if (p.hp <= 0) Player.die(this.state);
         }
+        this.state.screenShake = Math.max(this.state.screenShake || 0, 8);
+        try { audio.playHurt(); } catch (e) {}
+        try { UI.triggerDamageFlash(); } catch (e2) {}
+        Particles.showFloatingText(this.state, `-${dealt}`, p.x, p.y - 30, '#f87171');
     },
-    
+
     // Called when enemy is killed by player
     onEnemyKilled(enemy) {
         // Award score and XP
         if (this.state.player) {
             this.state.player.coins += enemy.score || 0;
             Player.addXP(this.state, enemy.xp || 0);
-            
+
             // Check achievements
             if (typeof Achievements !== 'undefined') {
                 Achievements.checkEnemyKill(this.state, enemy.enemyType);
             }
-            
+
             Particles.showFloatingText(this.state, `+${enemy.score} coins!`, enemy.x, enemy.y - 30, '#facc15');
             Particles.showFloatingText(this.state, `+${enemy.xp} XP`, enemy.x, enemy.y - 50, '#38bdf8');
         }
-        
+
+        // Sellable loot — seagulls & crabs drop meat, jumping fish drop
+        // their real species. Pick it up and sell it in the shop like fish.
+        if (!this.state.groundLoot) this.state.groundLoot = [];
+        let loot = null;
+        if (enemy.enemyType === 'seagull') {
+            loot = { id: 'seagull_meat', name: 'Seagull Meat', value: Math.max(15, enemy.score || 50), color: '#e2e8f0', rarity: 'common', size: 14 };
+        } else if (enemy.enemyType === 'beachCrab') {
+            loot = { id: 'crab_meat', name: 'Crab Meat', value: Math.max(20, enemy.score || 75), color: '#d97706', rarity: 'common', size: 16 };
+        } else if (enemy.enemyType === 'jumpingFish' && enemy.species) {
+            loot = enemy.species;
+        }
+        if (loot) {
+            this.state.groundLoot.push({ species: loot, x: enemy.x, y: enemy.y });
+            Particles.showFloatingText(this.state, `+1 ${loot.name}!`, enemy.x, enemy.y - 65, '#34d399');
+        }
+
         // Remove enemy
         this.state.enemies = this.state.enemies.filter(e => e !== enemy);
     }

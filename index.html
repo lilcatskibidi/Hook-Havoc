@@ -80,6 +80,7 @@
                     <div><span class="key">R</span> Reload</div>
                     <div><span class="key">ESC</span> Menu</div>
                     <div><span class="key">H</span> Heal</div>
+                    <div><span class="key">J</span> Index</div>
                 </div>
                 <div class="text-[10px] text-slate-400">Shoot hooked fish to weaken · Drag them to shore!</div>
             </div>
@@ -90,6 +91,10 @@
                 </button>
                 <button id="btn-audio" class="glass-panel hover:bg-slate-800/80 w-11 h-11 rounded-xl text-slate-300 hover:text-white transition-all flex items-center justify-center font-bold shadow-md hud-shadow">
                     <i id="audio-icon" class="fa-solid fa-volume-high"></i>
+                </button>
+                <button id="btn-open-index" class="glass-panel hover:bg-slate-800/80 px-4 py-2 rounded-xl text-fuchsia-400 hover:text-fuchsia-300 transition-all flex items-center gap-2 font-bold shadow-md hud-shadow border border-fuchsia-500/30" title="Fish Index (J)">
+                    <i class="fa-solid fa-book-open"></i>
+                    <span class="hidden sm:inline">Index</span>
                 </button>
                 <button id="btn-open-shop" class="glass-panel hover:bg-slate-800/80 px-4 py-2 rounded-xl text-amber-400 hover:text-amber-300 transition-all flex items-center gap-2 font-bold shadow-md hud-shadow border border-amber-500/30">
                     <i class="fa-solid fa-store"></i>
@@ -150,6 +155,15 @@
         </div>
 
         <div id="catch-popup-container" class="absolute top-1/3 left-1/2 -translate-x-1/2 pointer-events-none z-20 flex flex-col items-center gap-2"></div>
+
+        <!-- ================= MULTIPLAYER LOADING OVERLAY ================= -->
+        <div id="mp-loading-overlay" class="absolute inset-0 bg-slate-950/95 backdrop-blur-xl hidden items-center justify-center z-50 pointer-events-auto">
+            <div class="flex flex-col items-center gap-4 p-8">
+                <div class="w-16 h-16 rounded-full border-4 border-slate-700 border-t-sky-400 animate-spin"></div>
+                <div id="mp-loading-text" class="font-header text-2xl text-white font-bold tracking-wide">LOADING...</div>
+                <div id="mp-loading-sub" class="text-xs text-slate-400 font-bold">Syncing players</div>
+            </div>
+        </div>
 
         <!-- ================= MULTIPLAYER HUD (In-Game) ================= -->
         <div id="mp-hud" class="absolute top-4 left-4 glass-panel p-3 rounded-2xl shadow-xl border border-sky-500/30 hidden z-40 hud-shadow neon-glow w-72">
@@ -235,6 +249,43 @@
             </div>
         </div>
 
+        <!-- ================= FISH INDEX MODAL (In-Game) ================= -->
+        <div id="index-modal" class="absolute inset-0 bg-slate-950/90 backdrop-blur-lg flex items-center justify-center z-30 hidden pointer-events-auto p-3 sm:p-4">
+            <div class="glass-panel w-full max-w-3xl max-h-[92%] rounded-3xl flex flex-col overflow-hidden border border-fuchsia-500/30 shadow-2xl">
+                <div class="p-4 border-b border-slate-800/80 flex justify-between items-center bg-gradient-to-r from-fuchsia-900/40 to-slate-900/40">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-fuchsia-500/30 to-pink-600/20 text-fuchsia-400 flex items-center justify-center text-xl border border-fuchsia-500/30">
+                            <i class="fa-solid fa-book-open"></i>
+                        </div>
+                        <div>
+                            <h2 class="font-header text-xl text-white font-bold leading-none">FISH INDEX</h2>
+                            <p class="text-xs text-slate-400 mt-0.5"><span id="index-count-ingame" class="text-fuchsia-300 font-bold">0 / 0</span> discovered</p>
+                        </div>
+                    </div>
+                    <button id="btn-index-close" class="text-slate-400 hover:text-white p-2 text-2xl transition-all hover:rotate-90 duration-200">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                <div class="px-4 pt-3 flex gap-1 flex-wrap">
+                    <button class="index-filter-btn active px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-fuchsia-500" data-filter="all">All</button>
+                    <button class="index-filter-btn px-3 py-1.5 rounded-lg text-xs font-bold text-slate-300 bg-slate-800/50 border border-slate-700" data-filter="common">Common</button>
+                    <button class="index-filter-btn px-3 py-1.5 rounded-lg text-xs font-bold text-sky-300 bg-slate-800/50 border border-sky-500/30" data-filter="rare">Rare</button>
+                    <button class="index-filter-btn px-3 py-1.5 rounded-lg text-xs font-bold text-fuchsia-300 bg-slate-800/50 border border-fuchsia-500/30" data-filter="epic">Epic</button>
+                    <button class="index-filter-btn px-3 py-1.5 rounded-lg text-xs font-bold text-amber-300 bg-slate-800/50 border border-amber-500/30" data-filter="legendary">Legendary</button>
+                    <button class="index-filter-btn px-3 py-1.5 rounded-lg text-xs font-bold text-yellow-300 bg-slate-800/50 border border-yellow-500/30" data-filter="mythic">Mythic</button>
+                </div>
+                <div class="p-4 overflow-y-auto">
+                    <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden mb-3">
+                        <div id="index-progress-ingame" class="h-full bg-gradient-to-r from-fuchsia-500 to-pink-500 transition-all duration-500" style="width: 0%;"></div>
+                    </div>
+                    <div id="index-grid-ingame" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3"></div>
+                </div>
+                <div class="p-3 border-t border-slate-800/80 bg-slate-900/60 text-center text-[10px] text-slate-500 font-bold tracking-widest">
+                    PRESS <span class="key">J</span> OR <span class="key">ESC</span> TO CLOSE
+                </div>
+            </div>
+        </div>
+
         <!-- ================= CASINO MODAL ================= -->
         <div id="casino-modal" class="absolute inset-0 bg-slate-950/95 backdrop-blur-lg flex items-center justify-center z-30 hidden pointer-events-auto p-3 sm:p-4">
             <div class="glass-panel w-full max-w-4xl h-[90%] rounded-3xl flex flex-col overflow-hidden border border-fuchsia-500/30 shadow-2xl neon-glow-fuchsia">
@@ -269,14 +320,28 @@
                     <button id="casino-tab-highlow" class="casino-tab-btn py-3 px-4 font-bold text-sm text-slate-400">High-Low</button>
                 </div>
                 <div id="casino-content" class="flex-1 overflow-y-auto p-4 space-y-4"></div>
-                <div id="casino-footer" class="p-4 border-t border-slate-800/80 bg-slate-900/80 flex justify-between items-center">
+                <div id="casino-footer" class="p-4 border-t border-slate-800/80 bg-slate-900/80 flex justify-between items-center gap-2 flex-wrap">
                     <div class="text-xs text-slate-400">
                         <span class="block">Tokens: <span id="casino-tokens-footer" class="text-fuchsia-300 font-bold">0</span></span>
-                        <span class="block">House Edge: 2.7%</span>
+                        <span class="block">Cashout rate: 1T = 80c</span>
                     </div>
-                    <button id="casino-buy-tokens" class="px-4 py-2 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 font-bold rounded-xl transition-all">
-                        <i class="fa-solid fa-coins mr-1"></i> Buy Tokens (100c = 1T)
-                    </button>
+                    <div class="flex gap-2 flex-wrap">
+                        <button id="casino-buy-tokens" class="px-3 py-2 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 text-xs font-black rounded-xl transition-all">
+                            +1T (100c)
+                        </button>
+                        <button id="casino-buy-tokens-10" class="px-3 py-2 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 text-xs font-black rounded-xl transition-all">
+                            +10T (1k)
+                        </button>
+                        <button id="casino-buy-tokens-100" class="px-3 py-2 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 text-xs font-black rounded-xl transition-all">
+                            +100T (10k)
+                        </button>
+                        <button id="casino-free-tokens" class="px-3 py-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 text-xs font-black rounded-xl transition-all">
+                            +5 FREE (60s)
+                        </button>
+                        <button id="casino-cashout" class="px-3 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-black rounded-xl transition-all">
+                            <i class="fa-solid fa-sack-dollar mr-1"></i> Cashout <span id="casino-cashout-label">0T → 0c</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -383,6 +448,11 @@
                         </div>
                         <div id="mp-lobby-status" class="text-sm font-bold text-sky-400 min-h-[1.25rem]">Creating room...</div>
                     </div>
+
+                    <div class="glass-panel-light p-3 rounded-xl">
+                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-2">PLAYERS <span id="mp-lobby-count" class="text-sky-300">1 / 4</span></div>
+                        <div id="mp-lobby-players" class="flex flex-col gap-1.5"></div>
+                    </div>
                     
                     <div class="flex gap-2">
                         <button id="btn-start-mp" class="menu-btn flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 disabled:opacity-50" disabled>
@@ -391,7 +461,7 @@
                     </div>
                     
                     <div class="text-center text-[10px] text-slate-500 pt-2 border-t border-slate-800">
-                        <p>Host shares the room code · Max 2 players · LAN only</p>
+                        <p>Host shares the room code · Max 4 players · LAN only</p>
                         <p class="mt-1">Both computers must be on the same network</p>
                     </div>
                 </div>
@@ -457,7 +527,7 @@
                 </div>
 
                 <!-- Achievements Panel -->
-                <div id="mp-panel-achievements" class="mp-panel p-4 hidden flex flex-col">
+                <div id="mp-panel-achievements" class="mp-panel p-4 hidden flex-col achievements-scroll">
                     <div class="flex items-center justify-between mb-4 flex-shrink-0">
                         <h3 class="text-lg font-bold text-fuchsia-300 flex items-center gap-2">
                             <i class="fa-solid fa-trophy"></i> ACHIEVEMENTS
@@ -466,7 +536,7 @@
                             <i class="fa-solid fa-arrow-left mr-1"></i> Back
                         </button>
                     </div>
-                    <div id="achievements-container" class="flex-1 overflow-y-auto pr-1"></div>
+                    <div id="achievements-container" class="achievements-scroll-body"></div>
                 </div>
 
                 <div class="p-3 border-t border-slate-800/80 bg-slate-900/60 text-center text-[10px] text-slate-500 font-bold tracking-widest">
@@ -490,6 +560,7 @@
     <script src="js/save.js"></script>
     <script src="js/player.js"></script>
     <script src="js/shop.js"></script>
+    <script src="js/anticheat.js"></script>
     <script src="js/multiplayer.js"></script>
     <script src="js/casino.js"></script>
     <script src="js/enemies.js"></script>
