@@ -66,6 +66,8 @@ const Shop = {
         else if (tab === 'weapons') this.renderWeapons(state, content);
         else if (tab === 'rods')    this.renderRods(state, content);
         else if (tab === 'ammo')    this.renderAmmo(state, content);
+        else if (tab === 'casino')  this.renderCasinoTab(state, content);
+        else if (tab === 'beach')   this.renderBeachTab(state, content);
     },
 
     renderSell(state, content) {
@@ -408,5 +410,85 @@ const Shop = {
                 this.renderTab(state, 'ammo');
             };
         });
+    },
+
+    renderCasinoTab(state, content) {
+        content.innerHTML = `
+            <div class="glass-panel-light p-4 rounded-xl text-center">
+                <div class="w-16 h-16 mx-auto mb-3 rounded-2xl flex items-center justify-center" style="background: linear-gradient(135deg, #f0abfc, #d946ef);">
+                    <i class="fa-solid fa-dice-d6 text-3xl text-white"></i>
+                </div>
+                <h3 class="font-bold text-fuchsia-300 text-lg mb-2">Deep Sea Casino</h3>
+                <p class="text-slate-400 text-sm mb-4">Gamble your tokens for big rewards. The house edge is 2.7%.</p>
+                <div class="flex gap-2 mb-4">
+                    <div class="flex-1 glass-panel p-3 rounded-xl">
+                        <div class="text-2xl font-bold text-amber-300">${state.player.casinoTokens || 0}</div>
+                        <div class="text-xs text-slate-400">Tokens</div>
+                    </div>
+                    <div class="flex-1 glass-panel p-3 rounded-xl">
+                        <div class="text-2xl font-bold text-fuchsia-300">${state.player.casinoLifetimeWinnings || 0}</div>
+                        <div class="text-xs text-slate-400">Lifetime Won</div>
+                    </div>
+                </div>
+                <button id="btn-open-casino-from-shop" class="w-full px-4 py-3 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 font-black rounded-xl transition-all shadow-lg">
+                    <i class="fa-solid fa-dice mr-2"></i> OPEN CASINO
+                </button>
+                <p class="text-xs text-slate-500 mt-2">Also accessible from Beach Shop when near shore</p>
+            </div>
+        `;
+        
+        const btn = document.getElementById('btn-open-casino-from-shop');
+        if (btn) btn.onclick = () => {
+            if (typeof Casino !== 'undefined') Casino.open();
+            document.getElementById('shop-modal').classList.add('hidden');
+        };
+    },
+
+    renderBeachTab(state, content) {
+        const nearShore = state.player.x >= state.waterBoundaryX - 100;
+        const canAccess = nearShore || state.player.beachShopUnlocked;
+        
+        content.innerHTML = `
+            <div class="glass-panel-light p-4 rounded-xl text-center">
+                <div class="w-16 h-16 mx-auto mb-3 rounded-2xl flex items-center justify-center" style="background: linear-gradient(135deg, #fbbf24, #f59e0b);">
+                    <i class="fa-solid fa-umbrella-beach text-3xl text-white"></i>
+                </div>
+                <h3 class="font-bold text-amber-300 text-lg mb-2">Beach Shop</h3>
+                <p class="text-slate-400 text-sm mb-4">
+                    ${canAccess ? 'Welcome to the beach shop!' : 'Walk to the shoreline to access the beach shop.'}
+                </p>
+                
+                ${!canAccess ? `
+                    <div class="glass-panel p-4 rounded-xl mb-4">
+                        <i class="fa-solid fa-location-arrow text-2xl text-sky-400 mb-2"></i>
+                        <p class="text-slate-300">Distance to shore: ${Math.max(0, Math.round(state.waterBoundaryX - state.player.x))}m</p>
+                        <p class="text-xs text-slate-500 mt-1">Move closer to the water to unlock beach shop</p>
+                    </div>
+                ` : ''}
+                
+                <div class="space-y-2">
+                    <button class="w-full px-4 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl transition-all ${!canAccess ? 'opacity-50 cursor-not-allowed' : ''}" ${!canAccess ? 'disabled' : ''} onclick="if(typeof Casino!=='undefined'){Casino.open();document.getElementById('shop-modal').classList.add('hidden');}">
+                        <i class="fa-solid fa-dice mr-2"></i> Open Casino
+                    </button>
+                    <button class="w-full px-4 py-3 bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-400 hover:to-sky-500 text-white font-black rounded-xl transition-all ${!canAccess ? 'opacity-50 cursor-not-allowed' : ''}" ${!canAccess ? 'disabled' : ''}>
+                        <i class="fa-solid fa-fish-fins mr-2"></i> Buy Bait (+5% catch rate, 500c)
+                    </button>
+                    <button class="w-full px-4 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black rounded-xl transition-all ${!canAccess ? 'opacity-50 cursor-not-allowed' : ''}" ${!canAccess ? 'disabled' : ''}>
+                        <i class="fa-solid fa-shield-halved mr-2"></i> Rent Beach Umbrella (Safe zone, 1000c)
+                    </button>
+                    <button class="w-full px-4 py-3 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 font-black rounded-xl transition-all ${!canAccess ? 'opacity-50 cursor-not-allowed' : ''}" ${!canAccess ? 'disabled' : ''}>
+                        <i class="fa-solid fa-gem mr-2"></i> Appraise Catch (Reveal rarity, 200c)
+                    </button>
+                </div>
+                
+                <p class="text-xs text-slate-500 mt-4">Beach shop unlocks permanently after first visit</p>
+            </div>
+        `;
+        
+        if (nearShore && !state.player.beachShopUnlocked) {
+            state.player.beachShopUnlocked = true;
+            if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+            Particles.showFloatingText(state, 'Beach Shop Unlocked!', state.player.x, state.player.y - 50, '#facc15');
+        }
     }
 };
