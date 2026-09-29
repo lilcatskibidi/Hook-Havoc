@@ -15,6 +15,7 @@ const Render = {
         this.drawBobber(state, ctx);
         this.drawHookedFish(state, ctx);
         this.drawLandMonsters(state, ctx);
+        this.drawEnemies(state, ctx);
         this.drawBullets(state, ctx);
         this.drawPlayer(state, ctx);
         this.drawParticles(state, ctx);
@@ -774,6 +775,42 @@ const Render = {
         const g = (n >> 8) & 255;
         const b = n & 255;
         return `rgba(${r},${g},${b},${alpha})`;
+    },
+
+    // ============================================================
+    //  ENEMY RENDERING (Seagulls, Jumping Fish, Beach Crabs)
+    // ============================================================
+    drawEnemies(state, ctx) {
+        if (!state.enemies) return;
+        state.enemies.forEach(e => {
+            if (e.enemyType === 'seagull' && typeof renderSeagull === 'function') {
+                renderSeagull(ctx, e);
+            } else if (e.enemyType === 'jumpingFish' && typeof renderJumpingFish === 'function') {
+                renderJumpingFish(ctx, e);
+            } else if (e.enemyType === 'beachCrab' && typeof renderBeachCrab === 'function') {
+                renderBeachCrab(ctx, e);
+            }
+            
+            // Health bar for enemies
+            if (e.maxHp && e.hp < e.maxHp) {
+                const barW = 40;
+                ctx.fillStyle = 'rgba(15,23,42,0.9)';
+                ctx.fillRect(e.x - barW / 2, e.y - 30, barW, 5);
+                ctx.fillStyle = '#ef4444';
+                ctx.fillRect(e.x - barW / 2, e.y - 30, (e.hp / e.maxHp) * barW, 5);
+            }
+            
+            // Enemy type label
+            ctx.font = 'bold 9px Work Sans';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#fbbf24';
+            ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+            ctx.lineWidth = 2;
+            const label = e.enemyType === 'seagull' ? 'Seagull' : 
+                         e.enemyType === 'jumpingFish' ? 'Jumping Fish' : 'Beach Crab';
+            ctx.strokeText(label, e.x, e.y - 35);
+            ctx.fillText(label, e.x, e.y - 35);
+        });
     },
 
     drawBullets(state, ctx) {

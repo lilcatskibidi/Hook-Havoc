@@ -9,13 +9,11 @@ const RARITY_LABELS = {
 const Shop = {
     init(state) {
         const modal = document.getElementById('shop-modal');
-        const mpHud = document.getElementById('mp-hud');
 
         document.getElementById('btn-open-shop').onclick = () => {
             try { audio.playUIClick(); } catch (e) {}
             this.renderTab(state, 'sell');
             modal.classList.remove('hidden');
-            if (mpHud) mpHud.classList.add('hidden'); // Hide MP HUD when shop opens
             Player.refreshHUD(state);
         };
 
@@ -23,9 +21,6 @@ const Shop = {
             b.onclick = () => {
                 try { audio.playUIClick(); } catch (e) {}
                 modal.classList.add('hidden');
-                if (mpHud && state.multiplayer && state.multiplayer.isConnected) {
-                    mpHud.classList.remove('hidden'); // Show MP HUD when shop closes
-                }
             };
         });
 
@@ -65,10 +60,7 @@ const Shop = {
         if (tab === 'sell')         this.renderSell(state, content);
         else if (tab === 'weapons') this.renderWeapons(state, content);
         else if (tab === 'rods')    this.renderRods(state, content);
-        else if (tab === 'armor')   this.renderArmorTab(state, content);
         else if (tab === 'ammo')    this.renderAmmo(state, content);
-        else if (tab === 'casino')  this.renderCasinoTab(state, content);
-        else if (tab === 'beach')   this.renderBeachTab(state, content);
     },
 
     renderSell(state, content) {
@@ -411,181 +403,5 @@ const Shop = {
                 this.renderTab(state, 'ammo');
             };
         });
-    },
-
-    renderCasinoTab(state, content) {
-        content.innerHTML = `
-            <div class="glass-panel-light p-4 rounded-xl text-center">
-                <div class="w-16 h-16 mx-auto mb-3 rounded-2xl flex items-center justify-center" style="background: linear-gradient(135deg, #f0abfc, #d946ef);">
-                    <i class="fa-solid fa-dice-d6 text-3xl text-white"></i>
-                </div>
-                <h3 class="font-bold text-fuchsia-300 text-lg mb-2">Deep Sea Casino</h3>
-                <p class="text-slate-400 text-sm mb-4">Gamble your tokens for big rewards. The house edge is 2.7%.</p>
-                <div class="flex gap-2 mb-4">
-                    <div class="flex-1 glass-panel p-3 rounded-xl">
-                        <div class="text-2xl font-bold text-amber-300">${state.player.casinoTokens || 0}</div>
-                        <div class="text-xs text-slate-400">Tokens</div>
-                    </div>
-                    <div class="flex-1 glass-panel p-3 rounded-xl">
-                        <div class="text-2xl font-bold text-fuchsia-300">${state.player.casinoLifetimeWinnings || 0}</div>
-                        <div class="text-xs text-slate-400">Lifetime Won</div>
-                    </div>
-                </div>
-                <button id="btn-open-casino-from-shop" class="w-full px-4 py-3 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 font-black rounded-xl transition-all shadow-lg">
-                    <i class="fa-solid fa-dice mr-2"></i> OPEN CASINO
-                </button>
-                <p class="text-xs text-slate-500 mt-2">Also accessible from Beach Shop when near shore</p>
-            </div>
-        `;
-        
-        const btn = document.getElementById('btn-open-casino-from-shop');
-        if (btn) btn.onclick = () => {
-            if (typeof Casino !== 'undefined') Casino.open();
-            document.getElementById('shop-modal').classList.add('hidden');
-        };
-    },
-
-    renderBeachTab(state, content) {
-        const nearShore = state.player.x >= state.waterBoundaryX - 100;
-        const canAccess = nearShore || state.player.beachShopUnlocked;
-        
-        content.innerHTML = `
-            <div class="glass-panel-light p-4 rounded-xl text-center">
-                <div class="w-16 h-16 mx-auto mb-3 rounded-2xl flex items-center justify-center" style="background: linear-gradient(135deg, #fbbf24, #f59e0b);">
-                    <i class="fa-solid fa-umbrella-beach text-3xl text-white"></i>
-                </div>
-                <h3 class="font-bold text-amber-300 text-lg mb-2">Beach Shop</h3>
-                <p class="text-slate-400 text-sm mb-4">
-                    ${canAccess ? 'Welcome to the beach shop!' : 'Walk to the shoreline to access the beach shop.'}
-                </p>
-                
-                ${!canAccess ? `
-                    <div class="glass-panel p-4 rounded-xl mb-4">
-                        <i class="fa-solid fa-location-arrow text-2xl text-sky-400 mb-2"></i>
-                        <p class="text-slate-300">Distance to shore: ${Math.max(0, Math.round(state.waterBoundaryX - state.player.x))}m</p>
-                        <p class="text-xs text-slate-500 mt-1">Move closer to the water to unlock beach shop</p>
-                    </div>
-                ` : ''}
-                
-                <div class="space-y-2">
-                    <button class="w-full px-4 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl transition-all ${!canAccess ? 'opacity-50 cursor-not-allowed' : ''}" ${!canAccess ? 'disabled' : ''} onclick="if(typeof Casino!=='undefined'){Casino.open();document.getElementById('shop-modal').classList.add('hidden');}">
-                        <i class="fa-solid fa-dice mr-2"></i> Open Casino
-                    </button>
-                    <button class="w-full px-4 py-3 bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-400 hover:to-sky-500 text-white font-black rounded-xl transition-all ${!canAccess ? 'opacity-50 cursor-not-allowed' : ''}" ${!canAccess ? 'disabled' : ''}>
-                        <i class="fa-solid fa-fish-fins mr-2"></i> Buy Bait (+5% catch rate, 500c)
-                    </button>
-                    <button class="w-full px-4 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black rounded-xl transition-all ${!canAccess ? 'opacity-50 cursor-not-allowed' : ''}" ${!canAccess ? 'disabled' : ''}>
-                        <i class="fa-solid fa-shield-halved mr-2"></i> Rent Beach Umbrella (Safe zone, 1000c)
-                    </button>
-                    <button class="w-full px-4 py-3 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 font-black rounded-xl transition-all ${!canAccess ? 'opacity-50 cursor-not-allowed' : ''}" ${!canAccess ? 'disabled' : ''}>
-                        <i class="fa-solid fa-gem mr-2"></i> Appraise Catch (Reveal rarity, 200c)
-                    </button>
-                </div>
-                
-                <p class="text-xs text-slate-500 mt-4">Beach shop unlocks permanently after first visit</p>
-            </div>
-        `;
-        
-        if (nearShore && !state.player.beachShopUnlocked) {
-            state.player.beachShopUnlocked = true;
-            if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
-            Particles.showFloatingText(state, 'Beach Shop Unlocked!', state.player.x, state.player.y - 50, '#facc15');
-        }
-    },
-
-    renderArmorTab(state, content) {
-        const p = state.player;
-        if (!p.equippedArmor) p.equippedArmor = {};
-        if (!p.ownedArmor) p.ownedArmor = ['vest_light'];
-
-        const armorItems = ARMOR.filter(a => a.type !== 'set');
-        const sets = ARMOR.filter(a => a.type === 'set');
-
-        // Equipped armor display
-        let equippedHTML = '<div class="glass-panel-light p-3 rounded-xl mb-4"><h4 class="font-bold text-emerald-300 mb-2 flex items-center gap-2"><i class="fa-solid fa-shirt"></i> Equipped</h4><div class="grid grid-cols-2 sm:grid-cols-4 gap-2">';
-        const slots = ['head', 'chest', 'hands', 'feet'];
-        slots.forEach(slot => {
-            const equipped = p.equippedArmor[slot];
-            const item = equipped ? ARMOR.find(a => a.id === equipped) : null;
-            equippedHTML += `
-                <div class="glass-panel p-2 rounded-xl text-center ${item ? '' : 'opacity-40'}">
-                    <div class="w-10 h-10 mx-auto mb-1 rounded-lg flex items-center justify-center" style="background: ${item ? item.color + '20' : '#1e293b'}; border: 1px solid ${item ? item.color : '#374151'}">
-                        ${item ? `<i class="fa-solid fa-${item.type === 'head' ? 'helmet' : item.type === 'chest' ? 'vest' : item.type === 'hands' ? 'hand-fist' : 'shoe-prints'} text-lg" style="color: ${item.color}"></i>` : `<span class="text-xs text-slate-500">${slot.charAt(0).toUpperCase() + slot.slice(1)}</span>`}
-                    </div>
-                    <div class="text-[9px] font-bold ${item ? 'text-white' : 'text-slate-500'}">${item ? item.name : 'Empty'}</div>
-                    ${item ? `<div class="text-[8px] text-emerald-400">DEF +${item.defense || 0}</div>` : ''}
-                </div>
-            `;
-        });
-        equippedHTML += '</div></div>';
-        content.innerHTML = equippedHTML;
-
-        // Armor list
-        const categories = {
-            'Light': armorItems.filter(a => a.weight === 'Light'),
-            'Medium': armorItems.filter(a => a.weight === 'Medium'),
-            'Heavy': armorItems.filter(a => a.weight === 'Heavy'),
-            'Legendary': armorItems.filter(a => a.rarity === 'legendary'),
-            'Mythic': [...armorItems.filter(a => a.rarity === 'mythic'), ...sets],
-        };
-
-        for (const [cat, items] of Object.entries(categories)) {
-            if (items.length === 0) continue;
-            const catEl = document.createElement('div');
-            catEl.className = 'glass-panel-light p-3 rounded-xl mb-4';
-            catEl.innerHTML = `
-                <h4 class="font-bold text-emerald-300 mb-2 flex items-center gap-2"><i class="fa-solid fa-shield"></i> ${cat} Armor</h4>
-                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2" id="armor-cat-${cat.toLowerCase()}"></div>
-            `;
-            content.appendChild(catEl);
-            
-            const catContainer = document.getElementById(`armor-cat-${cat.toLowerCase()}`);
-            items.forEach(item => {
-                const isOwned = p.ownedArmor.includes(item.id);
-                const isEquipped = Object.values(p.equippedArmor).includes(item.id);
-                const canAfford = p.coins >= item.price;
-                
-                const div = document.createElement('div');
-                div.className = `shop-item glass-panel p-3 rounded-xl flex items-center justify-between rarity-${item.rarity} ${isOwned ? 'border-emerald-500/40' : ''} ${isEquipped ? 'ring-2 ring-emerald-400' : ''}`;
-                div.innerHTML = `
-                    <div class="flex items-center gap-3 flex-1 min-w-0">
-                        <div class="w-12 h-12 rounded-xl flex items-center justify-center shrink-0" style="background:${item.color}20;border:1px solid ${item.color}60">
-                            <i class="fa-solid fa-${item.type === 'head' ? 'helmet' : item.type === 'chest' ? 'vest' : item.type === 'hands' ? 'hand-fist' : 'shoe-prints'} text-lg" style="color:${item.color}"></i>
-                        </div>
-                        <div>
-                            <div class="flex items-center gap-2">
-                                <h3 class="font-bold text-white text-sm truncate">${item.name}</h3>
-                                <span class="text-[10px] font-black px-1.5 py-0.5 rounded" style="background:${RARITY_LABELS[item.rarity]?.color || '#94a3b8'}20;color:${RARITY_LABELS[item.rarity]?.color || '#94a3b8'}">${RARITY_LABELS[item.rarity]?.label || item.rarity.toUpperCase()}</span>
-                                ${isEquipped ? '<span class="text-[10px] text-emerald-400 font-bold px-1.5 py-0.5 rounded bg-emerald-500/20">EQUIPPED</span>' : ''}
-                            </div>
-                            <p class="text-xs text-slate-400 mt-0.5 truncate">${item.desc}</p>
-                            <div class="flex gap-3 mt-1 text-[10px] font-bold">
-                                <span class="text-rose-400"><i class="fa-solid fa-shield mr-1"></i>DEF +${item.defense || 0}</span>
-                                ${item.hpBonus ? `<span class="text-red-400"><i class="fa-solid fa-heart mr-1"></i>HP +${item.hpBonus}</span>` : ''}
-                                ${item.speedBonus ? `<span class="text-sky-400"><i class="fa-solid fa-bolt mr-1"></i>SPD +${item.speedBonus}</span>` : ''}
-                                ${item.speedPenalty ? `<span class="text-amber-400"><i class="fa-solid fa-weight-hanging mr-1"></i>SPD -${item.speedPenalty}</span>` : ''}
-                                ${item.luckBonus ? `<span class="text-fuchsia-400"><i class="fa-solid fa-clover mr-1"></i>Luck +${Math.round(item.luckBonus*100)}%</span>` : ''}
-                                ${item.reelPowerBonus ? `<span class="text-emerald-400"><i class="fa-solid fa-fish-fins mr-1"></i>Reel +${item.reelPowerBonus}</span>` : ''}
-                                ${item.meleeDamageBonus ? `<span class="text-orange-400"><i class="fa-solid fa-fist-raised mr-1"></i>Melee +${item.meleeDamageBonus}%</span>` : ''}
-                                ${item.damageReflect ? `<span class="text-fuchsia-400"><i class="fa-solid fa-shield-alt mr-1"></i>Reflect ${Math.round(item.damageReflect*100)}%</span>` : ''}
-                                ${item.anchorBonus ? `<span class="text-amber-300"><i class="fa-solid fa-anchor mr-1"></i>Unmovable</span>` : ''}
-                                ${item.waterWalk ? `<span class="text-sky-300"><i class="fa-solid fa-water mr-1"></i>Water Walk</span>` : ''}
-                                ${item.sonarRange ? `<span class="text-cyan-300"><i class="fa-solid fa-satellite mr-1"></i>Sonar ${item.sonarRange}m</span>` : ''}
-                                ${item.fullSetBonus ? `<span class="text-yellow-300"><i class="fa-solid fa-crown mr-1"></i>Set: Regen ${item.fullSetBonus.hpRegen}/s, DR ${Math.round(item.fullSetBonus.damageReduction*100)}%, Fear</span>` : ''}
-                            </div>
-                        </div>
-                    </div>
-                    <div class="shrink-0 flex flex-col items-end gap-1">
-                        ${isEquipped 
-                            ? `<span class="text-xs text-emerald-400 font-bold px-2 py-1 bg-emerald-500/20 rounded">EQUIPPED</span>`
-                            : isOwned
-                                ? `<button data-equip-armor="${item.id}" class="px-3 py-1.5 bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-black rounded-lg">EQUIP</button>`
-                                : `<button data-buy-armor="${item.id}" class="btn-buy px-3 py-1.5 text-slate-950 text-xs font-black rounded-lg" ${p.coins < item.price ? 'disabled' : ''}>${item.price.toLocaleString()} C</button>`
-                        }
-                    </div>
-                `;
-                catContainer.appendChild(div);
-            });
-        }
     }
 };

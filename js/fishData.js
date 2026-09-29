@@ -1430,6 +1430,451 @@ const FISH_SPECIES = [
         desc: 'Ancient progenitor of all krakens. Ten miles of tentacle.',
         skills: ['summonVoidlings', 'tidalCrush', 'voidCollapse', 'cosmicStorm', 'supernova', 'tsunami', 'gravitationalPull'], skillName: 'Primordial Tide / Void Ascension',
         image: 'kraken_prime'
+    },
+
+    // ============================================================
+    //  EXPANDED FISH SPECIES (80+ Additional Species for 135+ Total)
+    // ============================================================
+    // COMMON (15 more)
+    {
+        id: 'pilchard', name: 'Pilchard', color: '#cbd5e1', accent: '#94a3b8',
+        size: 11, maxHp: 110, staminaMax: 90, attack: 11, speed: 5.3,
+        value: 55, rarity: 'common', shape: 'oval', finColor: '#64748b',
+        desc: 'Silvery bait fish. Travels in massive schools.',
+        skills: ['dart', 'waterJet'], skillName: 'School Dash',
+        image: 'pilchard'
+    },
+    {
+        id: 'sprat', name: 'European Sprat', color: '#e2e8f0', accent: '#cbd5e1',
+        size: 9, maxHp: 85, staminaMax: 70, attack: 9, speed: 5.8,
+        value: 40, rarity: 'common', shape: 'oval', finColor: '#94a3b8',
+        desc: 'Tiny and oily. Favorite food of larger predators.',
+        skills: ['dart'], skillName: 'Micro Dart',
+        image: 'sprat'
+    },
+    {
+        id: 'herring', name: 'Atlantic Herring', color: '#94a3b8', accent: '#64748b',
+        size: 13, maxHp: 130, staminaMax: 110, attack: 13, speed: 5.0,
+        value: 65, rarity: 'common', shape: 'oval', finColor: '#475569',
+        desc: 'Keystone species. Shimmers like living mercury.',
+        skills: ['dart', 'blink'], skillName: 'Mirror Flash',
+        image: 'herring'
+    },
+    {
+        id: 'mackerel', name: 'Chub Mackerel', color: '#475569', accent: '#334155',
+        size: 18, maxHp: 170, staminaMax: 140, attack: 18, speed: 4.5,
+        value: 85, rarity: 'common', shape: 'oval', finColor: '#1e293b',
+        desc: 'Tiger-striped speedster. Fights hard for its size.',
+        skills: ['waterJet', 'rage'], skillName: 'Striped Fury',
+        image: 'mackerel'
+    },
+    {
+        id: 'sandeel', name: 'Lesser Sandeel', color: '#fde68a', accent: '#fcd34d',
+        size: 10, maxHp: 90, staminaMax: 75, attack: 10, speed: 4.8,
+        value: 48, rarity: 'common', shape: 'eel', finColor: '#f59e0b',
+        desc: 'Burrows in sand. Pops out to strike.',
+        skills: ['blink', 'dart'], skillName: 'Sand Burst',
+        image: 'sandeel'
+    },
+    {
+        id: 'garfish', name: 'Garfish', color: '#67e8f9', accent: '#22d3ee',
+        size: 20, maxHp: 160, staminaMax: 130, attack: 20, speed: 5.2,
+        value: 90, rarity: 'common', shape: 'eel', finColor: '#0891b2',
+        desc: 'Needle-nose surface dweller. Jumps when hooked.',
+        skills: ['charge', 'blink'], skillName: 'Surface Skip',
+        image: 'garfish'
+    },
+    {
+        id: 'pipefish', name: 'Straight-nosed Pipefish', color: '#86efac', accent: '#4ade80',
+        size: 12, maxHp: 100, staminaMax: 85, attack: 11, speed: 3.2,
+        value: 52, rarity: 'common', shape: 'eel', finColor: '#22c55e',
+        desc: 'Seahorse cousin. Camouflages in seagrass.',
+        skills: ['camouflaged', 'dart'], skillName: 'Grass Hide',
+        image: 'pipefish'
+    },
+    {
+        id: 'goby', name: 'Sand Goby', color: '#a8a29e', accent: '#78716c',
+        size: 8, maxHp: 75, staminaMax: 60, attack: 8, speed: 3.5,
+        value: 35, rarity: 'common', shape: 'oval', finColor: '#57534e',
+        desc: 'Bottom-hugging. Darts between rocks.',
+        skills: ['blink', 'mudSlime'], skillName: 'Rock Dart',
+        image: 'goby'
+    },
+    {
+        id: 'blenny', name: 'Tompot Blenny', color: '#d6d3d1', accent: '#a8a29e',
+        size: 9, maxHp: 85, staminaMax: 70, attack: 10, speed: 3.0,
+        value: 42, rarity: 'common', shape: 'oval', finColor: '#78716c',
+        desc: 'Curious rock-dweller. Watches anglers.',
+        skills: ['poisonSpit', 'dart'], skillName: 'Venom Nip',
+        image: 'blenny'
+    },
+    {
+        id: 'dragonet', name: 'Common Dragonet', color: '#fef08a', accent: '#fde047',
+        size: 11, maxHp: 105, staminaMax: 85, attack: 12, speed: 3.8,
+        value: 58, rarity: 'common', shape: 'spiky', finColor: '#facc15',
+        desc: 'Ornate fins. Walks on pectoral fins.',
+        skills: ['flashBang', 'mudSlime'], skillName: 'Fin Display',
+        image: 'dragonet'
+    },
+    {
+        id: 'weever', name: 'Lesser Weever', color: '#9ca3af', accent: '#6b7280',
+        size: 14, maxHp: 140, staminaMax: 110, attack: 18, speed: 4.0,
+        value: 72, rarity: 'common', shape: 'spiky', finColor: '#4b5563',
+        desc: 'Venomous dorsal spines. Buries in sand.',
+        skills: ['poisonSpit', 'camouflaged'], skillName: 'Sting Trap',
+        image: 'weever'
+    },
+    {
+        id: 'scorpionfish', name: 'Small Scorpionfish', color: '#d97706', accent: '#b45309',
+        size: 15, maxHp: 150, staminaMax: 120, attack: 20, speed: 2.8,
+        value: 78, rarity: 'common', shape: 'spiky', finColor: '#92400e',
+        desc: 'Master of disguise. Venomous spines.',
+        skills: ['camouflaged', 'poisonSpit', 'inflate'], skillName: 'Stonefish Mimic',
+        image: 'scorpionfish'
+    },
+    {
+        id: 'flatfish', name: 'European Flounder', color: '#a16207', accent: '#854d0e',
+        size: 16, maxHp: 180, staminaMax: 130, attack: 15, speed: 3.0,
+        value: 82, rarity: 'common', shape: 'oval', finColor: '#78350f',
+        desc: 'Flattened ambush predator. Both eyes on one side.',
+        skills: ['camouflaged', 'mudSlime'], skillName: 'Bottom Blend',
+        image: 'flatfish'
+    },
+    {
+        id: 'sole', name: 'Common Sole', color: '#78350f', accent: '#5c2a0d',
+        size: 18, maxHp: 200, staminaMax: 150, attack: 16, speed: 2.5,
+        value: 95, rarity: 'common', shape: 'oval', finColor: '#451a03',
+        desc: 'Nocturnal hunter. Incredibly well camouflaged.',
+        skills: ['camouflaged', 'blink'], skillName: 'Night Stalker',
+        image: 'sole'
+    },
+    {
+        id: 'plaice', name: 'European Plaice', color: '#92400e', accent: '#78350f',
+        size: 17, maxHp: 190, staminaMax: 140, attack: 17, speed: 2.8,
+        value: 88, rarity: 'common', shape: 'oval', finColor: '#5c2a0d',
+        desc: 'Orange-spotted flatfish. Tasty but tricky.',
+        skills: ['camouflaged', 'waterJet'], skillName: 'Spot Flash',
+        image: 'plaice'
+    },
+
+    // RARE (12 more)
+    {
+        id: 'tuna_skipjack', name: 'Skipjack Tuna', color: '#1e293b', accent: '#0f172a',
+        size: 30, maxHp: 650, staminaMax: 400, attack: 65, speed: 6.5,
+        value: 750, rarity: 'rare', shape: 'oval', finColor: '#020617',
+        desc: 'Tropical speedster. Schools with dolphins.',
+        skills: ['charge', 'dart', 'waterJet'], skillName: 'Purse Seine Dash',
+        image: 'tuna_skipjack'
+    },
+    {
+        id: 'tuna_albacore', name: 'Albacore Tuna', color: '#334155', accent: '#1e293b',
+        size: 35, maxHp: 800, staminaMax: 500, attack: 72, speed: 6.0,
+        value: 900, rarity: 'rare', shape: 'oval', finColor: '#0f172a',
+        desc: 'Long pectoral fins. "Chicken of the sea."',
+        skills: ['charge', 'blink', 'waterJet'], skillName: 'Longfin Sprint',
+        image: 'tuna_albacore'
+    },
+    {
+        id: 'bonito', name: 'Atlantic Bonito', color: '#475569', accent: '#334155',
+        size: 28, maxHp: 580, staminaMax: 350, attack: 60, speed: 6.2,
+        value: 680, rarity: 'rare', shape: 'oval', finColor: '#1e293b',
+        desc: 'Striped back. Ferocious feeder.',
+        skills: ['rage', 'charge', 'waterJet'], skillName: 'Striped Rage',
+        image: 'bonito'
+    },
+    {
+        id: 'little_tunny', name: 'Little Tunny (False Albacore)', color: '#64748b', accent: '#475569',
+        size: 26, maxHp: 520, staminaMax: 320, attack: 55, speed: 6.3,
+        value: 620, rarity: 'rare', shape: 'oval', finColor: '#334155',
+        desc: 'Worm-like markings. Explosive runs.',
+        skills: ['blink', 'charge', 'rage'], skillName: 'False Alarm',
+        image: 'little_tunny'
+    },
+    {
+        id: 'kingfish', name: 'Kingfish (Yellowtail Amberjack)', color: '#fde047', accent: '#facc15',
+        size: 38, maxHp: 900, staminaMax: 550, attack: 78, speed: 5.5,
+        value: 1100, rarity: 'rare', shape: 'oval', finColor: '#eab308',
+        desc: 'Golden stripe. Pulls like a freight train.',
+        skills: ['charge', 'waterJet', 'rage'], skillName: 'Gold Rush',
+        image: 'kingfish'
+    },
+    {
+        id: 'samson_fish', name: 'Samson Fish', color: '#f59e0b', accent: '#d97706',
+        size: 36, maxHp: 850, staminaMax: 500, attack: 75, speed: 5.3,
+        value: 1000, rarity: 'rare', shape: 'oval', finColor: '#b45309',
+        desc: 'Kingfish cousin. Even stronger pound-for-pound.',
+        skills: ['charge', 'rage', 'tsunami'], skillName: 'Biblical Strength',
+        image: 'samson_fish'
+    },
+    {
+        id: 'queenfish', name: 'Queenfish', color: '#38bdf8', accent: '#0ea5e9',
+        size: 32, maxHp: 700, staminaMax: 420, attack: 62, speed: 5.8,
+        value: 820, rarity: 'rare', shape: 'oval', finColor: '#0369a1',
+        desc: 'Silver missile. Multiple hook-ups common.',
+        skills: ['blink', 'charge', 'dart'], skillName: 'Royal Volley',
+        image: 'queenfish'
+    },
+    {
+        id: 'trevally_giant', name: 'Giant Trevally (GT)', color: '#18181b', accent: '#09090b',
+        size: 45, maxHp: 1400, staminaMax: 750, attack: 95, speed: 4.5,
+        value: 1800, rarity: 'rare', shape: 'oval', finColor: '#09090b',
+        desc: 'Reef bully. Smashes poppers with authority.',
+        skills: ['charge', 'tsunami', 'rage', 'waterJet'], skillName: 'GT Smash',
+        image: 'trevally_giant'
+    },
+    {
+        id: 'bluefin_trevally', name: 'Bluefin Trevally', color: '#1e3a8a', accent: '#1e40af',
+        size: 30, maxHp: 650, staminaMax: 400, attack: 68, speed: 5.2,
+        value: 880, rarity: 'rare', shape: 'oval', finColor: '#172554',
+        desc: 'Electric blue spots. Coral reef terror.',
+        skills: ['charge', 'shock', 'waterJet'], skillName: 'Electric Blue',
+        image: 'bluefin_trevally'
+    },
+    {
+        id: 'golden_trevally', name: 'Golden Trevally', color: '#fde047', accent: '#facc15',
+        size: 34, maxHp: 750, staminaMax: 450, attack: 70, speed: 5.0,
+        value: 950, rarity: 'rare', shape: 'oval', finColor: '#eab308',
+        desc: 'Golden with black bands. Follows sharks.',
+        skills: ['blink', 'charge', 'drain'], skillName: 'Pilot Fish',
+        image: 'golden_trevally'
+    },
+    {
+        id: 'permite', name: 'Permit', color: '#67e8f9', accent: '#22d3ee',
+        size: 35, maxHp: 800, staminaMax: 480, attack: 60, speed: 5.5,
+        value: 920, rarity: 'rare', shape: 'oval', finColor: '#0891b2',
+        desc: 'Permit to catch. Crab-crushing pharyngeal teeth.',
+        skills: ['inflate', 'mudSlime', 'charge'], skillName: 'Crab Crusher',
+        image: 'permite'
+    },
+
+    // EPIC (10 more)
+    {
+        id: 'roosterfish', name: 'Roosterfish', color: '#3f3f46', accent: '#27272a',
+        size: 48, maxHp: 1500, staminaMax: 800, attack: 92, speed: 5.5,
+        value: 2200, rarity: 'epic', shape: 'oval', finColor: '#18181b',
+        desc: 'Seven-spined dorsal "comb". Surf zone phantom.',
+        skills: ['charge', 'blink', 'tsunami', 'rage'], skillName: 'Comb Raise',
+        image: 'roosterfish'
+    },
+    {
+        id: 'cubera_snapper', name: 'Cubera Snapper', color: '#78350f', accent: '#5c2a0d',
+        size: 50, maxHp: 1800, staminaMax: 900, attack: 105, speed: 4.0,
+        value: 2500, rarity: 'epic', shape: 'spiky', finColor: '#451a03',
+        desc: 'Massive canine teeth. Mangrove monarch.',
+        skills: ['charge', 'rage', 'inflate', 'mudSlime'], skillName: 'Mangrove Maw',
+        image: 'cubera_snapper'
+    },
+    {
+        id: 'dogtooth_tuna', name: 'Dogtooth Tuna', color: '#1e293b', accent: '#0f172a',
+        size: 52, maxHp: 2000, staminaMax: 1000, attack: 115, speed: 5.8,
+        value: 2800, rarity: 'epic', shape: 'oval', finColor: '#020617',
+        desc: 'Tuna with dog-like teeth. Deep water brute.',
+        skills: ['charge', 'shock', 'tsunami', 'rage'], skillName: 'White Dog',
+        image: 'dogtooth_tuna'
+    },
+    {
+        id: 'wahoo_peterson', name: 'Peterson\'s Wahoo', color: '#0f172a', accent: '#020617',
+        size: 42, maxHp: 1200, staminaMax: 650, attack: 88, speed: 7.0,
+        value: 1900, rarity: 'epic', shape: 'eel', finColor: '#020617',
+        desc: 'Razor teeth. First run burns drag.',
+        skills: ['charge', 'blink', 'dart', 'rage'], skillName: 'Razor Line',
+        image: 'wahoo_peterson'
+    },
+    {
+        id: 'sailfish_atlantic', name: 'Atlantic Sailfish', color: '#14b8a6', accent: '#0d9488',
+        size: 55, maxHp: 1600, staminaMax: 850, attack: 95, speed: 7.5,
+        value: 2600, rarity: 'epic', shape: 'swordfish', finColor: '#0f766e',
+        desc: 'Iconic billfish. Jumps greyhound style.',
+        skills: ['blink', 'charge', 'solarBeam', 'waterJet', 'flashBang'], skillName: 'Sail Dance',
+        image: 'sailfish_atlantic'
+    },
+    {
+        id: 'white_marlin', name: 'White Marlin', color: '#e2e8f0', accent: '#cbd5e1',
+        size: 50, maxHp: 1400, staminaMax: 750, attack: 88, speed: 6.8,
+        value: 2200, rarity: 'epic', shape: 'swordfish', finColor: '#94a3b8',
+        desc: 'Rounded dorsal. Smallest marlin, biggest heart.',
+        skills: ['charge', 'blink', 'waterJet', 'solarBeam'], skillName: 'White Lightning',
+        image: 'white_marlin'
+    },
+    {
+        id: 'striped_marlin', name: 'Striped Marlin', color: '#1e293b', accent: '#0f172a',
+        size: 58, maxHp: 1800, staminaMax: 950, attack: 105, speed: 7.0,
+        value: 3000, rarity: 'epic', shape: 'swordfish', finColor: '#020617',
+        desc: 'Vertical stripes lit up. Pack hunter.',
+        skills: ['charge', 'tsunami', 'stormSpiral', 'blink'], skillName: 'Striped Squadron',
+        image: 'striped_marlin'
+    },
+    {
+        id: 'black_marlin', name: 'Black Marlin', color: '#09090b', accent: '#18181b',
+        size: 65, maxHp: 2200, staminaMax: 1100, attack: 120, speed: 6.5,
+        value: 3500, rarity: 'epic', shape: 'swordfish', finColor: '#09090b',
+        desc: 'Rigid pectorals. "The bull of the sea."',
+        skills: ['charge', 'tsunami', 'rage', 'inferno'], skillName: 'Black Bull',
+        image: 'black_marlin'
+    },
+    {
+        id: 'blue_marlin_grand', name: 'Grand Blue Marlin', color: '#1e3a8a', accent: '#1e40af',
+        size: 70, maxHp: 2800, staminaMax: 1400, attack: 140, speed: 6.0,
+        value: 4500, rarity: 'epic', shape: 'swordfish', finColor: '#172554',
+        desc: 'Granders exceed 1000lbs. Ultimate billfish.',
+        skills: ['charge', 'tsunami', 'solarBeam', 'supernova', 'rage'], skillName: 'Grand Slam',
+        image: 'blue_marlin_grand'
+    },
+    {
+        id: 'swordfish_broadbill', name: 'Broadbill Swordfish', color: '#374151', accent: '#1f2937',
+        size: 60, maxHp: 2000, staminaMax: 1000, attack: 110, speed: 5.5,
+        value: 2800, rarity: 'epic', shape: 'swordfish', finColor: '#111827',
+        desc: 'Gladius bill. Hunts in midnight zone.',
+        skills: ['charge', 'zapOrb', 'blink', 'drain'], skillName: 'Deep Sword',
+        image: 'swordfish_broadbill'
+    },
+
+    // LEGENDARY (10 more)
+    {
+        id: 'bluefin_tuna', name: 'Atlantic Bluefin Tuna', color: '#1e293b', accent: '#0f172a',
+        size: 80, maxHp: 4000, staminaMax: 2000, attack: 160, speed: 7.0,
+        value: 12000, rarity: 'legendary', shape: 'oval', finColor: '#020617',
+        desc: 'Warm-blooded giant. Crosses oceans.',
+        skills: ['charge', 'tsunami', 'stormSpiral', 'rage', 'supernova'], skillName: 'Toro Toro',
+        image: 'bluefin_tuna'
+    },
+    {
+        id: 'yellowfin_tuna', name: 'Yellowfin Tuna (Ahi)', color: '#fde047', accent: '#facc15',
+        size: 60, maxHp: 2500, staminaMax: 1300, attack: 135, speed: 7.2,
+        value: 5500, rarity: 'legendary', shape: 'oval', finColor: '#eab308',
+        desc: 'Sickle fins. Football-shaped torpedoes.',
+        skills: ['charge', 'blink', 'stormSpiral', 'solarBeam'], skillName: 'Ahi Speed',
+        image: 'yellowfin_tuna'
+    },
+    {
+        id: 'bigeye_tuna', name: 'Bigeye Tuna', color: '#0f172a', accent: '#020617',
+        size: 55, maxHp: 2200, staminaMax: 1100, attack: 125, speed: 6.5,
+        value: 4800, rarity: 'legendary', shape: 'oval', finColor: '#020617',
+        desc: 'Huge eyes for deep hunting. Fatty prized.',
+        skills: ['charge', 'zapOrb', 'blink', 'drain'], skillName: 'Deep Eye',
+        image: 'bigeye_tuna'
+    },
+    {
+        id: 'swordfish_giant', name: 'Giant Swordfish', color: '#1f2937', accent: '#111827',
+        size: 75, maxHp: 3000, staminaMax: 1500, attack: 150, speed: 5.8,
+        value: 6000, rarity: 'legendary', shape: 'swordfish', finColor: '#030712',
+        desc: 'Bill flattens prey. Daytime deep, night surface.',
+        skills: ['charge', 'zapOrb', 'blink', 'drain', 'supernova'], skillName: 'Gladius',
+        image: 'swordfish_giant'
+    },
+    {
+        id: 'great_hammerhead', name: 'Great Hammerhead', color: '#4b5563', accent: '#374151',
+        size: 70, maxHp: 2500, staminaMax: 1200, attack: 130, speed: 4.8,
+        value: 4200, rarity: 'legendary', shape: 'hammerhead', finColor: '#1f293b',
+        desc: 'Cephalofoil scans. Stingray specialist.',
+        skills: ['charge', 'tsunami', 'shock', 'blink', 'rage'], skillName: 'Hammer Time',
+        image: 'great_hammerhead'
+    },
+    {
+        id: 'tiger_shark_great', name: 'Great Tiger Shark', color: '#18181b', accent: '#09090b',
+        size: 75, maxHp: 3000, staminaMax: 1400, attack: 145, speed: 4.5,
+        value: 5000, rarity: 'legendary', shape: 'shark', finColor: '#09090b',
+        desc: 'Garbage can stomach. Eats license plates.',
+        skills: ['charge', 'rage', 'tsunami', 'drain', 'inferno'], skillName: 'Trash Compactor',
+        image: 'tiger_shark_great'
+    },
+    {
+        id: 'greenland_shark', name: 'Greenland Shark', color: '#374151', accent: '#1f2937',
+        size: 65, maxHp: 3500, staminaMax: 1600, attack: 120, speed: 1.8,
+        value: 4500, rarity: 'legendary', shape: 'shark', finColor: '#111827',
+        desc: '400-year lifespan. Toxic flesh. Arctic ghost.',
+        skills: ['poisonSpit', 'drain', 'camouflaged', 'inflate'], skillName: 'Time Eater',
+        image: 'greenland_shark'
+    },
+    {
+        id: 'sixgill_shark', name: 'Bluntnose Sixgill', color: '#111827', accent: '#030712',
+        size: 60, maxHp: 2800, staminaMax: 1300, attack: 135, speed: 3.5,
+        value: 3800, rarity: 'legendary', shape: 'shark', finColor: '#030712',
+        desc: 'Six gill slits. Living fossil from Jurassic.',
+        skills: ['charge', 'drain', 'voidPull', 'camouflaged'], skillName: 'Primeval Six',
+        image: 'sixgill_shark'
+    },
+    {
+        id: 'megamouth_shark', name: 'Megamouth Shark', color: '#1e293b', accent: '#0f172a',
+        size: 55, maxHp: 2200, staminaMax: 1100, attack: 90, speed: 2.5,
+        value: 3200, rarity: 'legendary', shape: 'shark', finColor: '#020617',
+        desc: 'Glowing mouth. Filter feeds on krill.',
+        skills: ['inflate', 'waterJet', 'flashBang', 'blink'], skillName: 'Bio-Lure',
+        image: 'megamouth_shark'
+    },
+    {
+        id: 'basking_shark', name: 'Basking Shark', color: '#6b7280', accent: '#4b5563',
+        size: 85, maxHp: 3500, staminaMax: 1600, attack: 80, speed: 3.0,
+        value: 4000, rarity: 'legendary', shape: 'shark', finColor: '#374151',
+        desc: 'Second largest fish. Harmless giant.',
+        skills: ['inflate', 'tsunami', 'whirlpool', 'waterJet'], skillName: 'Passive Filter',
+        image: 'basking_shark'
+    },
+
+    // MYTHIC (8 more)
+    {
+        id: 'colossal_squid', name: 'Colossal Squid', color: '#581c87', accent: '#7e22ce',
+        size: 90, maxHp: 10000, staminaMax: 3000, attack: 300, speed: 4.0,
+        value: 35000, rarity: 'mythic', shape: 'kraken', finColor: '#3b0764',
+        desc: 'Largest eyes in animal kingdom. Hooked tentacles.',
+        skills: ['tentacleSlam', 'voidPull', 'inkCloud', 'drain', 'supernova'], skillName: 'Antarctic Horror',
+        image: 'colossal_squid'
+    },
+    {
+        id: 'giant_oarfish', name: 'Giant Oarfish (King of Herrings)', color: '#c084fc', accent: '#a855f7',
+        size: 100, maxHp: 6000, staminaMax: 2500, attack: 180, speed: 3.5,
+        value: 15000, rarity: 'mythic', shape: 'eel', finColor: '#7e22ce',
+        desc: 'Longest bony fish. Sea serpent legend.',
+        skills: ['blink', 'solarBeam', 'cosmicStorm', 'timeWarp', 'drain'], skillName: 'Ribbon of Doom',
+        image: 'giant_oarfish'
+    },
+    {
+        id: 'whale_shark', name: 'Whale Shark', color: '#1e3a8a', accent: '#1e40af',
+        size: 120, maxHp: 15000, staminaMax: 4000, attack: 100, speed: 3.0,
+        value: 25000, rarity: 'mythic', shape: 'shark', finColor: '#172554',
+        desc: 'Largest fish alive. Gentle polka-dotted giant.',
+        skills: ['inflate', 'tsunami', 'whirlpool', 'waterJet', 'solarBeam'], skillName: 'Starry Night',
+        image: 'whale_shark'
+    },
+    {
+        id: 'coelacanth', name: 'Coelacanth (Living Fossil)', color: '#3f3f46', accent: '#27272a',
+        size: 45, maxHp: 3000, staminaMax: 1500, attack: 140, speed: 2.8,
+        value: 20000, rarity: 'mythic', shape: 'spiky', finColor: '#18181b',
+        desc: 'Lobe-finned. Thought extinct 66M years.',
+        skills: ['voidPull', 'timeWarp', 'drain', 'camouflaged', 'blink'], skillName: 'Lazarus Taxon',
+        image: 'coelacanth'
+    },
+    {
+        id: 'dunkleosteus', name: 'Dunkleosteus (Placoderm)', color: '#7f1d1d', accent: '#991b1b',
+        size: 55, maxHp: 5000, staminaMax: 2000, attack: 250, speed: 4.2,
+        value: 28000, rarity: 'mythic', shape: 'spiky', finColor: '#450a0a',
+        desc: 'Armored jaw plates. First vertebrate superpredator.',
+        skills: ['charge', 'inferno', 'tsunami', 'supernova', 'voidPull'], skillName: 'Armor Crusher',
+        image: 'dunkleosteus'
+    },
+    {
+        id: 'leedsichthys', name: 'Leedsichthys (Giant Ray-Finned)', color: '#1e40af', accent: '#1e3a8a',
+        size: 110, maxHp: 12000, staminaMax: 3500, attack: 150, speed: 3.2,
+        value: 30000, rarity: 'mythic', shape: 'oval', finColor: '#172554',
+        desc: 'Largest ray-finned fish ever. Jurassic filter feeder.',
+        skills: ['inflate', 'tsunami', 'whirlpool', 'solarBeam', 'supernova'], skillName: 'Jurassic Leviathan',
+        image: 'leedsichthys'
+    },
+    {
+        id: 'xiphactinus', name: 'Xiphactinus (Bulldog Fish)', color: '#dc2626', accent: '#b91c1c',
+        size: 50, maxHp: 4000, staminaMax: 1800, attack: 220, speed: 5.5,
+        value: 22000, rarity: 'mythic', shape: 'swordfish', finColor: '#7f1d1d',
+        desc: 'Cretaceous bulldog. Swallowed prey whole.',
+        skills: ['charge', 'rage', 'inferno', 'tsunami', 'drain'], skillName: 'Bulldog Bite',
+        image: 'xiphactinus'
+    },
+    {
+        id: 'megalodon_prime', name: 'Primeval Megalodon', color: '#030712', accent: '#111827',
+        size: 100, maxHp: 20000, staminaMax: 5000, attack: 500, speed: 5.0,
+        value: 100000, rarity: 'mythic', shape: 'shark', finColor: '#030712',
+        desc: 'The ultimate apex. 60-foot, 50-ton nightmare.',
+        skills: ['charge', 'tsunami', 'inferno', 'supernova', 'voidPull', 'cosmicStorm', 'gravitationalPull', 'timeWarp'], skillName: 'Extinction Event',
+        image: 'megalodon_prime'
     }
 ];
 

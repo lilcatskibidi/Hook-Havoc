@@ -201,26 +201,5 @@ const Player = {
         }
         
         return actualHeal;
-    },
-    
-    // Select rod from inventory
-    selectRod(state) {
-        const p = state.player;
-        if (!p.unlockedRods || p.unlockedRods.length === 0) return;
-        
-        // Cycle through unlocked rods
-        const currentIdx = p.unlockedRods.indexOf(p.equippedRod?.id || 'rod_starter');
-        const nextIdx = (currentIdx + 1) % p.unlockedRods.length;
-        const rodId = p.unlockedRods[nextIdx];
-        const rod = RODS.find(r => r.id === rodId);
-        
-        if (rod) {
-            p.equippedRod = rod;
-            this.refreshHUD(state);
-            UI.refreshLuckDisplay(state);
-            UI.renderWeaponToolbar(state);
-            Particles.showFloatingText(state, `Rod: ${rod.name}`, p.x, p.y - 30, rod.color);
-            try { audio.playUIClick(); } catch (e) {}
-        }
     }
 };

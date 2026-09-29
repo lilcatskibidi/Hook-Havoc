@@ -456,6 +456,7 @@ const UI = {
         const p = state.player;
         toolbar.innerHTML = '';
 
+        // Weapon slots (1-4)
         for (let i = 0; i < EQUIP_SLOTS; i++) {
             const weaponId = p.equippedWeapons[i];
             const w = weaponId ? WEAPONS.find(x => x.id === weaponId) : null;
@@ -477,6 +478,26 @@ const UI = {
             };
             toolbar.appendChild(slot);
         }
+
+        // Rod slot (5th slot - R key)
+        const rod = p.equippedRod;
+        const rodActive = p.activeSlot === 4; // Using 4 as rod slot index
+        const rodSlot = document.createElement('div');
+        rodSlot.className = `weapon-slot relative w-14 h-14 rounded-xl flex flex-col items-center justify-center border ${
+            rodActive ? 'active' : 'border-emerald-700/60 bg-emerald-900/60'
+        } ${rod ? '' : 'opacity-40'}`;
+        rodSlot.innerHTML = rod
+            ? `<i class="fa-solid fa-fishing-rod text-lg text-emerald-400"></i>
+               <span class="text-[9px] font-bold mt-0.5 text-slate-300">R</span>`
+            : `<i class="fa-solid fa-plus text-lg text-slate-600"></i>
+               <span class="text-[9px] font-bold mt-0.5 text-slate-600">R</span>`;
+        rodSlot.title = 'Rod Slot (R) - Click to equip rod';
+        rodSlot.onclick = () => { if (typeof Player !== 'undefined') Player.selectRod(state); };
+        rodSlot.oncontextmenu = (e) => {
+            e.preventDefault();
+            if (p.equippedRod) { p.equippedRod = RODS[0]; UI.refreshLuckDisplay(state); UI.renderWeaponToolbar(state); }
+        };
+        toolbar.appendChild(rodSlot);
     },
 
     renderStatusEffectsHUD(state) {
@@ -939,6 +960,7 @@ const FishIndex = {
         
         on('btn-fish-index', () => this.show());
         on('btn-fish-index-back', () => this.hide());
+        on('btn-achievements', () => this.showAchievements());
         
         // Filter buttons
         document.querySelectorAll('.fish-filter-btn').forEach(btn => {
@@ -969,13 +991,20 @@ const FishIndex = {
     },
     
     showPanel(panel) {
-        const panels = ['mp-panel-main', 'mp-panel-multiplayer', 'mp-panel-join', 'mp-panel-lobby', 'menu-about', 'mp-panel-fish-index'];
+        const panels = ['mp-panel-main', 'mp-panel-multiplayer', 'mp-panel-join', 'mp-panel-lobby', 'menu-about', 'mp-panel-fish-index', 'mp-panel-achievements'];
         panels.forEach(id => {
             const el = $(id);
             if (el) el.classList.add('hidden');
         });
         const target = $(`mp-panel-${panel}`);
         if (target) target.classList.remove('hidden');
+    },
+    
+    showAchievements() {
+        this.showPanel('achievements');
+        if (typeof Achievements !== 'undefined') {
+            Achievements.renderPanel($('achievements-container'));
+        }
     },
     
     updateProgress() {
@@ -1153,11 +1182,20 @@ const MainMenu = {
 
         // Fish Index button
         on('btn-fish-index', () => {
-            const panels = ['mp-panel-main', 'mp-panel-multiplayer', 'mp-panel-join', 'mp-panel-lobby', 'menu-about'];
+            const panels = ['mp-panel-main', 'mp-panel-multiplayer', 'mp-panel-join', 'mp-panel-lobby', 'menu-about', 'mp-panel-achievements'];
             panels.forEach(id => { const el = $(id); if (el) el.classList.add('hidden'); });
             const fishIndex = $('mp-panel-fish-index');
             if (fishIndex) fishIndex.classList.remove('hidden');
             if (typeof FishIndex !== 'undefined') FishIndex.show();
+        });
+
+        // Achievements button
+        on('btn-achievements', () => {
+            const panels = ['mp-panel-main', 'mp-panel-multiplayer', 'mp-panel-join', 'mp-panel-lobby', 'menu-about', 'mp-panel-fish-index'];
+            panels.forEach(id => { const el = $(id); if (el) el.classList.add('hidden'); });
+            const achievements = $('mp-panel-achievements');
+            if (achievements) achievements.classList.remove('hidden');
+            if (typeof Achievements !== 'undefined') Achievements.renderPanel($('achievements-container'));
         });
 
         // Menu button in HUD
@@ -1177,15 +1215,17 @@ const MainMenu = {
                     const main = $('mp-panel-main');
                     const mpMain = $('mp-panel-multiplayer');
                     const fishIdx = $('mp-panel-fish-index');
+                    const achieveIdx = $('mp-panel-achievements');
                     const about = $('menu-about');
                     if (main && !main.classList.contains('hidden') &&
                         mpMain && !mpMain.classList.contains('hidden') &&
                         fishIdx && fishIdx.classList.contains('hidden') &&
+                        achieveIdx && achieveIdx.classList.contains('hidden') &&
                         about && about.classList.contains('hidden')) {
                         self.hide();
                     } else {
                         // Close sub-panels, show main
-                        const panels = ['mp-panel-multiplayer', 'mp-panel-join', 'mp-panel-lobby', 'menu-about', 'mp-panel-fish-index'];
+                        const panels = ['mp-panel-multiplayer', 'mp-panel-join', 'mp-panel-lobby', 'menu-about', 'mp-panel-fish-index', 'mp-panel-achievements'];
                         panels.forEach(id => { const el = $(id); if (el) el.classList.add('hidden'); });
                         if (main) main.classList.remove('hidden');
                     }
@@ -1220,6 +1260,15 @@ if (typeof MainMenu !== 'undefined') MainMenu.init(state);
 
 // Init Fish Index
 if (typeof FishIndex !== 'undefined') FishIndex.init(state);
+
+// Init Casino
+if (typeof Casino !== 'undefined') Casino.init(state);
+
+// Init Enemy Spawner
+if (typeof EnemySpawner !== 'undefined') EnemySpawner.init(state);
+
+// Init Achievements
+if (typeof Achievements !== 'undefined') Achievements.init(state);
 
 // Init Multiplayer UI
 if (typeof MultiplayerUI !== 'undefined') MultiplayerUI.init(state);
@@ -1303,6 +1352,9 @@ function mainLoop(time) {
     if (typeof Combat !== 'undefined') Combat.update(state, delta);
     if (typeof Particles !== 'undefined') Particles.update(state, delta);
 
+    // Update enemies
+    if (typeof EnemySpawner !== 'undefined') EnemySpawner.update(delta);
+
     // Update multiplayer
     if (typeof Multiplayer !== 'undefined' && state.multiplayer) {
         state.multiplayer.update(delta);
@@ -1346,6 +1398,25 @@ function mainLoop(time) {
 
     UI.updateBossBar(state);
     UI.renderStatusEffectsHUD(state);
+
+    // Beach shop indicator
+    const beachIndicator = $('beach-shop-indicator');
+    if (beachIndicator) {
+        const nearShore = state.player.x >= state.waterBoundaryX - 100;
+        if (nearShore && !state.player.beachShopUnlocked) {
+            beachIndicator.classList.remove('hidden');
+        } else {
+            beachIndicator.classList.add('hidden');
+        }
+    }
+
+    // Survival time tracking (for achievement)
+    if (!state.paused && state.player.hp > 0) {
+        state.player.survivalTime = (state.player.survivalTime || 0) + delta;
+        if (state.player.survivalTime >= 3600 && typeof Achievements !== 'undefined') {
+            Achievements.checkSurvival(state, state.player.survivalTime);
+        }
+    }
 
     requestAnimationFrame(mainLoop);
 }

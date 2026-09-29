@@ -118,57 +118,7 @@ const WEAPONS = [
       price: 75000, desc: 'Three piercing bolts. Devastating volley.',
       rarity: 'mythic', pellets: 'Triple pierce',
       auto: false, pierce: true, explosive: false, burn: false,
-      sound: 'harpoon', shake: 12, muzzle: 28, recoil: 12 },
-
-    // TIER 6 — EXOTIC (NEW WEAPONS)
-    { id: 'crossbow', name: 'Abyssal Crossbow', icon: 'fa-bow-arrow', type: 'crossbow',
-      damage: 160, fireRate: 1.2, range: 850, spread: 0.0, count: 1,
-      price: 35000, desc: 'Silent killer. Bolts pierce and apply poison.',
-      rarity: 'mythic', pellets: 'Poison Bolt',
-      auto: false, pierce: true, explosive: false, burn: false, poison: true,
-      sound: 'harpoon', shake: 6, muzzle: 8, recoil: 5 },
-
-    { id: 'tesla_gun', name: 'Tesla Coil Gun', icon: 'fa-bolt', type: 'tesla',
-      damage: 45, fireRate: 0.15, range: 500, spread: 0.08, count: 1,
-      price: 42000, desc: 'Chains lightning between enemies.',
-      rarity: 'mythic', pellets: 'Chain Lightning',
-      auto: true, pierce: false, explosive: false, burn: false, chain: true,
-      sound: 'rifle', shake: 3, muzzle: 16, recoil: 2 },
-
-    { id: 'void_rifle', name: 'Void Reaper', icon: 'fa-skull', type: 'void',
-      damage: 300, fireRate: 1.0, range: 900, spread: 0.01, count: 1,
-      price: 95000, desc: 'Erases matter. Bullets ignore armor and heal you.',
-      rarity: 'mythic', pellets: 'Void Round',
-      auto: false, pierce: true, explosive: false, burn: false, lifesteal: 0.3,
-      sound: 'harpoon', shake: 10, muzzle: 24, recoil: 8 },
-
-    { id: 'coral_launcher', name: 'Coral Mortar', icon: 'fa-seedling', type: 'launcher',
-      damage: 220, fireRate: 1.5, range: 700, spread: 0.12, count: 1,
-      price: 58000, desc: 'Launches explosive coral that spawns damaging reefs.',
-      rarity: 'legendary', pellets: 'Coral Grenade',
-      auto: false, pierce: false, explosive: true, burn: false, coral: true,
-      sound: 'shotgun', shake: 12, muzzle: 20, recoil: 10 },
-
-    { id: 'frost_bow', name: 'Glacial Bow', icon: 'fa-icicles', type: 'crossbow',
-      damage: 140, fireRate: 1.1, range: 800, spread: 0.0, count: 3,
-      price: 48000, desc: 'Triple shot that freezes enemies in place.',
-      rarity: 'mythic', pellets: 'Ice Shards',
-      auto: false, pierce: true, explosive: false, burn: false, freeze: true,
-      sound: 'harpoon', shake: 5, muzzle: 10, recoil: 4 },
-
-    { id: 'magma_shotgun', name: 'Magma Blunderbuss', icon: 'fa-fire-burner', type: 'shotgun',
-      damage: 25, fireRate: 0.5, range: 350, spread: 0.35, count: 10,
-      price: 32000, desc: 'Erupts with molten shrapnel. Burns everything.',
-      rarity: 'legendary', pellets: '10 Molten Pellets',
-      auto: false, pierce: false, explosive: false, burn: true,
-      sound: 'shotgun', shake: 8, muzzle: 22, recoil: 7 },
-
-    { id: 'sonic_pistol', name: 'Resonance Pistol', icon: 'fa-wave-square', type: 'sonic',
-      damage: 80, fireRate: 0.25, range: 600, spread: 0.02, count: 1,
-      price: 28000, desc: 'Sonic waves pierce walls and stun enemies.',
-      rarity: 'epic', pellets: 'Sonic Pulse',
-      auto: false, pierce: true, explosive: false, burn: false, stun: true,
-      sound: 'pistol', shake: 4, muzzle: 12, recoil: 3 }
+      sound: 'harpoon', shake: 12, muzzle: 28, recoil: 12 }
 ];
 
 const RODS = [
@@ -181,57 +131,6 @@ const RODS = [
     { id: 'rod_abyssal', name: 'Abyssal Grapple',    tensionMax: 520, reelPower: 220, luck: 1.50, price: 18000,  desc: 'Legendary. Nothing escapes this line.',     rarity: 'legendary', color: '#f59e0b' },
     { id: 'rod_cosmic',  name: 'Cosmic Thread',      tensionMax: 700, reelPower: 280, luck: 2.20, price: 45000,  desc: 'Mythic. The line bends reality itself.',    rarity: 'mythic',    color: '#e879f9' }
 ];
-const ARMOR = [
-    // Light Armor
-    { id: 'vest_light', name: 'Fisher\'s Vest', type: 'chest', slot: 'armor',
-      defense: 5, hpBonus: 20, speedPenalty: 0, weight: 'Light',
-      price: 500, desc: 'Light canvas vest. Basic protection.', rarity: 'common', color: '#94a3b8' },
-    { id: 'boots_light', name: 'Wading Boots', type: 'feet', slot: 'armor',
-      defense: 3, hpBonus: 10, speedBonus: 5, weight: 'Light',
-      price: 400, desc: 'Rubber boots. Better traction on wet surfaces.', rarity: 'common', color: '#94a3b8' },
-    { id: 'gloves_light', name: 'Grip Gloves', type: 'hands', slot: 'armor',
-      defense: 2, hpBonus: 5, reelPowerBonus: 10, weight: 'Light',
-      price: 300, desc: 'Fingerless gloves. Better rod grip.', rarity: 'common', color: '#94a3b8' },
-    
-    // Medium Armor
-    { id: 'vest_medium', name: 'Reinforced Chestplate', type: 'chest', slot: 'armor',
-      defense: 15, hpBonus: 50, speedPenalty: 5, weight: 'Medium',
-      price: 2500, desc: 'Kevlar-weave vest. Solid protection.', rarity: 'rare', color: '#38bdf8' },
-    { id: 'boots_medium', name: 'Treaded Waders', type: 'feet', slot: 'armor',
-      defense: 8, hpBonus: 25, speedPenalty: 2, weight: 'Medium',
-      price: 1800, desc: 'Heavy-duty waders. Stability in currents.', rarity: 'rare', color: '#38bdf8' },
-    { id: 'helm_medium', name: 'Angler\'s Helm', type: 'head', slot: 'armor',
-      defense: 10, hpBonus: 30, luckBonus: 0.1, weight: 'Medium',
-      price: 2000, desc: 'Wide-brim hat with Kevlar lining.', rarity: 'rare', color: '#38bdf8' },
-    
-    // Heavy Armor
-    { id: 'vest_heavy', name: 'Abyssal Plate', type: 'chest', slot: 'armor',
-      defense: 30, hpBonus: 100, speedPenalty: 15, weight: 'Heavy',
-      price: 12000, desc: 'Titanium-alloy plate. Near-impervious.', rarity: 'epic', color: '#a855f7' },
-    { id: 'boots_heavy', name: 'Lead-Soled Boots', type: 'feet', slot: 'armor',
-      defense: 20, hpBonus: 60, speedPenalty: 10, anchorBonus: true, weight: 'Heavy',
-      price: 8000, desc: 'Cannot be knocked back. Immune to push.', rarity: 'epic', color: '#a855f7' },
-    { id: 'gauntlets_heavy', name: 'Crusher Gauntlets', type: 'hands', slot: 'armor',
-      defense: 15, hpBonus: 40, meleeDamageBonus: 25, weight: 'Heavy',
-      price: 9000, desc: 'Hydraulic crushing grip. Melee kills heal.', rarity: 'epic', color: '#a855f7' },
-    
-    // Legendary Armor
-    { id: 'vest_legendary', name: 'Leviathan Hide', type: 'chest', slot: 'armor',
-      defense: 50, hpBonus: 200, speedPenalty: 10, damageReflect: 0.15, weight: 'Legendary',
-      price: 50000, desc: 'Scales of a fallen leviathan. Reflects damage.', rarity: 'legendary', color: '#f59e0b' },
-    { id: 'boots_legendary', name: 'Tidewalker Striders', type: 'feet', slot: 'armor',
-      defense: 25, hpBonus: 80, speedBonus: 20, waterWalk: true, weight: 'Legendary',
-      price: 35000, desc: 'Walk on water. Speed boost in shallows.', rarity: 'legendary', color: '#f59e0b' },
-    { id: 'helm_legendary', name: 'Crown of Tides', type: 'head', slot: 'armor',
-      defense: 30, hpBonus: 100, luckBonus: 0.5, sonarRange: 300, weight: 'Legendary',
-      price: 40000, desc: 'See fish through walls. Massive luck boost.', rarity: 'legendary', color: '#f59e0b' },
-    
-    // Mythic Armor
-    { id: 'set_abyssal', name: 'Abyssal Sovereign Set', type: 'set', slot: 'armor',
-      defense: 100, hpBonus: 500, speedPenalty: 0, fullSetBonus: { hpRegen: 5, damageReduction: 0.25, fearAura: true }, weight: 'Mythic',
-      price: 250000, desc: 'Full set: Unkillable. Regenerates. Enemies flee.', rarity: 'mythic', color: '#e879f9', setItems: ['vest_abyssal', 'boots_abyssal', 'helm_abyssal', 'gauntlets_abyssal'] },
-];
-
 const WeaponSystem = {
     // Returns the weapon currently held in the active slot, or null.
     getActiveWeapon(state) {
@@ -285,13 +184,6 @@ const WeaponSystem = {
                 pierce: !!w.pierce,
                 explosive: !!w.explosive,
                 burn: !!w.burn,
-                // NEW: Special weapon properties
-                poison: !!w.poison,
-                chain: !!w.chain,
-                lifesteal: w.lifesteal || 0,
-                coral: !!w.coral,
-                freeze: !!w.freeze,
-                stun: !!w.stun,
                 hitSet: new Set(),
                 trail: []
             });
@@ -439,60 +331,6 @@ const WeaponSystem = {
 
                         if (b.burn) m.burnTimer = 3.0;
 
-                        // NEW: Poison effect (crossbow)
-                        if (b.poison) {
-                            m.poisonTimer = 5.0;
-                            m.poisonDps = Math.round(b.damage * 0.3);
-                            Particles.spawnParticles(state, m.x, m.y, '#84cc16', 8);
-                            Particles.showFloatingText(state, 'POISONED!', m.x, m.y - 30, '#84cc16');
-                        }
-
-                        // NEW: Freeze effect (frost bow)
-                        if (b.freeze) {
-                            m.freezeTimer = 2.5;
-                            m.slowed = true;
-                            Particles.spawnParticles(state, m.x, m.y, '#67e8f9', 12, { size: 4 });
-                            Particles.showFloatingText(state, 'FROZEN!', m.x, m.y - 30, '#67e8f9');
-                        }
-
-                        // NEW: Stun effect (sonic pistol)
-                        if (b.stun) {
-                            m.stunTimer = 1.5;
-                            Particles.spawnParticles(state, m.x, m.y, '#fde047', 10);
-                            Particles.showFloatingText(state, 'STUNNED!', m.x, m.y - 30, '#fde047');
-                        }
-
-                        // NEW: Lifesteal (void rifle)
-                        if (b.lifesteal) {
-                            const healAmount = Math.round(b.damage * b.lifesteal);
-                            const p = state.player;
-                            const oldHp = p.hp;
-                            p.hp = Math.min(p.maxHp, p.hp + healAmount);
-                            if (p.hp > oldHp) {
-                                Particles.showFloatingText(state, `+${p.hp - oldHp} HP`, p.x, p.y - 40, '#34d399');
-                                if (typeof UI !== 'undefined' && UI.triggerDamageFlash) {
-                                    const el = document.getElementById('damage-flash');
-                                    if (el) {
-                                        el.style.background = 'radial-gradient(circle, transparent 30%, rgba(52, 211, 153, 0.4) 100%)';
-                                        el.classList.remove('active');
-                                        void el.offsetWidth;
-                                        el.classList.add('active');
-                                        setTimeout(() => el.style.background = '', 300);
-                                    }
-                                }
-                                Player.refreshHUD(state);
-                            }
-                        }
-
-                        // NEW: Coral reef creation (coral launcher)
-                        if (b.coral) {
-                            state.groundHazards.push({
-                                x: m.x, y: m.y, radius: 80, duration: 6.0,
-                                type: 'coral', damagePerSec: 15, color: '#14b8a6'
-                            });
-                            Particles.spawnParticles(state, m.x, m.y, '#14b8a6', 15, { size: 5 });
-                        }
-
                         if (b.explosive) {
                             const splash = 70;
                             const sDmg = b.damage * 0.5;
@@ -507,27 +345,6 @@ const WeaponSystem = {
                             }
                             Particles.spawnParticles(state, m.x, m.y, '#f97316', 20, { size: 6 });
                             state.screenShake = Math.max(state.screenShake, 12);
-                        }
-
-                        // NEW: Chain lightning (tesla gun)
-                        if (b.chain) {
-                            let targetsHit = 1;
-                            for (const other of state.monstersOnLand) {
-                                if (other === m) continue;
-                                if (targetsHit >= 4) break; // Max 4 targets
-                                const dist = Math.hypot(other.x - m.x, other.y - m.y);
-                                if (dist < 200) {
-                                    other.hp -= Math.round(b.damage * 0.6);
-                                    Particles.spawnParticles(state, other.x, other.y, '#38bdf8', 8);
-                                    Particles.showFloatingText(state, `-${Math.round(b.damage * 0.6)}`,
-                                        other.x, other.y - 15, '#38bdf8');
-                                    // Visual chain
-                                    if (typeof Particles !== 'undefined') {
-                                        Particles.spawnLightning(state, m.x, m.y, other.x, other.y, '#38bdf8');
-                                    }
-                                    targetsHit++;
-                                }
-                            }
                         }
 
                         if (!b.pierce) { consumed = true; break; }
