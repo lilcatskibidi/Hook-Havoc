@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Lint & build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Parse-check all scripts
+        run: |
+          for f in js/*.js server.js scripts/*.mjs; do
+            echo "checking $f"
+            node --check "$f"
+          done
+
+      - name: Check script load order (TDZ guard)
+        run: node scripts/check-load-order.mjs js
+
+      - name: Build itch.io package
+        run: node scripts/build-itch.mjs
+
+      - name: Assert index.html is at the archive root
+        run: |
+          unzip -Z1 dist/itch.zip | head -1 | grep -qx 'index.html' \
+            || { echo "::error::first archive entry must be index.html"; exit 1; }
+          echo "root entry: $(unzip -Z1 dist/itch.zip | head -1)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aquatic-havoc-itch
+          path: dist/itch.zip
+          if-no-files-found: error
+          retention-days: 14
