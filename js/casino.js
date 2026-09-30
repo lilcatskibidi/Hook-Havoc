@@ -55,29 +55,6 @@ const Casino = {
         
         // Buy tokens
         on('casino-buy-tokens', () => this.buyTokens(1));
-        
-        // Bet controls
-        on('casino-bet-minus', () => this.adjustBet(-1));
-        on('casino-bet-plus', () => this.adjustBet(1));
-        on('casino-bet-max', () => this.setMaxBet());
-        
-        // Game specific
-        on('casino-roulette-spin', () => this.spinRoulette());
-        on('casino-slots-spin', () => this.spinSlots());
-        on('casino-fishbet-bet', () => this.placeFishBet());
-        on('casino-highlow-higher', () => this.highlowGuess(true));
-        on('casino-highlow-lower', () => this.highlowGuess(false));
-        on('casino-highlow-new', () => this.newHighlowCard());
-        
-        // Number bets for roulette
-        document.querySelectorAll('.roulette-number-btn').forEach(btn => {
-            btn.onclick = () => this.placeNumberBet(parseInt(btn.dataset.number));
-        });
-        
-        // Color bets for roulette
-        document.querySelectorAll('.roulette-color-btn').forEach(btn => {
-            btn.onclick = () => this.placeColorBet(btn.dataset.color);
-        });
     },
     
     open() {
@@ -136,6 +113,53 @@ const Casino = {
             case 'fishbet': this.renderFishBet(content); break;
             case 'highlow': this.renderHighlow(content); break;
         }
+        // Re-bind dynamic event listeners after render
+        this.bindDynamicEvents();
+    },
+    
+    bindDynamicEvents() {
+        // Number bets for roulette
+        document.querySelectorAll('.roulette-number-btn').forEach(btn => {
+            btn.onclick = () => this.placeNumberBet(parseInt(btn.dataset.number));
+        });
+        
+        // Color bets for roulette
+        document.querySelectorAll('.roulette-color-btn').forEach(btn => {
+            if (btn.dataset.color) btn.onclick = () => this.placeColorBet(btn.dataset.color);
+            if (btn.dataset.parity) btn.onclick = () => this.placeParityBet(btn.dataset.parity);
+            if (btn.dataset.range) btn.onclick = () => this.placeRangeBet(btn.dataset.range);
+        });
+        
+        // Fish bet buttons
+        document.querySelectorAll('.fish-bet-btn').forEach(btn => {
+            btn.onclick = () => {
+                this.fishBetSelected = btn.dataset.fishId;
+                this.renderTab();
+            };
+        });
+        
+        // Bet controls
+        const betMinus = document.getElementById('casino-bet-minus');
+        const betPlus = document.getElementById('casino-bet-plus');
+        const betMax = document.getElementById('casino-bet-max');
+        if (betMinus) betMinus.onclick = () => this.adjustBet(-1);
+        if (betPlus) betPlus.onclick = () => this.adjustBet(1);
+        if (betMax) betMax.onclick = () => this.setMaxBet();
+        
+        // Game specific buttons
+        const rouletteSpin = document.getElementById('casino-roulette-spin');
+        const slotsSpin = document.getElementById('casino-slots-spin');
+        const fishBetBtn = document.getElementById('casino-fishbet-bet');
+        const highlowHigher = document.getElementById('casino-highlow-higher');
+        const highlowLower = document.getElementById('casino-highlow-lower');
+        const highlowNew = document.getElementById('casino-highlow-new');
+        
+        if (rouletteSpin) rouletteSpin.onclick = () => this.spinRoulette();
+        if (slotsSpin) slotsSpin.onclick = () => this.spinSlots();
+        if (fishBetBtn) fishBetBtn.onclick = () => this.placeFishBet();
+        if (highlowHigher) highlowHigher.onclick = () => this.highlowGuess(true);
+        if (highlowLower) highlowLower.onclick = () => this.highlowGuess(false);
+        if (highlowNew) highlowNew.onclick = () => this.newHighlowCard();
     },
     
     renderRoulette(content) {

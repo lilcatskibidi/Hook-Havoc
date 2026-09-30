@@ -8,6 +8,16 @@ const Input = {
     if (e.key === '4') Player.selectWeapon(state, 3);
     if (e.key.toLowerCase() === 'r') WeaponSystem.reload(state);
     if (e.code === 'Space') { e.preventDefault(); Fishing.onSpaceDown(state); }
+    if (e.key.toLowerCase() === 'e') {
+        // Open beach shop if near shore
+        if (typeof Shop !== 'undefined' && state.player.x >= state.waterBoundaryX - 100) {
+            const beachTab = document.getElementById('tab-beach');
+            if (beachTab) {
+                beachTab.click();
+                document.getElementById('btn-open-shop').click();
+            }
+        }
+    }
 });
 
         window.addEventListener('keyup', (e) => {

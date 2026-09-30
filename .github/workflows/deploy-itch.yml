@@ -1,33 +1,18 @@
-name: Deploy to itch.io
+name: Deploy HTML to itch.io
 
-# Push a v* tag  -> publishes a build
-# Run manually  -> lets you tick "publish" and preview as a draft build first
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      publish:
-        description: 'Publish immediately (untick = save as draft build)'
-        type: boolean
-        required: false
-        default: true
-
-# Never let two uploads race for the same game.
-concurrency:
-  group: itch-deploy-${{ github.repository }}
-  cancel-in-progress: false
 
 jobs:
   deploy:
-    name: Build & upload
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Set up Node
@@ -38,61 +23,12 @@ jobs:
       - name: Build itch.io package
         run: node scripts/build-itch.mjs
 
-      - name: Verify archive layout
-        run: |
-          echo "--- archive contents ---"
-          unzip -l dist/itch.zip
-          unzip -Z1 dist/itch.zip | grep -qx 'index.html' \
-            || { echo "::error::index.html missing from archive root"; exit 1; }
-          if unzip -Z1 dist/itch.zip | grep -qE '^(node_modules/|.*/server\.js$)'; then
-            echo "::error::archive contains server-side files"; exit 1
-          fi
-
-      - name: Install butler
-        run: |
-          curl -fsSL -o butler https://broth.itch.zone/butler/linux/LATEST/archive/default
-          chmod +x butler
-          ./butler -v
-
-      - name: Push build to itch.io
+      - name: Publish to Itch.io via Butler
+        uses: yeslayla/butler-publish-itchio-action@master
         env:
-          ITCHIO_USERNAME: ${{ secrets.ITCHIO_USERNAME }}
-          ITCHIO_API_KEY: ${{ secrets.ITCHIO_API_KEY }}
-          ITCHIO_GAME_ID: ${{ secrets.ITCHIO_GAME_ID }}
-          # github.event.inputs is the raw *string* from the checkbox, so an
-          # unticked box is exactly "false" (on tag pushes it is empty => publish).
-          PUBLISH: ${{ github.event.inputs.publish }}
-        run: |
-          set -euo pipefail
-          if [ -z "${ITCHIO_USERNAME:-}" ] || [ -z "${ITCHIO_API_KEY:-}" ] || [ -z "${ITCHIO_GAME_ID:-}" ]; then
-            echo "::error::Missing secrets. Add ITCHIO_USERNAME, ITCHIO_API_KEY and ITCHIO_GAME_ID in repo Settings > Secrets."
-            exit 1
-          fi
-
-          FLAGS=""
-          if [ "$PUBLISH" = "false" ]; then
-            FLAGS="--draft"
-            echo "Uploading as a DRAFT build (unpublished)."
-          else
-            echo "Uploading and publishing build."
-          fi
-
-          ./butler push dist/itch "${ITCHIO_USERNAME}:${ITCHIO_GAME_ID}" \
-            --api-key "${ITCHIO_API_KEY}" \
-            --build-name "${GITHUB_REF_NAME}-${GITHUB_SHA::7}" \
-            $FLAGS
-
-      - name: Build status
-        env:
-          ITCHIO_USERNAME: ${{ secrets.ITCHIO_USERNAME }}
-          ITCHIO_API_KEY: ${{ secrets.ITCHIO_API_KEY }}
-          ITCHIO_GAME_ID: ${{ secrets.ITCHIO_GAME_ID }}
-        run: ./butler status "${ITCHIO_USERNAME}:${ITCHIO_GAME_ID}" --api-key "${ITCHIO_API_KEY}" || true
-
-      - name: Upload zip artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: aquatic-havoc-itch
-          path: dist/itch.zip
-          if-no-files-found: error
-          retention-days: 30
+          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
+          CHANNEL: html
+          ITCH_GAME: ${{ secrets.ITCHIO_GAME }}
+          ITCH_USER: ${{ secrets.ITCHIO_USERNAME }}
+          PACKAGE: dist/itch
+          VERSION: ${{ github.ref_name }}-${{ github.sha }}
