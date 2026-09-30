@@ -1070,6 +1070,7 @@ const FishIndex = {
         on('btn-fish-index', () => this.show());
         on('btn-fish-index-back', () => this.hide());
         on('btn-achievements', () => this.showAchievements());
+        on('btn-achievements-back', () => this.showPanel('main'));
         on('btn-open-index', () => this.openInGame());
         on('btn-index-close', () => this.closeInGame());
 

@@ -35,7 +35,9 @@ function resolveSignalingUrl() {
     } catch (e) { /* storage blocked, fall through */ }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.hostname}:8080`;
+    // file:// has no hostname (double-clicked zip build) -> assume local server
+    const host = window.location.hostname || 'localhost';
+    return `${protocol}//${host}:8080`;
 }
 
 const Multiplayer = {
