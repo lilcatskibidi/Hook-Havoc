@@ -43,6 +43,35 @@ const Player = {
 
         p.x = Utils.clamp(p.x, B.MIN_X + p.radius, state.waterBoundaryX - p.radius);
         p.y = Utils.clamp(p.y, B.MIN_Y + p.radius, B.MAX_Y - p.radius);
+
+        // Beach consumable timers
+        if (p.baitTimer > 0) p.baitTimer = Math.max(0, p.baitTimer - delta);
+        if (p.umbrellaTimer > 0) {
+            p.umbrellaTimer = Math.max(0, p.umbrellaTimer - delta);
+            // Safe-zone regen + fear enemies away
+            if (p.hp < p.maxHp) {
+                p.hp = Math.min(p.maxHp, p.hp + 2 * delta);
+                if (Math.random() < 0.05) this.refreshHUD(state);
+            }
+            if (state.monstersOnLand) {
+                for (const m of state.monstersOnLand) {
+                    const d = Math.hypot(m.x - p.x, m.y - p.y);
+                    if (d < 220 && d > 1) {
+                        m.x += ((m.x - p.x) / d) * 60 * delta;
+                        m.y += ((m.y - p.y) / d) * 60 * delta;
+                    }
+                }
+            }
+        }
+        // Abyssal set regen
+        if (p.armorSetBonus && p.armorSetBonus.hpRegen && p.hp < p.maxHp && !p.isDead) {
+            p._regenTick = (p._regenTick || 0) + delta;
+            if (p._regenTick >= 1) {
+                p._regenTick = 0;
+                p.hp = Math.min(p.maxHp, p.hp + p.armorSetBonus.hpRegen);
+                this.refreshHUD(state);
+            }
+        }
     },
 
     selectWeapon(state, slotIdx) {
@@ -201,5 +230,26 @@ const Player = {
         }
         
         return actualHeal;
+    },
+    
+    // Select rod from inventory
+    selectRod(state) {
+        const p = state.player;
+        if (!p.unlockedRods || p.unlockedRods.length === 0) return;
+        
+        // Cycle through unlocked rods
+        const currentIdx = p.unlockedRods.indexOf(p.equippedRod?.id || 'rod_starter');
+        const nextIdx = (currentIdx + 1) % p.unlockedRods.length;
+        const rodId = p.unlockedRods[nextIdx];
+        const rod = RODS.find(r => r.id === rodId);
+        
+        if (rod) {
+            p.equippedRod = rod;
+            this.refreshHUD(state);
+            UI.refreshLuckDisplay(state);
+            UI.renderWeaponToolbar(state);
+            Particles.showFloatingText(state, `Rod: ${rod.name}`, p.x, p.y - 30, rod.color);
+            try { audio.playUIClick(); } catch (e) {}
+        }
     }
 };

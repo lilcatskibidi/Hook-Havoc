@@ -32,7 +32,11 @@ const Fishing = {
             f.bobber.x = state.player.x + castDist;
             f.bobber.y = state.player.y + Utils.rand(-50, 50);
             f.waitingTime = 0;
-            f.biteTimer = Utils.rand(CONFIG.BITE_MIN_DELAY, CONFIG.BITE_MAX_DELAY);
+            const rod = state.player.equippedRod || {};
+            // Bait bonus: +5% catch rate ~ shorter wait handled via biteTimer scale
+            let biteMult = rod.biteTimeMult || 1.0;
+            if (state.player.baitTimer > 0) biteMult *= 0.8;
+            f.biteTimer = Utils.rand(CONFIG.BITE_MIN_DELAY, CONFIG.BITE_MAX_DELAY) * biteMult;
             UI.updateStatusBanner('Waiting for a bite...', 'Step 2');
         }
     },
@@ -73,9 +77,18 @@ const Fishing = {
         f.lineTension = 15;
         state.screenShake = 6;
 
-        const species = (typeof rollFishSpecies === 'function')
+        const rolled = (typeof rollFishSpecies === 'function')
             ? rollFishSpecies(state)
             : { name: 'Common Bass', rarity: 'common', maxHp: 100, staminaMax: 100, speed: 100, color: '#38bdf8', value: 10 };
+        // Per-catch instance: unique size, dot pattern, possible shiny.
+        // Cloned so shiny/value mods never leak into the global species.
+        const luck = (rod && typeof rod.luck === 'number') ? rod.luck : 0;
+        const species = (typeof makeCatchInstance === 'function')
+            ? makeCatchInstance(rolled, luck) : Object.assign({}, rolled);
+        if (species.shiny) {
+            Particles.showFloatingText(state, '✨ SHINY! Worth 3x! ✨', f.bobber.x, f.bobber.y - 60, '#fde047');
+            try { audio.playLevelUp(); } catch (e) {}
+        }
         const maxHp = species.maxHp || 100;
         const staminaMax = species.staminaMax || 100;
 
@@ -84,7 +97,8 @@ const Fishing = {
             rare:      50.0,
             epic:      65.0,
             legendary: 85.0,
-            mythic:    110.0
+            mythic:    110.0,
+            boss:      160.0
         };
 
         const rod = state.player.equippedRod || { reelPower: 80 };
@@ -118,7 +132,7 @@ const Fishing = {
 
         try {
             const rarity = species.rarity || 'common';
-            if (rarity === 'legendary' || rarity === 'mythic') audio.playRoar();
+            if (rarity === 'legendary' || rarity === 'mythic' || rarity === 'boss' || species.isBoss) audio.playRoar();
             else audio.playFishScreech();
         } catch (e) {}
 
@@ -280,6 +294,25 @@ const Fishing = {
 
         if (!fish.isDead) {
             fish.skillCooldown -= delta;
+            // Stun/freeze from guns pauses fish skills & movement in water too
+            if (fish.stunTimer > 0) fish.stunTimer -= delta;
+            if (fish.freezeTimer > 0) fish.freezeTimer -= delta;
+            // Burn / poison DoT in water (gun effects fixed)
+            if (fish.burnTimer > 0) {
+                fish.burnTimer -= delta;
+                const dps = fish.burnDps || 12;
+                fish.hp -= dps * delta;
+                fish.stamina -= dps * 0.5 * delta;
+                if (Math.random() < 0.2) Particles.spawnParticles(state, fish.x, fish.y, '#f97316', 1, { size: 3 });
+            }
+            if (fish.poisonTimer > 0) {
+                fish.poisonTimer -= delta;
+                const dps = fish.poisonDps || 10;
+                fish.hp -= dps * delta;
+                if (Math.random() < 0.1) Particles.showFloatingText(state, `-${Math.round(dps * delta)}`, fish.x, fish.y - 25, '#84cc16');
+            }
+            if (fish.slowTimer > 0) fish.slowTimer -= delta;
+            if (fish.hp <= 0) { this.killHookedFish(state); return; }
             if (fish.skillCooldown <= 0) {
                 const cooldowns = {
                     common: 4.0,
@@ -316,7 +349,10 @@ const Fishing = {
             const maxStam = fish.staminaMax || 100;
             const staminaRatio = fish.stamina / maxStam;
             const fishSpeed = (fish.species && fish.species.speed) ? fish.species.speed : 100;
-            const swimPower = fishSpeed * (fish.isRaging ? 1.8 : 1.0) * (0.4 + staminaRatio * 0.6);
+            const swimPower = fishSpeed * (fish.isRaging ? 1.8 : 1.0) * (0.4 + staminaRatio * 0.6)
+                * (fish.freezeTimer > 0 ? 0.25 : 1.0)
+                * (fish.stunTimer > 0 ? 0.0 : 1.0)
+                * (fish.slowTimer > 0 ? (fish.slowMult || 0.5) : 1.0);
 
             fish.vx += Math.cos(fish.targetAngle) * swimPower * 35 * delta;
             fish.vy += Math.sin(fish.targetAngle) * swimPower * 20 * delta;
@@ -340,13 +376,14 @@ const Fishing = {
                 pullMultiplier = 1 + (1 - staminaRatio) * 3.0;
             }
 
-            const reelPower = rod.reelPower || 80;
+            const reelPower = (rod.reelPower || 80) * (rod.pullMult || 1.0);
             const pullAccel = reelPower * pullMultiplier * 1.2;
             fish.vx += (dx / dist) * pullAccel * delta;
             fish.vy += (dy / dist) * pullAccel * delta;
 
             if (!fish.isDead) {
-                fish.stamina -= CONFIG.STAMINA_DRAIN_PER_REEL * delta;
+                const save = rod.staminaSave || 0;
+                fish.stamina -= CONFIG.STAMINA_DRAIN_PER_REEL * (1 - save) * delta;
                 const ragePenalty = fish.isRaging ? 2.2 : 1.0;
                 f.lineTension += CONFIG.TENSION_PER_REEL * ragePenalty * staminaRatio * delta;
             }

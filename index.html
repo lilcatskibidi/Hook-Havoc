@@ -397,6 +397,15 @@
                 <div id="mp-panel-multiplayer" class="mp-panel p-4 flex flex-col gap-3 hidden">
                     <h3 class="text-center text-lg font-bold text-sky-300 mb-2">MULTIPLAYER (LAN)</h3>
                     <p class="text-center text-xs text-slate-400 mb-4">Host a game or join a friend on the same network. Make sure the signaling server is running!</p>
+
+                    <div class="glass-panel-light p-3 rounded-xl">
+                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-1.5">SIGNALING SERVER (for itch.io: paste your public server URL)</div>
+                        <div class="flex gap-1.5">
+                            <input type="text" id="mp-server-url" class="flex-1 bg-slate-900/80 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 font-mono" placeholder="wss://your-server.onrender.com" spellcheck="false">
+                            <button id="btn-mp-server-save" class="px-3 py-1.5 bg-sky-500 hover:bg-sky-400 text-slate-950 text-[11px] font-black rounded-lg whitespace-nowrap">Save</button>
+                        </div>
+                        <div id="mp-server-status" class="text-[10px] text-slate-500 mt-1">Default: auto (same network, port 8080)</div>
+                    </div>
                     
                     <button id="btn-host" class="menu-btn bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950">
                         <i class="fa-solid fa-server mr-2"></i> <span>Host Game</span>

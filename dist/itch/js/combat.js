@@ -1,4 +1,26 @@
 const Combat = {
+    // Armor + umbrella mitigation shared by all enemy damage
+    damagePlayer(state, raw, opts = {}) {
+        const p = state.player;
+        if (p.isDead) return 0;
+        let dmg = Math.max(1, Math.round(raw));
+        let dr = 0;
+        if (typeof Shop !== 'undefined' && Shop.getDamageReduction) {
+            try { dr = Shop.getDamageReduction(state); } catch (e) {}
+        }
+        if (p.umbrellaTimer > 0) dr = Math.min(0.8, dr + 0.35);
+        dmg = Math.max(1, Math.round(dmg * (1 - dr)));
+        if (p.armorAnchor && opts.knockback) opts.knockback = 0;
+        p.hp -= dmg;
+        // Reflect back to attacker
+        if (opts.attacker && p.armorReflect > 0) {
+            opts.attacker.hp -= Math.round(raw * p.armorReflect);
+        }
+        Player.refreshHUD(state);
+        UI.triggerDamageFlash();
+        if (p.hp <= 0) Player.die(state);
+        return dmg;
+    },
     // ============================================================
     //  MAIN UPDATE
     // ============================================================
@@ -106,6 +128,39 @@ const Combat = {
             m.angle = Math.atan2(dy, dx);
 
             this.updateMonsterAI(state, m, p, dist, dx, dy, delta);
+
+            // --- Status Effects on Monsters ---
+            // Burn damage (all burn weapons, incl. water-applied)
+            if (m.burnTimer > 0) {
+                m.burnTimer -= delta;
+                const burnDps = m.burnDps || 12;
+                m.hp -= burnDps * delta;
+                if (Math.random() < 0.25) {
+                    Particles.spawnParticles(state, m.x, m.y, '#f97316', 1, { size: 3 });
+                }
+            }
+            // Poison damage
+            if (m.poisonTimer > 0) {
+                m.poisonTimer -= delta;
+                const poisonDps = m.poisonDps || 10;
+                m.hp -= poisonDps * delta;
+                if (Math.random() < 0.1) {
+                    Particles.showFloatingText(state, `-${Math.round(poisonDps * delta)}`, m.x, m.y - 25, '#84cc16');
+                }
+            }
+
+            // Freeze/slow effect
+            if (m.freezeTimer > 0) {
+                m.freezeTimer -= delta;
+                m.slowed = true;
+            } else {
+                m.slowed = false;
+            }
+
+            // Stun effect
+            if (m.stunTimer > 0) {
+                m.stunTimer -= delta;
+            }
 
             const size = m.species.size || 20;
             m.x = Utils.clamp(m.x, B.MIN_X + size, state.waterBoundaryX - size);
@@ -217,7 +272,7 @@ const Combat = {
                 if (b.trail.length > 8) b.trail.shift();
             }
 
-            if (Math.random() < 0.5) {
+            if (Math.random() < 0.2) {
                 Particles.spawnParticles(state, b.x, b.y,
                     b.color || '#facc15', 1, { size: 2 });
             }
@@ -232,8 +287,8 @@ const Combat = {
 
             const dist = Math.hypot(p.x - b.x, p.y - b.y);
             if (dist < (p.radius || 15) + (b.radius || 6)) {
-                p.hp -= b.damage || 5;
-                Particles.showFloatingText(state, `-${b.damage || 5}`, p.x, p.y - 25,
+                const dealt = this.damagePlayer(state, b.damage || 5);
+                Particles.showFloatingText(state, `-${dealt}`, p.x, p.y - 25,
                     b.color || '#facc15');
                 Player.refreshHUD(state);
                 UI.triggerDamageFlash();
@@ -272,11 +327,19 @@ const Combat = {
     //  IMPROVED BOSS AI
     // ============================================================
     updateMonsterAI(state, m, p, dist, dx, dy, delta) {
+        // Status effect modifiers
+        const isStunned = m.stunTimer > 0;
+        const isSlowed = m.slowed === true;
+        
+        if (isStunned) return; // Stunned monsters don't move or act
+        
+        const slowMult = isSlowed ? 0.3 : 1.0;
         const baseSpeed = (m.species.speed || 4) * 22;
         const speedMult =
             (m.isEnraged ? 1.45 : 1.0) *
             (m.stealthTimer > 0 ? 1.25 : 1.0) *
-            (m.phase === 2 ? 1.15 : 1.0);
+            (m.phase === 2 ? 1.15 : 1.0) *
+            slowMult;
         const spd = baseSpeed * speedMult;
 
         const dirX = dx / dist;
@@ -356,7 +419,7 @@ const Combat = {
                 m.x += tangentX * flankSpeed * delta;
                 m.y += tangentY * flankSpeed * delta;
 
-                if (Math.random() < 0.6) {
+                if (Math.random() < 0.4) {
                     Particles.spawnParticles(state, m.x, m.y,
                         m.species.color || '#f87171', 1, { size: 2 });
                 }
@@ -373,7 +436,7 @@ const Combat = {
                 m.x += dirX * spd * 0.2 * delta;
                 m.y += dirY * spd * 0.2 * delta;
 
-                if (Math.random() < 0.55) {
+                if (Math.random() < 0.35) {
                     Particles.spawnParticles(state, m.x, m.y,
                         m.species.color || '#ef4444', 2, { size: 3 });
                 }
@@ -392,7 +455,7 @@ const Combat = {
                     m.x += (m.chargeDirX || dirX) * chargeSpeed * delta;
                     m.y += (m.chargeDirY || dirY) * chargeSpeed * delta;
 
-                    if (Math.random() < 0.7) {
+                    if (Math.random() < 0.45) {
                         Particles.spawnParticles(state, m.x, m.y,
                             m.phase === 2 ? '#dc2626' : '#f59e0b', 2);
                     }
@@ -1028,17 +1091,17 @@ const Combat = {
         }
 
         const finalDamage = Math.round(damage);
-        p.hp -= finalDamage;
+        const dealt = this.damagePlayer(state, finalDamage, { attacker: m, knockback: 1 });
 
         try { audio.playHit(); } catch (e) {}
         try { audio.playHurt(); } catch (e) {}
-        Particles.showFloatingText(state, `-${finalDamage}`,
+        Particles.showFloatingText(state, `-${dealt}`,
             p.x, p.y - 25, '#f43f5e');
         Player.refreshHUD(state);
         UI.triggerDamageFlash();
         state.screenShake = 8;
 
-        const knockback = 40;
+        const knockback = (p.armorAnchor || p.umbrellaTimer > 0) ? 0 : 40;
         p.x += (dx / dist) * knockback;
         p.y += (dy / dist) * knockback;
 
@@ -1085,7 +1148,12 @@ const Combat = {
             const dist = Math.hypot(p.x - h.x, p.y - h.y);
             if (dist < h.radius + (p.radius || 15)) {
                 const tickDmg = h.damagePerSec * delta;
-                p.hp -= tickDmg;
+                let dr = 0;
+                if (typeof Shop !== 'undefined' && Shop.getDamageReduction) {
+                    try { dr = Shop.getDamageReduction(state); } catch (e) {}
+                }
+                if (p.umbrellaTimer > 0) dr = Math.min(0.8, dr + 0.35);
+                p.hp -= tickDmg * (1 - dr);
                 if (Math.random() < 0.2) {
                     Particles.showFloatingText(state, `-${Math.ceil(tickDmg)}`,
                         p.x, p.y - 20, h.color);
@@ -1130,6 +1198,17 @@ const Combat = {
                     UI.showCatchPopup(item.species);
                     Player.refreshHUD(state);
                     state.groundLoot.splice(i, 1);
+                    
+                    // Add to fish index (caught fish) — real fish only,
+                    // so seagull/crab meat doesn't pollute the index count
+                    if (!p.caughtFish) p.caughtFish = [];
+                    const isRealFish = (typeof FISH_SPECIES !== 'undefined') && FISH_SPECIES.some(s => s.id === item.species.id);
+                    const alreadyCaught = p.caughtFish.some(f => f.id === item.species.id);
+                    if (!alreadyCaught && isRealFish) {
+                        p.caughtFish.push(item.species);
+                        Particles.showFloatingText(state, `NEW ENTRY: ${item.species.name}!`, p.x, p.y - 50, '#facc15');
+                    }
+                    
                     Player.addXP(state, Math.round((item.species.value || 10) / 10) + 5);
                     UI.updateStatusBanner('Loot Claimed! Return to shop.', 'Claimed!', 'emerald');
                 } else {

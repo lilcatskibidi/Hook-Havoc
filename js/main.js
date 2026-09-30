@@ -742,6 +742,7 @@ const MultiplayerUI = {
         on('btn-multiplayer', () => this.showPanel('multiplayer'));
         on('btn-host',        () => this.hostGame());
         on('btn-join',        () => this.showPanel('join'));
+        on('btn-mp-server-save', () => this.saveServerUrl());
         on('btn-mp-back',     () => this.showPanel('main'));
         on('btn-join-back',   () => this.showPanel('multiplayer'));
         on('btn-copy-room',   () => this.copyRoomCode());
@@ -783,6 +784,47 @@ const MultiplayerUI = {
         const panelEl = $(`mp-panel-${panel}`);
         if (panelEl) panelEl.classList.remove('hidden');
         this.currentPanel = panel;
+        if (panel === 'multiplayer') this.refreshServerUrlRow();
+    },
+
+    refreshServerUrlRow() {
+        try {
+            const saved = localStorage.getItem('ah_signaling_server');
+            const input = $('mp-server-url');
+            const status = $('mp-server-status');
+            if (input && document.activeElement !== input) input.value = saved || '';
+            if (status) {
+                status.innerText = saved
+                    ? `Using custom server: ${saved}`
+                    : 'Default: auto (same network, port 8080)';
+                status.className = `text-[10px] mt-1 ${saved ? 'text-emerald-400' : 'text-slate-500'}`;
+            }
+        } catch (e) {}
+    },
+
+    saveServerUrl() {
+        const input = $('mp-server-url');
+        const val = input ? input.value.trim() : '';
+        try {
+            if (val) localStorage.setItem('ah_signaling_server', val);
+            else localStorage.removeItem('ah_signaling_server');
+        } catch (e) {}
+        // Apply live (takes effect on next Host/Join)
+        if (window.Multiplayer) {
+            try {
+                const u = val || null;
+                let resolved = null;
+                if (u) {
+                    if (/^wss?:\/\//i.test(u)) resolved = u;
+                    else if (/^https:\/\//i.test(u)) resolved = 'wss://' + u.slice(8);
+                    else if (/^http:\/\//i.test(u)) resolved = 'ws://' + u.slice(7);
+                    else resolved = 'wss://' + u.replace(/^\/+/, '');
+                }
+                if (resolved) window.Multiplayer.signalingUrl = resolved;
+            } catch (e) {}
+        }
+        this.refreshServerUrlRow();
+        UI.updateStatusBanner(val ? 'Signaling server saved.' : 'Custom server cleared (back to auto).', 'Server', 'emerald');
     },
 
     async hostGame() {
