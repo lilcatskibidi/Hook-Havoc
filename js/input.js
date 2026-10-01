@@ -12,8 +12,17 @@ const Input = {
     }
     if (e.code === 'Space') { e.preventDefault(); Fishing.onSpaceDown(state); }
     if (e.key.toLowerCase() === 'e') {
-        // World SHOP / CASINO zones (double-circle pads on the beach).
-        // SHOP circle = beach shop (same shop, Beach tab).
+        // Old Marlin first — quests beat shopping
+        if (typeof NPC !== 'undefined' && NPC.near) {
+            try {
+                if (!state.paused && NPC.near(state) < (NPC.RADIUS || 115)) {
+                    NPC.open(state);
+                    return;
+                }
+            } catch (err) {}
+        }
+        // World SHOP / CASINO pads only — no more opening shops from
+        // anywhere near the sea. SHOP pad = beach shop (same shop).
         if (typeof Render !== 'undefined' && Render.nearestShopZone) {
             const near = Render.nearestShopZone(state);
             if (near && near.dist < near.zone.radius + 30) {
@@ -22,12 +31,7 @@ const Input = {
                 } else {
                     if (typeof Shop !== 'undefined') Shop.openBeach(state);
                 }
-                return;
             }
-        }
-        // Fallback: near shore opens the beach shop
-        if (typeof Shop !== 'undefined' && state.player.x >= state.waterBoundaryX - 100) {
-            Shop.openBeach(state);
         }
     }
 });

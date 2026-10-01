@@ -1,0 +1,14 @@
+AQUATIC HAVOC — CUSTOM BOBBER ART
+==================================
+Drop a PNG named exactly like a bobber model into THIS folder:
+
+  classic.png  slim.png  bulb.png  glow.png  feather.png  rocket.png
+
+(rod -> model mapping: see the bobberModel field on each rod
+in js/weapons.js — or upload per-model art in-game via
+Shop > Rods > UPLOAD on any rod row)
+
+Rules:
+  - Transparent background, any size or aspect ratio — the game
+    fits it around ~30px without stretching (pixels never squashed).
+  - Missing file = procedural bobber for that model, no errors.

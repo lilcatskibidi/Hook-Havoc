@@ -34,12 +34,25 @@ const Combat = {
         if (!state.groundLoot) state.groundLoot = [];
         if (!state.delayedBlasts) state.delayedBlasts = [];
 
-        this.updateBullets(state, delta);
+        // MP clients render the host's world: monster death + loot are
+        // host-owned (prevents double kills / double loot).
+        const isMPClient = (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient());
+
+        // Enemy-bullet sim is host-owned; clients only take the hits (intake)
+        if (!isMPClient) this.updateBullets(state, delta);
         this.updateDelayedBlasts(state, delta);
         this.updateGroundHazards(state, delta);
         this.updatePlayerStatus(state, delta);
 
         if (p.isDead || p.hp <= 0) return;
+
+        // Co-op client: the host simulates ALL shared entities. The client
+        // only takes damage from them (identical positions = identical view).
+        if (isMPClient) {
+            this.applyClientIntake(state, delta);
+            this.updateGroundLoot(state);
+            return;
+        }
 
         for (let i = state.monstersOnLand.length - 1; i >= 0; i--) {
             const m = state.monstersOnLand[i];
@@ -57,6 +70,7 @@ const Combat = {
 
             // --- Death ---
             if (m.hp <= 0) {
+                if (isMPClient) continue; // host owns death + loot
                 Particles.spawnBloodImpact(state, m.x, m.y, '#ef4444', 30);
                 const isBoss = m.species.isBoss ||
                                m.species.rarity === 'legendary' ||
@@ -84,7 +98,7 @@ const Combat = {
                     UI.updateStatusBanner(`${m.species.name} has fallen!`, 'Victory', 'emerald');
                 }
 
-                state.groundLoot.push({ species: m.species, x: m.x, y: m.y });
+                state.groundLoot.push({ id: 'l' + (state._lootSeq = (state._lootSeq || 0) + 1), species: m.species, x: m.x, y: m.y });
                 state.monstersOnLand.splice(i, 1);
                 continue;
             }
@@ -240,6 +254,99 @@ const Combat = {
         }
     },
 
+    // Co-op damage intake: host owns positions/AI, the client only checks
+    // "is a synced threat touching me?" — same positions, same damage.
+    _intakeCd() {
+        if (!this._clientHitCd || Object.keys(this._clientHitCd).length > 300) {
+            this._clientHitCd = {};
+        }
+        return this._clientHitCd;
+    },
+
+    applyClientIntake(state, delta) {
+        void delta;
+        const p = state.player;
+        if (!p || p.isDead || p.hp <= 0) return;
+        const cd = this._intakeCd();
+        const now = state.time || 0;
+
+        // Beached monsters — same contact rule as the host melee pass
+        for (const m of (state.monstersOnLand || [])) {
+            if (!m.species || m.hp <= 0) continue;
+            const size = m.species.size || 20;
+            const dx = p.x - m.x, dy = p.y - m.y;
+            const dist = Math.hypot(dx, dy) || 1;
+            if (dist < (p.radius || 15) + size) {
+                const key = 'm:' + m.id;
+                if ((cd[key] || 0) > now) continue;
+                cd[key] = now + 0.6;
+                this.handleDirectMeleeContact(state, m, p, dist, dx, dy);
+                if (p.hp <= 0) return;
+            }
+        }
+
+        // Open-world enemies touching the player
+        for (const e of (state.enemies || [])) {
+            if (e.hp <= 0 || e.burrowed || e.state === 'burrowed') continue;
+            // Living missiles detonate host-side; the client takes the hit
+            // once per missile id (host owns the lifecycle/removal).
+            if (e.enemyType === 'gullMissile') {
+                if (!e.id || cd['m:' + e.id]) continue;
+                if (Math.hypot(p.x - e.x, p.y - e.y) < (p.radius || 15) + 12) {
+                    cd['m:' + e.id] = 1;
+                    const dealt = this.damagePlayer(state, e.damage || 35);
+                    Particles.showFloatingText(state, `-${dealt}`, p.x, p.y - 25, '#f97316');
+                    Particles.spawnParticles(state, p.x, p.y, '#f97316', 10, { size: 5 });
+                    state.screenShake = Math.max(state.screenShake, 10);
+                    try { audio.playHurt(); } catch (err) {}
+                    if (p.hp <= 0) return;
+                }
+                continue;
+            }
+            const er = e.isBoss ? 44 : e.enemyType === 'seagull' ? 22 : e.enemyType === 'beachCrab' ? 24 : 30;
+            const dist = Math.hypot(p.x - e.x, p.y - e.y);
+            if (dist < (p.radius || 15) + er) {
+                const key = 'e:' + (e.id || e.enemyType);
+                if ((cd[key] || 0) > now) continue;
+                cd[key] = now + 0.8;
+                const dealt = this.damagePlayer(state, e.damage || 10);
+                try { audio.playHurt(); } catch (err) {}
+                Particles.showFloatingText(state, `-${dealt}`, p.x, p.y - 25, '#f43f5e');
+                if (p.hp <= 0) return;
+            }
+        }
+
+        // Host enemy bullets — hit once per bullet id (never despawned locally;
+        // the host owns the bullet lifecycle)
+        for (const b of (state.bullets || [])) {
+            if (b.owner !== 'enemy' || !b.id || cd['b:' + b.id]) continue;
+            const dist = Math.hypot(p.x - b.x, p.y - b.y);
+            if (dist < (p.radius || 15) + (b.radius || 6)) {
+                cd['b:' + b.id] = 1;
+                const dealt = this.damagePlayer(state, b.damage || 5);
+                Particles.showFloatingText(state, `-${dealt}`, p.x, p.y - 25, b.color || '#facc15');
+                Particles.spawnParticles(state, b.x, b.y, b.color || '#facc15', 6);
+                try { audio.playHurt(); } catch (err) {}
+                state.screenShake = Math.max(state.screenShake, 6);
+                if (p.hp <= 0) return;
+            }
+        }
+
+        // Host fish-skill projectiles — same one-hit-per-id rule
+        for (const b of (state.projectiles || [])) {
+            if (!b.id || cd['p:' + b.id]) continue;
+            const dist = Math.hypot(p.x - b.x, p.y - b.y);
+            if (dist < (p.radius || 15) + (b.radius || 8)) {
+                cd['p:' + b.id] = 1;
+                const dealt = this.damagePlayer(state, b.damage || 5);
+                Particles.showFloatingText(state, `-${dealt}`, p.x, p.y - 25, b.color || '#facc15');
+                Particles.spawnParticles(state, p.x, p.y, b.color || '#facc15', 6);
+                try { audio.playHurt(); } catch (err) {}
+                if (p.hp <= 0) return;
+            }
+        }
+    },
+
     // ============================================================
     //  BULLETS
     // ============================================================
@@ -309,6 +416,7 @@ const Combat = {
 
     spawnBullet(state, x, y, vx, vy, opts = {}) {
         state.bullets.push({
+            id: 'e' + (state._ebSeq = (state._ebSeq || 0) + 1),
             x, y, vx, vy,
             owner: 'enemy',
             radius: opts.radius || 7,
@@ -1177,14 +1285,42 @@ const Combat = {
 
         const MAGNET_RADIUS = 90;
         const PICKUP_RADIUS = 55;
+        const B = (typeof CONFIG !== 'undefined' && CONFIG.WORLD) || { MIN_X: 0, MAX_X: 9999, MIN_Y: 0, MAX_Y: 9999 };
 
         for (let i = state.groundLoot.length - 1; i >= 0; i--) {
             const item = state.groundLoot[i];
+            // Lost to the sea / out of bounds: sink with bubbles, then gone
+            if (!item.sinking) {
+                const lost = item.x > state.waterBoundaryX + 15 ||
+                    item.x < B.MIN_X - 20 || item.x > B.MAX_X + 20 ||
+                    item.y < B.MIN_Y - 20 || item.y > B.MAX_Y + 20;
+                if (lost) {
+                    item.sinking = 1.2;
+                    item.sinkMax = 1.2;
+                    if (typeof Particles !== 'undefined') {
+                        Particles.spawnWaterSplashes(state, item.x, item.y, 6);
+                        Particles.showFloatingText(state, 'Lost to the sea...', item.x, item.y - 20, '#38bdf8');
+                    }
+                }
+            }
+            if (item.sinking) {
+                item.sinking -= 0.016;
+                item.y += 22 * 0.016; // settle down
+                if (Math.random() < 0.25 && typeof Particles !== 'undefined') {
+                    Particles.spawnWaterSplashes(state, item.x, item.y, 1);
+                }
+                if (item.sinking <= 0) {
+                    state.groundLoot.splice(i, 1);
+                }
+                continue; // no magnet/pickup while sinking
+            }
             const dx = p.x - item.x;
             const dy = p.y - item.y;
             const dist = Math.hypot(dx, dy) || 1;
 
-            if (dist < MAGNET_RADIUS && dist > 4) {
+            // Host owns loot physics — clients only pick up (then claim)
+            const isMPClient = (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient());
+            if (dist < MAGNET_RADIUS && dist > 4 && !isMPClient) {
                 const strength = 1 + (1 - dist / MAGNET_RADIUS) * 3;
                 const pullSpeed = 260 * strength;
                 item.x += (dx / dist) * pullSpeed * 0.016;
@@ -1192,12 +1328,23 @@ const Combat = {
             }
 
             if (dist < PICKUP_RADIUS) {
+                // Personal loot: whoever grabs it keeps it. In MP the host
+                // is told to delete the shared drop so it can't double-spawn.
                 if (p.bucket.length < p.bucketCapacity) {
                     try { audio.playCoin(); } catch (e) {}
                     p.bucket.push(item.species);
                     UI.showCatchPopup(item.species);
+                    if (typeof NPC !== 'undefined' && NPC.onCatch) {
+                        try { NPC.onCatch(state, item.species); } catch (err) {}
+                    }
+                    if (typeof Tutorial !== 'undefined' && Tutorial.onLoot) {
+                        try { Tutorial.onLoot(state); } catch (err) {}
+                    }
                     Player.refreshHUD(state);
                     state.groundLoot.splice(i, 1);
+                    if (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient()) {
+                        if (item.id && Multiplayer.sendLootDelete) Multiplayer.sendLootDelete(item.id);
+                    }
                     
                     // Add to fish index (caught fish) — real fish only,
                     // so seagull/crab meat doesn't pollute the index count

@@ -16,21 +16,29 @@
         <div class="absolute inset-0 pointer-events-none" style="background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.4) 100%);"></div>
         <div id="damage-flash" class="damage-flash"></div>
         
-        <!-- Boss HP bar -->
-        <div id="boss-bar" class="absolute top-4 left-1/2 -translate-x-1/2 w-[70%] max-w-3xl hidden z-20 pointer-events-none">
-            <div class="glass-panel rounded-2xl p-3 border-2 border-rose-500/60 shadow-2xl neon-glow-amber">
-                <div class="flex justify-between items-center mb-1">
-                    <div class="flex items-center gap-2">
-                        <i class="fa-solid fa-crown text-amber-400 animate-pulse"></i>
-                        <span id="boss-name" class="font-black text-white text-sm tracking-widest uppercase">BOSS</span>
+        <!-- Boss HP bar (BIG) -->
+        <div id="boss-bar" class="absolute top-3 left-1/2 -translate-x-1/2 w-[80%] max-w-4xl hidden z-20 pointer-events-none">
+            <div class="glass-panel rounded-2xl p-4 border-2 border-rose-500/70 shadow-2xl neon-glow-amber">
+                <div class="flex justify-between items-center mb-1.5 gap-2">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <i class="fa-solid fa-crown text-amber-400 animate-pulse text-2xl"></i>
+                        <span id="boss-name" class="font-black text-white text-xl tracking-widest uppercase truncate">BOSS</span>
                     </div>
-                    <span id="boss-hp-text" class="text-xs font-black text-rose-300">0 / 0</span>
+                    <span id="boss-hp-text" class="text-sm font-black text-rose-300 whitespace-nowrap">0 / 0</span>
                 </div>
-                <div class="w-full h-4 bg-slate-950 rounded-full overflow-hidden border border-rose-500/40 relative">
+                <div class="w-full h-6 bg-slate-950 rounded-full overflow-hidden border-2 border-rose-500/50 relative">
                     <div id="boss-hp-bar" class="h-full bg-gradient-to-r from-rose-600 via-red-500 to-amber-400 transition-all duration-200" style="width: 100%;"></div>
                     <div class="absolute top-0 bottom-0 w-0.5 bg-white/50" style="left: 40%;"></div>
                 </div>
-                <div id="boss-phase-text" class="text-[10px] text-amber-300 font-bold mt-1 tracking-wider">PHASE 1</div>
+                <div id="boss-phase-text" class="text-xs text-amber-300 font-bold mt-1 tracking-wider">PHASE 1</div>
+            </div>
+        </div>
+
+        <!-- Fight list (normal fish currently in combat, can be many) -->
+        <div id="fight-list" class="absolute top-24 right-3 w-64 hidden z-10 pointer-events-none">
+            <div class="glass-panel rounded-2xl p-2.5 border border-sky-500/30 shadow-xl">
+                <div id="fight-list-header" class="text-[10px] font-black tracking-widest text-sky-300 mb-1.5">⚔ IN COMBAT</div>
+                <div id="fight-list-rows" class="flex flex-col gap-1.5 max-h-[46vh] overflow-y-auto"></div>
             </div>
         </div>
         
@@ -71,19 +79,7 @@
                 </div>
             </div>
 
-            <div class="hidden lg:flex flex-col items-center glass-panel px-5 py-2.5 rounded-2xl border border-sky-500/20 text-[11px] gap-1 pointer-events-auto hud-shadow">
-                <div class="flex gap-4 font-bold text-sky-300">
-                    <div><span class="key">WASD</span> Move</div>
-                    <div><span class="key">SPACE</span> Cast / Reel</div>
-                    <div><span class="key">LMB</span> Shoot</div>
-                    <div><span class="key">1-4</span> Weapon</div>
-                    <div><span class="key">R</span> Reload</div>
-                    <div><span class="key">ESC</span> Menu</div>
-                    <div><span class="key">H</span> Heal</div>
-                    <div><span class="key">J</span> Index</div>
-                </div>
-                <div class="text-[10px] text-slate-400">Shoot hooked fish to weaken · Drag them to shore!</div>
-            </div>
+            <!-- In-game controls hint moved to Menu > HOW TO PLAY -->
 
             <div class="flex gap-2 pointer-events-auto">
                 <button id="btn-menu" class="glass-panel hover:bg-slate-800/80 w-11 h-11 rounded-xl text-slate-300 hover:text-white transition-all flex items-center justify-center font-bold shadow-md hud-shadow" title="Menu (ESC)">
@@ -95,6 +91,10 @@
                 <button id="btn-open-index" class="glass-panel hover:bg-slate-800/80 px-4 py-2 rounded-xl text-fuchsia-400 hover:text-fuchsia-300 transition-all flex items-center gap-2 font-bold shadow-md hud-shadow border border-fuchsia-500/30" title="Fish Index (J)">
                     <i class="fa-solid fa-book-open"></i>
                     <span class="hidden sm:inline">Index</span>
+                </button>
+                <button id="btn-open-casino-hud" class="glass-panel hover:bg-slate-800/80 px-4 py-2 rounded-xl text-fuchsia-400 hover:text-fuchsia-300 transition-all flex items-center gap-2 font-bold shadow-md hud-shadow border border-fuchsia-500/30" title="Open Casino">
+                    <i class="fa-solid fa-dice"></i>
+                    <span class="hidden sm:inline">Casino</span>
                 </button>
                 <button id="btn-open-shop" class="glass-panel hover:bg-slate-800/80 px-4 py-2 rounded-xl text-amber-400 hover:text-amber-300 transition-all flex items-center gap-2 font-bold shadow-md hud-shadow border border-amber-500/30">
                     <i class="fa-solid fa-store"></i>
@@ -135,6 +135,9 @@
             </div>
         </div>
 
+        <!-- Quest tracker (Old Marlin job progress) -->
+        <div id="quest-tracker" class="absolute top-40 left-3 glass-panel px-3 py-2 rounded-xl shadow-xl border border-amber-500/40 hidden z-10 pointer-events-none w-60"></div>
+
         <!-- Weapon toolbar -->
         <div id="weapon-toolbar" class="absolute bottom-6 left-6 glass-panel p-2 rounded-2xl flex gap-1.5 shadow-xl border border-slate-700/60 pointer-events-auto z-10 hud-shadow"></div>
 
@@ -174,34 +177,12 @@
                     <span class="px-1.5 py-0.5 bg-amber-500/20 border border-amber-500/30 rounded text-[8px] font-bold text-amber-300">EARLY BETA</span>
                 </div>
                 <div class="flex items-center gap-1">
-                    <button id="mp-chat-toggle" class="text-slate-400 hover:text-white text-xs p-1" title="Chat">
-                        <i class="fa-solid fa-comments"></i>
-                    </button>
-                    <button id="mp-exit-btn" class="text-rose-400 hover:text-rose-300 text-xs p-1" title="Leave Game (LAN Bug Escape)">
+                    <button id="mp-exit-btn" class="text-rose-400 hover:text-rose-300 text-xs p-1" title="Leave Game">
                         <i class="fa-solid fa-door-open"></i>
                     </button>
                 </div>
             </div>
-            
-            <!-- Heal button with cooldown -->
-            <div class="mb-2">
-                <button id="mp-heal-btn" class="w-full px-3 py-2 bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-400 hover:to-rose-500 text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg">
-                    <i class="fa-solid fa-heart-pulse mr-1"></i>Heal (3)
-                </button>
-                <div class="w-full h-1 bg-slate-800 rounded-full mt-1 overflow-hidden">
-                    <div id="mp-heal-cooldown" class="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all duration-100" style="width: 100%;"></div>
-                </div>
-                <div class="text-[9px] text-slate-400 text-right mt-0.5">Press <span class="key">H</span> to heal both players</div>
-            </div>
-            
-            <!-- Chat panel -->
-            <div id="mp-chat-panel" class="hidden border-t border-slate-700/50 pt-2 mt-2 max-h-40 overflow-y-auto">
-                <div id="mp-chat-messages" class="space-y-1 max-h-32 overflow-y-auto pr-1"></div>
-                <div class="flex gap-1 mt-2">
-                    <input type="text" id="mp-chat-input" class="flex-1 bg-slate-900/80 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500" placeholder="Press Enter to chat..." maxlength="100">
-                    <button id="mp-chat-send" class="px-2 py-1 bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-bold rounded-lg">Send</button>
-                </div>
-            </div>
+            <div class="text-[9px] text-slate-500 font-bold tracking-wider">SHARED WORLD · PERSONAL COINS & GEAR</div>
         </div>
 
         <!-- ================= SHOP MODAL ================= -->
@@ -286,6 +267,26 @@
             </div>
         </div>
 
+        <!-- ================= NPC DIALOGUE MODAL ================= -->
+        <div id="npc-modal" class="absolute inset-0 bg-slate-950/90 backdrop-blur-lg flex items-center justify-center z-30 hidden pointer-events-auto p-3 sm:p-4">
+            <div class="glass-panel w-full max-w-md rounded-3xl overflow-hidden border border-amber-500/30 shadow-2xl">
+                <div class="p-4 border-b border-slate-800/80 flex items-center gap-3 bg-gradient-to-r from-amber-900/40 to-slate-900/40">
+                    <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500/30 to-amber-600/20 text-amber-400 flex items-center justify-center text-3xl border border-amber-500/30 shrink-0">🧙</div>
+                    <div class="flex-1">
+                        <h2 class="font-header text-xl text-white font-bold leading-none">OLD MARLIN</h2>
+                        <p class="text-xs text-amber-300 mt-0.5">Quest giver · Keeper of storm tales</p>
+                    </div>
+                    <button id="npc-close" class="text-slate-400 hover:text-white p-2 text-2xl transition-all hover:rotate-90 duration-200">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                <div class="p-4">
+                    <div id="npc-text" class="text-sm text-slate-200 leading-relaxed mb-3 min-h-[3rem]"></div>
+                    <div id="npc-buttons" class="flex flex-col gap-2"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- ================= CASINO MODAL ================= -->
         <div id="casino-modal" class="absolute inset-0 bg-slate-950/95 backdrop-blur-lg flex items-center justify-center z-30 hidden pointer-events-auto p-3 sm:p-4">
             <div class="glass-panel w-full max-w-4xl h-[90%] rounded-3xl flex flex-col overflow-hidden border border-fuchsia-500/30 shadow-2xl neon-glow-fuchsia">
@@ -323,7 +324,7 @@
                 <div id="casino-footer" class="p-4 border-t border-slate-800/80 bg-slate-900/80 flex justify-between items-center gap-2 flex-wrap">
                     <div class="text-xs text-slate-400">
                         <span class="block">Tokens: <span id="casino-tokens-footer" class="text-fuchsia-300 font-bold">0</span></span>
-                        <span class="block">Cashout rate: 1T = 80c</span>
+                        <span class="block">Cashout rate: 1T = 70c (house cut 30%)</span>
                     </div>
                     <div class="flex gap-2 flex-wrap">
                         <button id="casino-buy-tokens" class="px-3 py-2 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 text-xs font-black rounded-xl transition-all">
@@ -336,7 +337,7 @@
                             +100T (10k)
                         </button>
                         <button id="casino-free-tokens" class="px-3 py-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 text-xs font-black rounded-xl transition-all">
-                            +5 FREE (60s)
+                            +3 FREE (120s)
                         </button>
                         <button id="casino-cashout" class="px-3 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-black rounded-xl transition-all">
                             <i class="fa-solid fa-sack-dollar mr-1"></i> Cashout <span id="casino-cashout-label">0T → 0c</span>
@@ -370,6 +371,15 @@
 
                 <!-- Main Menu Panel -->
                 <div id="mp-panel-main" class="mp-panel p-4 flex flex-col gap-2">
+                    <div class="glass-panel-light px-3 py-2 rounded-xl">
+                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-1.5">SAVE FILE (SINGLE PLAYER)</div>
+                        <div class="flex gap-1.5" id="save-slots-row">
+                            <button class="save-slot-btn flex-1 px-2 py-1.5 rounded-lg text-xs font-black bg-slate-800/60 border border-slate-700 text-slate-300" data-slot="1">Slot 1</button>
+                            <button class="save-slot-btn flex-1 px-2 py-1.5 rounded-lg text-xs font-black bg-slate-800/60 border border-slate-700 text-slate-300" data-slot="2">Slot 2</button>
+                            <button class="save-slot-btn flex-1 px-2 py-1.5 rounded-lg text-xs font-black bg-slate-800/60 border border-slate-700 text-slate-300" data-slot="3">Slot 3</button>
+                        </div>
+                        <div id="save-slot-meta" class="text-[10px] text-slate-500 mt-1">No save in this slot yet</div>
+                    </div>
                     <button id="btn-start" class="menu-btn">
                         <i class="fa-solid fa-play"></i> <span>Start New Game</span>
                     </button>
@@ -381,6 +391,12 @@
                     </button>
                     <button id="btn-fish-index" class="menu-btn border-l-4 border-l-fuchsia-500">
                         <i class="fa-solid fa-book-open"></i> <span>Fish Index</span>
+                    </button>
+                    <button id="btn-how-to-play" class="menu-btn border-l-4 border-l-sky-500">
+                        <i class="fa-solid fa-circle-question"></i> <span>How To Play</span>
+                    </button>
+                    <button id="btn-settings" class="menu-btn border-l-4 border-l-slate-500">
+                        <i class="fa-solid fa-gear"></i> <span>Settings</span>
                     </button>
                     <button id="btn-achievements" class="menu-btn border-l-4 border-l-amber-500">
                         <i class="fa-solid fa-trophy"></i> <span>Achievements</span>
@@ -462,6 +478,15 @@
                         <div class="text-[10px] font-black tracking-widest text-slate-400 mb-2">PLAYERS <span id="mp-lobby-count" class="text-sky-300">1 / 4</span></div>
                         <div id="mp-lobby-players" class="flex flex-col gap-1.5"></div>
                     </div>
+
+                    <div class="glass-panel-light p-3 rounded-xl" id="mp-expedition-box">
+                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-1.5">EXPEDITION SAVE (HOST'S FILE)</div>
+                        <div class="flex gap-1.5">
+                            <button id="btn-mp-new" class="flex-1 px-2 py-2 rounded-xl text-xs font-black bg-slate-800/60 border border-slate-600 text-slate-200">NEW</button>
+                            <button id="btn-mp-continue" class="flex-1 px-2 py-2 rounded-xl text-xs font-black bg-emerald-500/20 border border-emerald-500/40 text-emerald-300">CONTINUE</button>
+                        </div>
+                        <div id="mp-save-meta" class="text-[10px] text-slate-500 mt-1">No expedition save yet</div>
+                    </div>
                     
                     <div class="flex gap-2">
                         <button id="btn-start-mp" class="menu-btn flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 disabled:opacity-50" disabled>
@@ -532,7 +557,7 @@
                     </div>
                     
                     <!-- Fish grid -->
-                    <div id="fish-index-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[50vh] overflow-y-auto pr-1"></div>
+                    <div id="fish-index-grid" class="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[50vh] overflow-y-auto pr-1"></div>
                 </div>
 
                 <!-- Achievements Panel -->
@@ -546,6 +571,57 @@
                         </button>
                     </div>
                     <div id="achievements-container" class="achievements-scroll-body"></div>
+                </div>
+
+                <!-- How To Play Panel -->
+                <div id="mp-panel-help" class="mp-panel p-4 hidden">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-lg font-bold text-sky-300 flex items-center gap-2">
+                            <i class="fa-solid fa-circle-question"></i> HOW TO PLAY
+                        </h3>
+                        <button id="btn-help-back" class="text-slate-400 hover:text-white text-sm font-bold px-2 py-1">
+                            <i class="fa-solid fa-arrow-left mr-1"></i> Back
+                        </button>
+                    </div>
+                    <div class="glass-panel-light p-3 rounded-xl mb-3">
+                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-2">CONTROLS</div>
+                        <div class="grid grid-cols-2 gap-1.5 text-xs font-bold text-sky-200">
+                            <div><span class="key">WASD</span> Move</div>
+                            <div><span class="key">SPACE</span> Cast / Reel</div>
+                            <div><span class="key">LMB</span> Shoot</div>
+                            <div><span class="key">1-4</span> Weapons</div>
+                            <div><span class="key">R</span> Reload</div>
+                            <div><span class="key">E</span> Talk / Shop</div>
+                            <div><span class="key">J</span> Fish Index</div>
+                            <div><span class="key">Wheel</span> Zoom</div>
+                            <div><span class="key">ESC</span> Menu</div>
+                        </div>
+                    </div>
+                    <div class="glass-panel-light p-3 rounded-xl mb-3 text-xs text-slate-300 leading-relaxed space-y-1.5 max-h-[30vh] overflow-y-auto">
+                        <p><b class="text-amber-300">1.</b> Stand near the water, hold <span class="key">SPACE</span> to charge, release to cast.</p>
+                        <p><b class="text-amber-300">2.</b> When a fish bites, <b>shoot it</b> to drain stamina, then hold <span class="key">SPACE</span> to reel. Watch the red tension bar — ease off before it snaps!</p>
+                        <p><b class="text-amber-300">3.</b> Drag it onto the sand, finish it, walk over the loot to collect.</p>
+                        <p><b class="text-amber-300">4.</b> Sell catches, buy guns, rods, armor. Talk to <b class="text-amber-300">OLD MARLIN</b> (press <span class="key">E</span>) for fish-catching quests.</p>
+                        <p><b class="text-amber-300">5.</b> Slay 20 seagulls and their mother, the <b class="text-rose-400">STORMCALLER</b>, will come. No fishing during her storm.</p>
+                    </div>
+                </div>
+
+                <!-- Settings Panel -->
+                <div id="mp-panel-settings" class="mp-panel p-4 hidden">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-lg font-bold text-slate-200 flex items-center gap-2">
+                            <i class="fa-solid fa-gear"></i> SETTINGS
+                        </h3>
+                        <button id="btn-settings-back" class="text-slate-400 hover:text-white text-sm font-bold px-2 py-1">
+                            <i class="fa-solid fa-arrow-left mr-1"></i> Back
+                        </button>
+                    </div>
+                    <div class="flex flex-col gap-2" id="settings-list">
+                        <button id="set-sound" class="menu-btn justify-between"><span><i class="fa-solid fa-volume-high mr-2"></i> Sound</span><span id="set-sound-val" class="text-emerald-300 font-black">ON</span></button>
+                        <button id="set-fx" class="menu-btn justify-between"><span><i class="fa-solid fa-sparkles mr-2"></i> Particles</span><span id="set-fx-val" class="text-emerald-300 font-black">MED</span></button>
+                        <button id="set-shake" class="menu-btn justify-between"><span><i class="fa-solid fa-house-crack mr-2"></i> Screen Shake</span><span id="set-shake-val" class="text-emerald-300 font-black">ON</span></button>
+                        <button id="set-tutorial" class="menu-btn justify-between"><span><i class="fa-solid fa-graduation-cap mr-2"></i> Replay Tutorial</span><span class="text-sky-300 font-black">GO</span></button>
+                    </div>
                 </div>
 
                 <div class="p-3 border-t border-slate-800/80 bg-slate-900/60 text-center text-[10px] text-slate-500 font-bold tracking-widest">
@@ -574,6 +650,7 @@
     <script src="js/casino.js"></script>
     <script src="js/enemies.js"></script>
     <script src="js/achievements.js"></script>
+    <script src="js/npc.js"></script>
     <script src="js/main.js"></script>
 </body>
 </html>

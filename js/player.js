@@ -3,6 +3,13 @@ const Player = {
         const p = state.player;
         const B = CONFIG.WORLD;
 
+        // Safety net: no damage path may leave the player at 0 HP and
+        // "alive" (used to happen with fish skills). Death always respawns.
+        if (p.hp <= 0 && !p.isDead) {
+            this.die(state);
+            return;
+        }
+
         if (p.stunTimer > 0) {
             p.stunTimer = Math.max(0, p.stunTimer - delta);
         } else {
@@ -157,7 +164,9 @@ const Player = {
 
     die(state) {
         const p = state.player;
-
+        // Death stamp: die() restores HP instantly, so enemies can never
+        // observe "hp <= 0" afterwards — they watch this counter instead.
+        try { state._deathSeq = (state._deathSeq || 0) + 1; } catch (e) {}
         p.hp = p.maxHp;
         p.x = 220;
         p.y = 300;
@@ -182,6 +191,9 @@ const Player = {
             state.fishing.biteTimer = 0;
             state.fishing.waitingTime = 0;
             state.fishing.castPower = 0;
+            state.fishing.castFrom = null;
+            state.fishing.castTo = null;
+            state.fishing.castT = 0;
         }
 
         state.monstersOnLand = [];

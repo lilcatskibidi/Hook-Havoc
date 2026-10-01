@@ -1,0 +1,18 @@
+AQUATIC HAVOC — CUSTOM GUN SKINS
+================================
+Drop a PNG named exactly like the weapon id into THIS folder:
+
+  pistol.png  smg.png  shotgun.png  rifle.png  harpoon.png  ...
+  (full id list: see the WEAPONS table in js/weapons.js)
+
+Rules:
+  - Transparent background, weapon facing RIGHT (muzzle toward +x).
+  - Any size or aspect ratio — the game fits it into the gun's
+    footprint WITHOUT stretching (pixels never squashed).
+  - In-game Shop > Guns tab, on any OWNED gun: SKIN button toggles
+    between PNG and CLASSIC. Shows NO PNG until a file is detected.
+  - Per-weapon override in js/weapons.js:  skin: 'shared-name'
+    reuses one file for several guns,  skin: false  forces classic art.
+
+Fish art works the same way in assets/fish/<species-id>.png
+(fish must also face RIGHT).

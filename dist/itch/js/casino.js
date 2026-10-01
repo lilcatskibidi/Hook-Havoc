@@ -20,7 +20,17 @@ const Casino = {
     highlowPot: 0,
 
     TOKEN_PRICE: 100,
-    CASHOUT_RATE: 80, // 1T -> 80c (house cut)
+    CASHOUT_RATE: 70, // 1T -> 70c (house cut just went up)
+
+    // Fish-betting odds: every rarity is priced against the player.
+    // EV ranges from -23% (common) to -40% (legendary). The house thanks you.
+    FISHBET_ODDS: {
+        common:    { mult: 1.2, ch: 35 },
+        rare:      { mult: 1.6, ch: 28 },
+        epic:      { mult: 2.5, ch: 20 },
+        legendary: { mult: 5,   ch: 10 },
+        mythic:    { mult: 12,  ch: 5 }
+    },
 
     slotSymbols: [
         { id: 'sardine', name: 'Sardine', color: '#cbd5e1', weight: 30, payout: 2 },
@@ -45,6 +55,7 @@ const Casino = {
     bindEvents() {
         const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
         on('btn-open-casino', () => this.open());
+        on('btn-open-casino-hud', () => this.open());
         document.querySelectorAll('.casino-close').forEach(b => { b.onclick = () => this.close(); });
         document.querySelectorAll('.casino-tab-btn').forEach(btn => {
             btn.onclick = () => {
@@ -63,13 +74,40 @@ const Casino = {
     },
 
     open() {
-        const modal = document.getElementById('casino-modal');
-        if (modal) { modal.classList.remove('hidden'); this.renderTab(); this.updateTokenDisplay(); }
+        try {
+            // Late-bind the state if init ran before it existed or was missed
+            if (!this.state) {
+                try {
+                    if (typeof state !== 'undefined' && state.player) this.state = state;
+                } catch (e) {}
+            }
+            if (this.state && this.state.player) {
+                // Sync tokens both ways so the HUD/footer never shows stale 0T
+                if (typeof this.state.player.casinoTokens === 'number') this.tokens = this.state.player.casinoTokens;
+                else this.state.player.casinoTokens = this.tokens;
+            }
+            // Never stack the shop under the casino
+            try {
+                const shop = document.getElementById('shop-modal');
+                if (shop) shop.classList.add('hidden');
+            } catch (e) {}
+            const modal = document.getElementById('casino-modal');
+            if (modal) {
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                this.renderTab();
+                this.updateTokenDisplay();
+            }
+        } catch (e) {
+            try { console.error('[Casino] open failed:', e); } catch (ee) {}
+        }
     },
 
     close() {
-        const modal = document.getElementById('casino-modal');
-        if (modal) modal.classList.add('hidden');
+        try {
+            const modal = document.getElementById('casino-modal');
+            if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+        } catch (e) {}
     },
 
     betControlsHTML() {
@@ -85,8 +123,12 @@ const Casino = {
     },
 
     updateTokenDisplay() {
-        const ce = document.getElementById('casino-coins-display');
-        if (ce) ce.innerText = this.state.player.coins;
+        try {
+            if (this.state && this.state.player) {
+                const ce = document.getElementById('casino-coins-display');
+                if (ce) ce.innerText = this.state.player.coins;
+            }
+        } catch (e) {}
         ['casino-tokens-display', 'casino-tokens-footer'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.innerText = this.tokens;
@@ -115,6 +157,10 @@ const Casino = {
     renderTab() {
         const content = document.getElementById('casino-content');
         if (!content) return;
+        if (!this.state || !this.state.player) {
+            content.innerHTML = `<div class="glass-panel-light p-6 rounded-xl text-center text-sm text-slate-400">Casino is warming up… close and reopen.</div>`;
+            return;
+        }
         switch (this.currentTab) {
             case 'roulette': this.renderRoulette(content); break;
             case 'slots': this.renderSlots(content); break;
@@ -127,7 +173,7 @@ const Casino = {
 
     bindDynamicEvents() {
         document.querySelectorAll('.roulette-number-btn').forEach(btn => {
-            btn.onclick = () => this.placeNumberBet(parseInt(btn.dataset.number));
+            btn.onclick = () => this.placeNumberBet(btn.dataset.number === '00' ? '00' : parseInt(btn.dataset.number));
         });
         document.querySelectorAll('.roulette-color-btn').forEach(btn => {
             if (btn.dataset.color) btn.onclick = () => this.placeColorBet(btn.dataset.color);
@@ -155,17 +201,18 @@ const Casino = {
     },
 
     renderRoulette(content) {
-        const numbers = [...Array(37).keys()];
+        const numbers = [...Array(37).keys(), '00'];
         const redNumbers = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
+        const isGreenPocket = (n) => n === 0 || n === '00';
         content.innerHTML = `
             <div class="space-y-4">
                 ${this.betControlsHTML()}
                 <div class="glass-panel-light p-4 rounded-xl">
-                    <h3 class="font-bold text-fuchsia-300 mb-3">European Roulette (Single Zero)</h3>
-                    <div class="grid grid-cols-12 gap-1 mb-4" style="max-width: 480px; margin: 0 auto;">
+                    <h3 class="font-bold text-fuchsia-300 mb-3">American Roulette (0 + 00 — house edge 5.26%)</h3>
+                    <div class="grid grid-cols-12 gap-1 mb-4" style="max-width: 520px; margin: 0 auto;">
                         ${numbers.map(n => `
                             <button class="roulette-number-btn px-1 py-1.5 text-xs font-bold rounded transition-all hover:scale-110 ${
-                                n === 0 ? 'bg-green-900 text-green-300' :
+                                isGreenPocket(n) ? 'bg-green-900 text-green-300' :
                                 redNumbers.includes(n) ? 'bg-red-900 text-red-300' : 'bg-slate-900 text-white'
                             } ${this.rouletteBetNumbers?.includes(n) ? 'ring-2 ring-amber-400 scale-110' : ''}"
                                 data-number="${n}" ${this.rouletteSpinning ? 'disabled' : ''}>${n}</button>
@@ -185,8 +232,8 @@ const Casino = {
                 </div>
                 <div class="glass-panel p-4 rounded-xl text-center">
                     <div id="roulette-result" class="roulette-ball text-6xl font-black mb-2 ${this.rouletteSpinning ? 'roulette-spinning' : ''}" style="font-family: 'Courier New', monospace;">
-                        ${this.rouletteNumber !== null ?
-                            `<span class="${this.rouletteNumber === 0 ? 'text-green-400' : (redNumbers.includes(this.rouletteNumber) ? 'text-red-400' : 'text-white')}">${this.rouletteNumber}</span>` :
+                        ${this.rouletteNumber !== null && this.rouletteNumber !== undefined ?
+                            `<span class="${(this.rouletteNumber === 0 || this.rouletteNumber === '00') ? 'text-green-400' : (redNumbers.includes(this.rouletteNumber) ? 'text-red-400' : 'text-white')}">${this.rouletteNumber}</span>` :
                             '<span class="text-slate-600">?</span>'}
                     </div>
                     <div class="text-sm font-bold mb-3 ${this.rouletteMsgColor}">${this.rouletteMsg}</div>
@@ -200,7 +247,7 @@ const Casino = {
                 </div>
             </div>`;
         document.querySelectorAll('.roulette-number-btn').forEach(btn => {
-            btn.onclick = () => this.placeNumberBet(parseInt(btn.dataset.number));
+            btn.onclick = () => this.placeNumberBet(btn.dataset.number === '00' ? '00' : parseInt(btn.dataset.number));
         });
         document.querySelectorAll('.roulette-color-btn').forEach(btn => {
             if (btn.dataset.color) btn.onclick = () => this.placeColorBet(btn.dataset.color);
@@ -222,6 +269,7 @@ const Casino = {
     renderSlots(content) {
         const reels = this.slotsReels;
         const totalW = this.slotSymbols.reduce((a, s) => a + s.weight, 0);
+        const won = !!this.slotsWon;
         content.innerHTML = `
             <div class="space-y-4">
                 ${this.betControlsHTML()}
@@ -230,17 +278,17 @@ const Casino = {
                     <div class="flex justify-center gap-3 mb-2">
                         ${[0, 1, 2].map(i => {
                             const s = this.slotSymbols[reels[i]] || this.slotSymbols[0];
-                            const isBest = this.slotsBest === i || (this.slotsBest === -2);
+                            const isBest = won && (this.slotsBest === i || this.slotsBest === -2);
                             return `
-                            <div id="slot-reel-${i}" class="slot-reel w-24 h-24 rounded-xl flex flex-col items-center justify-center font-bold ${this.slotsSpinning ? 'slot-spinning' : ''} ${isBest && !this.slotsSpinning ? 'slot-win' : ''}"
-                                style="background: linear-gradient(135deg, ${s.color}22, ${s.color}44); border: 3px solid ${isBest && !this.slotsSpinning ? '#fde047' : s.color + '66'}; box-shadow: ${isBest && !this.slotsSpinning ? '0 0 24px #fde047' : 'none'};">
+                            <div id="slot-reel-${i}" class="slot-reel w-24 h-24 rounded-xl flex flex-col items-center justify-center font-bold ${this.slotsSpinning ? 'slot-spinning' : ''} ${isBest ? 'slot-win' : ''}"
+                                style="background: linear-gradient(135deg, ${s.color}22, ${s.color}44); border: 3px solid ${isBest ? '#fde047' : s.color + '66'}; box-shadow: ${isBest ? '0 0 24px #fde047' : 'none'};">
                                 <i class="fa-solid fa-fish text-3xl" style="color: ${s.color}"></i>
                                 <span class="text-[9px] font-black mt-1" style="color:${s.color}">${s.name.toUpperCase()}</span>
                             </div>`;
                         }).join('')}
                     </div>
-                    <div class="text-center text-sm font-bold mb-1 ${this.slotsResultColor}">${this.slotsResult || 'Match 3 for payout | Jackpot: 500x'}</div>
-                    <div class="text-center text-xs text-slate-500">Two of a kind pays 1x · Three of a kind pays full</div>
+                    <div class="text-center text-sm font-bold mb-1 ${this.slotsResultColor}">${this.slotsResult || 'Only 3 of a kind pays | Jackpot: 500x'}</div>
+                    <div class="text-center text-xs text-slate-500">Pairs pay nothing · The house thanks you for playing</div>
                 </div>
                 <div class="glass-panel p-4 rounded-xl text-center">
                     <button id="casino-slots-spin" class="px-8 py-3 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 font-black rounded-xl transition-all ${this.slotsSpinning || this.betAmount > this.tokens ? 'opacity-50 cursor-not-allowed' : ''}" ${(this.slotsSpinning || this.betAmount > this.tokens) ? 'disabled' : ''}>
@@ -281,8 +329,9 @@ const Casino = {
                                 <p class="font-bold text-slate-300">No fish caught yet — this game is locked.</p>
                                 <p class="text-xs mt-1">Catch any fish (or grab beached floppers) to unlock Fish Betting.<br>Try Roulette, Slots or High-Low meanwhile!</p>
                             </div>` : uniqueFish.map(fish => {
-                            const rarityMult = { common: 1.5, rare: 2.5, epic: 4, legendary: 8, mythic: 20 }[fish.rarity] || 1;
-                            const winChance = Math.max(5, 50 - (rarityMult * 3));
+                            const odds = (this.FISHBET_ODDS && this.FISHBET_ODDS[fish.rarity]) || { mult: 1, ch: 5 };
+                            const rarityMult = odds.mult;
+                            const winChance = odds.ch;
                             return `
                                 <button class="fish-bet-btn glass-panel p-3 rounded-xl text-center transition-all hover:scale-105 ${this.fishBetSelected === fish.id ? 'ring-2 ring-fuchsia-400 bg-fuchsia-500/10 scale-105' : ''}"
                                     data-fish-id="${fish.id}" ${this.tokens < this.betAmount ? 'disabled' : ''}>
@@ -436,14 +485,15 @@ const Casino = {
         this.rouletteSpinning = true;
         this.rouletteMsg = 'Spinning...'; this.rouletteMsgColor = 'text-amber-300';
         this.updateTokenDisplay(); this.renderTab();
-        // Animated number cycling
+        // Animated number cycling (38 pockets, American wheel)
         let ticks = 0;
         const ticker = setInterval(() => {
-            this.rouletteNumber = Math.floor(Math.random() * 37);
+            const r = Math.floor(Math.random() * 38);
+            this.rouletteNumber = r === 37 ? '00' : r;
             const el = document.getElementById('roulette-result');
             if (el) {
                 const reds = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
-                const cls = this.rouletteNumber === 0 ? 'text-green-400' : (reds.includes(this.rouletteNumber) ? 'text-red-400' : 'text-white');
+                const cls = (this.rouletteNumber === 0 || this.rouletteNumber === '00') ? 'text-green-400' : (reds.includes(this.rouletteNumber) ? 'text-red-400' : 'text-white');
                 el.innerHTML = `<span class="${cls}">${this.rouletteNumber}</span>`;
             }
             if (++ticks >= 14) {
@@ -454,21 +504,22 @@ const Casino = {
     },
 
     resolveRoulette(totalBet) {
-        this.rouletteNumber = Math.floor(Math.random() * 37);
+        const r = Math.floor(Math.random() * 38);
+        this.rouletteNumber = r === 37 ? '00' : r;
         const redNumbers = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
+        const isZero = this.rouletteNumber === 0 || this.rouletteNumber === '00';
         let winnings = 0;
         if (this.rouletteBetNumbers?.includes(this.rouletteNumber)) winnings += this.betAmount * 35;
         if (this.rouletteBetColor) {
             const isRed = redNumbers.includes(this.rouletteNumber);
-            const isBlack = this.rouletteNumber !== 0 && !isRed;
-            const isGreen = this.rouletteNumber === 0;
-            if ((this.rouletteBetColor === 'red' && isRed) || (this.rouletteBetColor === 'black' && isBlack) || (this.rouletteBetColor === 'green' && isGreen)) winnings += this.betAmount * (isGreen ? 35 : 1);
+            const isBlack = !isZero && !isRed;
+            if ((this.rouletteBetColor === 'red' && isRed) || (this.rouletteBetColor === 'black' && isBlack) || (this.rouletteBetColor === 'green' && isZero)) winnings += this.betAmount * (isZero ? 35 : 1);
         }
-        if (this.rouletteBetParity && this.rouletteNumber !== 0) {
+        if (this.rouletteBetParity && !isZero) {
             const isEven = this.rouletteNumber % 2 === 0;
             if ((this.rouletteBetParity === 'even' && isEven) || (this.rouletteBetParity === 'odd' && !isEven)) winnings += this.betAmount;
         }
-        if (this.rouletteBetRange && this.rouletteNumber !== 0) {
+        if (this.rouletteBetRange && !isZero) {
             const isLow = this.rouletteNumber <= 18;
             if ((this.rouletteBetRange === 'low' && isLow) || (this.rouletteBetRange === 'high' && !isLow)) winnings += this.betAmount;
         }
@@ -486,14 +537,16 @@ const Casino = {
         }
         this.rouletteSpinning = false;
         this.rouletteBetNumbers = []; this.rouletteBetColor = null; this.rouletteBetParity = null; this.rouletteBetRange = null;
-        this.updateTokenDisplay(); this.renderTab(); this.saveTokens();
+        this.updateTokenDisplay();
+        if (this.currentTab === 'roulette') this.renderTab();
+        this.saveTokens();
     },
 
     spinSlots() {
         if (this.betAmount > this.tokens || this.slotsSpinning) return;
         const bet = this.betAmount;
         this.tokens -= bet;
-        this.slotsSpinning = true; this.slotsBest = -1;
+        this.slotsSpinning = true; this.slotsBest = -1; this.slotsWon = false;
         this.slotsResult = 'Spinning...'; this.slotsResultColor = 'text-amber-300';
         this.updateTokenDisplay(); this.renderTab();
         // Staggered reel reveal animation
@@ -506,54 +559,53 @@ const Casino = {
                 if (el) {
                     const s = this.slotSymbols[this.slotsReels[i]];
                     el.style.borderColor = s.color + '66';
+                    el.style.boxShadow = 'none';
                     el.innerHTML = `<i class="fa-solid fa-fish text-3xl" style="color:${s.color}"></i><span class="text-[9px] font-black mt-1" style="color:${s.color}">${s.name.toUpperCase()}</span>`;
                 }
             }
-        }, 90);
+        }, 60);
         const now = Date.now();
-        this._slotLock0 = now + 700; this._slotLock1 = now + 1200; this._slotLock2 = now + 1700;
+        this._slotLock0 = now + 600; this._slotLock1 = now + 1100; this._slotLock2 = now + 1800;
         const lockReel = (i) => {
             this.slotsReels[i] = final[i];
             const el = document.getElementById('slot-reel-' + i);
             if (el) {
                 el.classList.remove('slot-spinning');
+                el.classList.add('slot-lock');
+                setTimeout(() => { try { el.classList.remove('slot-lock'); } catch (e) {} }, 260);
                 const s = this.slotSymbols[final[i]];
                 el.style.borderColor = s.color;
                 el.innerHTML = `<i class="fa-solid fa-fish text-3xl" style="color:${s.color}"></i><span class="text-[9px] font-black mt-1" style="color:${s.color}">${s.name.toUpperCase()}</span>`;
             }
             try { audio.playUIClick(); } catch (e) {}
         };
-        setTimeout(() => lockReel(0), 700);
-        setTimeout(() => lockReel(1), 1200);
+        setTimeout(() => lockReel(0), 600);
+        setTimeout(() => lockReel(1), 1100);
         setTimeout(() => {
             lockReel(2);
             clearInterval(flicker);
             this.resolveSlots(bet);
-        }, 1700);
+        }, 1800);
     },
 
     resolveSlots(bet) {
         const [a, b, c] = this.slotsReels;
         let winnings = 0;
+        this.slotsWon = false;
         if (a === b && b === c) {
             const symbol = this.slotSymbols[a];
             winnings = bet * symbol.payout;
             this.slotsBest = -2; // all win
+            this.slotsWon = true;
             this.slotsResult = `JACKPOT! 3x ${symbol.name} — +${winnings}T!`;
             this.slotsResultColor = 'text-amber-300';
             if (symbol.id === 'jackpot' && typeof Achievements !== 'undefined') Achievements.onJackpot(this.state);
-        } else if (a === b || b === c || a === c) {
-            winnings = bet; // stake back + 1x profit
-            this.slotsBest = (a === b) ? 0 : 1;
-            this.slotsResult = `Pair! +${winnings}T`;
-            this.slotsResultColor = 'text-emerald-400';
         } else {
-            // Highlight best (highest payout) symbol
-            let best = a;
-            if (this.slotSymbols[b].payout > this.slotSymbols[best].payout) best = b;
-            if (this.slotSymbols[c].payout > this.slotSymbols[best].payout) best = c;
-            this.slotsBest = [a, b, c].indexOf(best);
-            this.slotsResult = `No match — lost ${bet}T`;
+            // Pairs pay NOTHING — only 3 of a kind wins. The near-miss message
+            // is honest about it instead of flashing a fake win highlight.
+            const pair = (a === b || b === c || a === c);
+            this.slotsBest = -1;
+            this.slotsResult = pair ? `Pair — so close! Only 3 of a kind pays (lost ${bet}T)` : `No match — lost ${bet}T`;
             this.slotsResultColor = 'text-rose-400';
         }
         if (winnings > 0) {
@@ -565,15 +617,18 @@ const Casino = {
             if (typeof Achievements !== 'undefined') Achievements.onCasinoLoss(this.state, bet);
         }
         this.slotsSpinning = false;
-        this.updateTokenDisplay(); this.renderTab(); this.saveTokens();
+        this.updateTokenDisplay();
+        if (this.currentTab === 'slots') this.renderTab();
+        this.saveTokens();
     },
 
     placeFishBet() {
         if (!this.fishBetSelected || this.betAmount > this.tokens) return;
         const fish = (this.state.player.caughtFish || []).find(f => f.id === this.fishBetSelected);
         if (!fish) return;
-        const rarityMult = { common: 1.5, rare: 2.5, epic: 4, legendary: 8, mythic: 20 }[fish.rarity] || 1;
-        const winChance = Math.max(5, 50 - (rarityMult * 3));
+        const odds = (this.FISHBET_ODDS && this.FISHBET_ODDS[fish.rarity]) || { mult: 1, ch: 5 };
+        const rarityMult = odds.mult;
+        const winChance = odds.ch;
         const bet = this.betAmount;
         this.tokens -= bet;
         const won = Math.random() * 100 < winChance;
@@ -620,7 +675,7 @@ const Casino = {
         const won = (higher && nextVal > currentVal) || (!higher && nextVal < currentVal);
         const isEqual = nextVal === currentVal;
         if (won) {
-            this.highlowPot = Math.round(this.highlowPot * 1.5); // streak growth
+            this.highlowPot = Math.round(this.highlowPot * 1.4); // house shaved the streak growth
             this.highlowStreak++;
             this.highlowResult = `CORRECT! ${this.highlowCard.value} → ${this.highlowNextCard.value}. Pot: ${this.highlowPot}T — guess again or cash out!`;
             this.highlowResultColor = 'text-emerald-400';
@@ -644,10 +699,14 @@ const Casino = {
 
     highlowCashout() {
         if (!this.highlowPot) return;
-        this.tokens += this.highlowPot;
-        this.highlowResult = `Cashed out +${this.highlowPot}T after ${this.highlowStreak} streak!`;
+        // 10% house cut, rounded down so a 1T pot still cashes out whole —
+        // previously ceil() ate the entire pot and flashed a "+0T win".
+        const fee = Math.floor(this.highlowPot * 0.1);
+        const payout = this.highlowPot - fee;
+        this.tokens += payout;
+        this.highlowResult = `Cashed out +${payout}T after ${this.highlowStreak} streak! (house took ${fee}T)`;
         this.highlowResultColor = 'text-amber-300';
-        if (typeof Achievements !== 'undefined') Achievements.onCasinoWin(this.state, this.highlowPot);
+        if (typeof Achievements !== 'undefined') Achievements.onCasinoWin(this.state, payout);
         this.highlowPot = 0; this.highlowStreak = 0;
         try { audio.playCoin(); } catch (e) {}
         this.updateTokenDisplay(); this.renderTab(); this.saveTokens();
@@ -655,7 +714,7 @@ const Casino = {
 
     claimFreeTokens() {
         const now = Date.now();
-        const cd = 60 * 1000;
+        const cd = 120 * 1000;
         if (now - (this.freeClaimAt || 0) < cd) {
             const left = Math.ceil((cd - (now - this.freeClaimAt)) / 1000);
             if (typeof Particles !== 'undefined') Particles.showFloatingText(this.state, `FREE TOKENS IN ${left}s`, this.state.player.x, this.state.player.y - 50, '#f87171');
@@ -663,11 +722,11 @@ const Casino = {
             return;
         }
         this.freeClaimAt = now;
-        this.tokens += 5;
+        this.tokens += 3;
         if (this.betAmount < 1) this.betAmount = 1;
         this.updateTokenDisplay();
         this.saveTokens();
-        if (typeof Particles !== 'undefined') Particles.showFloatingText(this.state, '+5 FREE TOKENS!', this.state.player.x, this.state.player.y - 50, '#34d399');
+        if (typeof Particles !== 'undefined') Particles.showFloatingText(this.state, '+3 FREE TOKENS!', this.state.player.x, this.state.player.y - 50, '#34d399');
         try { audio.playCoin(); } catch (e) {}
         this.renderTab();
     },

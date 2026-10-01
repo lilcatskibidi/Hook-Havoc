@@ -22,6 +22,11 @@ const Shop = {
     },
 
     openBeach(state) {
+        if (!state.player.beachShopUnlocked) {
+            state.player.beachShopUnlocked = true;
+            if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+            if (typeof Particles !== 'undefined') Particles.showFloatingText(state, 'Beach Shop Unlocked!', state.player.x, state.player.y - 50, '#facc15');
+        }
         this.openShop(state, 'beach');
     },
 
@@ -35,6 +40,29 @@ const Shop = {
     init(state) {
         const modal = document.getElementById('shop-modal');
         const mpHud = document.getElementById('mp-hud');
+
+        // When a gun PNG finishes probing, refresh the open Guns tab so
+        // the SKIN button flips from NO PNG to PNG without reopening.
+        try {
+            if (typeof GunSkinLoader !== 'undefined') {
+                GunSkinLoader.onReady = () => {
+                    try {
+                        if (!modal.classList.contains('hidden') && this._tab === 'weapons') {
+                            this.renderTab(state, 'weapons');
+                        }
+                    } catch (e) {}
+                };
+            }
+            if (typeof BobberLoader !== 'undefined') {
+                BobberLoader.onReady = () => {
+                    try {
+                        if (!modal.classList.contains('hidden') && this._tab === 'rods') {
+                            this.renderTab(state, 'rods');
+                        }
+                    } catch (e) {}
+                };
+            }
+        } catch (e) {}
 
         document.getElementById('btn-open-shop').onclick = () => {
             try { audio.playUIClick(); } catch (e) {}
@@ -74,6 +102,11 @@ const Shop = {
             try { audio.playCoin(); } catch (e) {}
             Player.addXP(state, Math.round(total / 5));
             Player.refreshHUD(state);
+            // Sold quest fish no longer count — resync Marlin's job progress
+            try {
+                if (typeof NPC !== 'undefined' && NPC.syncActive) NPC.syncActive(state);
+                if (typeof NPC !== 'undefined' && NPC.updateTracker) NPC.updateTracker(state);
+            } catch (e) {}
             if (typeof AntiCheat !== 'undefined') AntiCheat.markLegit();
             if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
             this.renderTab(state, 'sell');
@@ -81,6 +114,7 @@ const Shop = {
     },
 
     renderTab(state, tab) {
+        this._tab = tab;
         const content = document.getElementById('shop-content');
         content.innerHTML = '';
 
@@ -151,10 +185,37 @@ const Shop = {
     renderWeapons(state, content) {
         const p = state.player;
 
-        WEAPONS.forEach((w, idx) => {
+        // Lazy PNG probe: only owned guns are checked, once per session
+        // (failed probes are cached). No boot-time 404 storm.
+        try {
+            if (typeof GunSkinLoader !== 'undefined') {
+                [...new Set((p.ownedWeapons || []).map(id => {
+                    const w = WEAPONS.find(x => x.id === id);
+                    return w ? (w.skin || w.id) : id;
+                }))].forEach(skinId => {
+                    if (!GunSkinLoader.get(skinId) && !(GunSkinLoader.failed || new Set()).has(skinId)) GunSkinLoader.load(skinId);
+                });
+            }
+        } catch (e) {}
+
+        // Rarity order: common -> mythic, cheapest first inside each tier
+        const RARITY_ORDER = { common: 0, rare: 1, epic: 2, legendary: 3, mythic: 4 };
+        this._lastWeaponRar = null;
+        [...WEAPONS]
+            .sort((a, b) => ((RARITY_ORDER[a.rarity] ?? 9) - (RARITY_ORDER[b.rarity] ?? 9)) || a.price - b.price)
+            .forEach((w) => {
             const owned = p.ownedWeapons.includes(w.id);
             const equippedAt = p.equippedWeapons.indexOf(w.id);
             const r = RARITY_LABELS[w.rarity] || RARITY_LABELS.common;
+            const rarKey = w.rarity || 'common';
+            if (this._lastWeaponRar !== rarKey) {
+                this._lastWeaponRar = rarKey;
+                const h = document.createElement('div');
+                h.className = 'text-[10px] font-black tracking-widest mt-2 px-1';
+                h.style.color = r.color;
+                h.innerText = `— ${r.label.toUpperCase()} —`;
+                content.appendChild(h);
+            }
 
             const div = document.createElement('div');
             div.className = `shop-item glass-panel-light p-4 rounded-xl flex items-center justify-between rarity-${w.rarity}`;
@@ -240,6 +301,67 @@ const Shop = {
                 }
                 right.appendChild(slotRow);
 
+                // PNG skin toggle for owned guns (assets/guns/<id>.png)
+                const skinBtn = document.createElement('button');
+                const pngReady = (typeof GunSkinLoader !== 'undefined' && GunSkinLoader.has(w.skin || w.id));
+                const prefClassic = p.gunSkins && p.gunSkins[w.id] === 'classic';
+                const effectiveCustom = !prefClassic && pngReady;
+                skinBtn.className = 'text-[9px] font-black px-2 py-1 rounded-lg border mt-0.5 transition-all ' + (effectiveCustom ? 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/40' : 'bg-slate-800 text-slate-400 border-slate-600 hover:bg-slate-700');
+                skinBtn.innerText = pngReady ? (effectiveCustom ? 'SKIN: PNG' : 'SKIN: CLASSIC') : 'SKIN: NO PNG';
+                skinBtn.title = pngReady ? 'Toggle custom PNG skin (assets/guns/' + (w.skin || w.id) + '.png)' : 'Drop ' + (w.skin || w.id) + '.png into assets/guns/ to unlock a skin';
+                skinBtn.onclick = () => {
+                    if (!pngReady) {
+                        try { audio.playError(); } catch (e) {}
+                        Particles.showFloatingText(state, `ADD ${(w.skin || w.id).toUpperCase()}.PNG TO assets/guns/`, p.x, p.y - 40, '#f87171');
+                        return;
+                    }
+                    if (!p.gunSkins) p.gunSkins = {};
+                    if (p.gunSkins[w.id] === 'classic') delete p.gunSkins[w.id];
+                    else p.gunSkins[w.id] = 'classic';
+                    try { audio.playUIClick(); } catch (e) {}
+                    if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+                    this.renderTab(state, 'weapons');
+                };
+                right.appendChild(skinBtn);
+
+                // Custom upload: any image, fitted without stretching.
+                // Left-click = pick/replace, right-click = remove upload.
+                const upBtn = document.createElement('button');
+                const hasUp = (() => { try { return !!localStorage.getItem('ah_gunskin_' + (w.skin || w.id)); } catch (e) { return false; } })();
+                upBtn.className = 'text-[9px] font-black px-2 py-1 rounded-lg border mt-0.5 transition-all ' + (hasUp ? 'bg-sky-500/20 text-sky-300 border-sky-500/40' : 'bg-slate-800 text-slate-400 border-slate-600 hover:bg-slate-700');
+                upBtn.innerText = hasUp ? 'UPLOAD ✓' : 'UPLOAD';
+                upBtn.title = 'Upload your own skin (left-click: pick/replace, right-click: remove). Faces right, any size.';
+                upBtn.onclick = () => {
+                    const inp = document.createElement('input');
+                    inp.type = 'file';
+                    inp.accept = 'image/*';
+                    inp.onchange = () => {
+                        const f = inp.files && inp.files[0];
+                        if (!f) return;
+                        if (!p.gunSkins) p.gunSkins = {};
+                        delete p.gunSkins[w.id]; // show the upload, not classic
+                        GunSkinLoader.saveUpload(w.skin || w.id, f).then(
+                            () => {
+                                if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+                                this.renderTab(state, 'weapons');
+                                Particles.showFloatingText(state, 'SKIN UPLOADED!', p.x, p.y - 40, '#38bdf8');
+                            },
+                            (err) => {
+                                Particles.showFloatingText(state, (err && err.message) || 'UPLOAD FAILED', p.x, p.y - 40, '#f87171');
+                                this.renderTab(state, 'weapons');
+                            }
+                        );
+                    };
+                    inp.click();
+                };
+                upBtn.oncontextmenu = (ev) => {
+                    ev.preventDefault();
+                    GunSkinLoader.clearUpload(w.skin || w.id);
+                    this.renderTab(state, 'weapons');
+                    Particles.showFloatingText(state, 'UPLOAD REMOVED', p.x, p.y - 40, '#94a3b8');
+                };
+                right.appendChild(upBtn);
+
                 if (equippedAt !== -1 && w.id !== 'pistol') {
                     const un = document.createElement('button');
                     un.className = 'text-[9px] text-rose-400 hover:text-rose-300 font-bold mt-0.5';
@@ -263,7 +385,21 @@ const Shop = {
     renderRods(state, content) {
         const p = state.player;
 
-        RODS.forEach((r, idx) => {
+        // Lazy bobber PNG probe: only models of unlocked rods, once per session.
+        try {
+            if (typeof BobberLoader !== 'undefined') {
+                [...new Set(RODS.filter(r => (p.unlockedRods || []).includes(r.id)).map(r => r.bobberModel || 'classic'))].forEach(model => {
+                    if (!BobberLoader.get(model) && !(BobberLoader.failed || new Set()).has(model)) BobberLoader.load(model);
+                });
+            }
+        } catch (e) {}
+
+        // Cheapest first — power progression reads top to bottom
+        [...RODS.map((r, i) => ({ r, i }))]
+            .sort((a, b) => a.r.price - b.r.price)
+            .forEach((o) => {
+            const r = o.r;
+            const idx = o.i;
             const isEquipped = p.equippedRod && p.equippedRod.id === r.id;
             const isUnlocked = p.unlockedRods.includes(r.id);
             const rar = RARITY_LABELS[r.rarity] || RARITY_LABELS.common;
@@ -290,12 +426,16 @@ const Shop = {
                         </div>
                     </div>
                 </div>
-                <div class="shrink-0">
+                <div class="shrink-0 flex flex-col items-end gap-1">
                     ${isEquipped
                         ? `<span class="text-xs text-emerald-400 font-bold px-3 py-1.5 bg-emerald-500/20 rounded-lg border border-emerald-500/30">EQUIPPED</span>`
                         : isUnlocked
                             ? `<button data-equip-rod="${idx}" class="px-4 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-black rounded-xl">EQUIP</button>`
                             : `<button data-buy-rod="${idx}" class="btn-buy px-4 py-2 text-slate-950 text-xs font-black rounded-xl" ${p.coins < r.price ? 'disabled' : ''}>${r.price} C</button>`}
+                    <div class="flex items-center gap-1">
+                        <span class="text-[9px] font-black text-slate-400">BOBBER: <span style="color:${r.color}">${(r.bobberModel || 'classic').toUpperCase()}</span></span>
+                        <button data-upload-bobber="${idx}" class="text-[9px] font-black px-2 py-0.5 rounded-lg border bg-slate-800 text-slate-300 border-slate-600 hover:bg-slate-700" title="Upload a custom bobber PNG for this model (left-click: pick/replace, right-click: remove)">UPLOAD</button>
+                    </div>
                 </div>
             `;
             content.appendChild(div);
@@ -333,6 +473,43 @@ const Shop = {
                 this.renderTab(state, 'rods');
             };
         });
+
+        content.querySelectorAll('[data-upload-bobber]').forEach(btn => {
+            const rod = RODS[+btn.dataset.uploadBobber];
+            const model = rod ? (rod.bobberModel || 'classic') : 'classic';
+            try {
+                if (typeof BobberLoader !== 'undefined' && BobberLoader.has(model)) {
+                    btn.innerText = 'UPLOAD ✓';
+                    btn.classList.add('text-sky-300', 'border-sky-500/40');
+                }
+            } catch (e) {}
+            btn.onclick = () => {
+                const inp = document.createElement('input');
+                inp.type = 'file';
+                inp.accept = 'image/*';
+                inp.onchange = () => {
+                    const f = inp.files && inp.files[0];
+                    if (!f || typeof BobberLoader === 'undefined') return;
+                    BobberLoader.saveUpload(model, f).then(
+                        () => {
+                            Particles.showFloatingText(state, 'BOBBER UPLOADED!', state.player.x, state.player.y - 40, '#38bdf8');
+                            this.renderTab(state, 'rods');
+                        },
+                        (err) => {
+                            Particles.showFloatingText(state, (err && err.message) || 'UPLOAD FAILED', state.player.x, state.player.y - 40, '#f87171');
+                            this.renderTab(state, 'rods');
+                        }
+                    );
+                };
+                inp.click();
+            };
+            btn.oncontextmenu = (ev) => {
+                ev.preventDefault();
+                try { BobberLoader.clearUpload(model); } catch (e) {}
+                this.renderTab(state, 'rods');
+                Particles.showFloatingText(state, 'BOBBER UPLOAD REMOVED', state.player.x, state.player.y - 40, '#94a3b8');
+            };
+        });
     },
 
     renderAmmo(state, content) {
@@ -351,10 +528,15 @@ const Shop = {
                     id: w.id,
                     name: `${w.name} Ammo`,
                     icon: w.icon,
+                    rarity: w.rarity,
                     unit,
                     max,
                     pack: Math.max(10, Math.round(max / 4))
                 };
+            })
+            .sort((a, b) => {
+                const order = { common: 0, rare: 1, epic: 2, legendary: 3, mythic: 4 };
+                return ((order[a.rarity] ?? 9) - (order[b.rarity] ?? 9)) || a.unit - b.unit;
             });
 
         if (ammoItems.length === 0) {
@@ -505,7 +687,7 @@ const Shop = {
                     </div>` : ''}
 
                 <div class="space-y-2">
-                    <button id="beach-open-casino" class="w-full px-4 py-3 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 font-black rounded-xl transition-all ${!canAccess ? 'opacity-50 cursor-not-allowed' : ''}" ${!canAccess ? 'disabled' : ''}>
+                    <button id="beach-open-casino" class="w-full px-4 py-3 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 font-black rounded-xl transition-all">
                         <i class="fa-solid fa-dice mr-2"></i> Open Casino (${p.casinoTokens || 0}T)
                     </button>
                     <button id="beach-buy-bait" class="w-full px-4 py-3 bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-400 hover:to-sky-500 text-white font-black rounded-xl transition-all ${(!canAccess || p.coins < 500) ? 'opacity-50 cursor-not-allowed' : ''}" ${(!canAccess || p.coins < 500) ? 'disabled' : ''}>
@@ -691,11 +873,11 @@ const Shop = {
         content.innerHTML = equippedHTML;
 
         const categories = {
-            'Light': armorItems.filter(a => a.weight === 'Light'),
-            'Medium': armorItems.filter(a => a.weight === 'Medium'),
-            'Heavy': armorItems.filter(a => a.weight === 'Heavy'),
-            'Legendary': armorItems.filter(a => a.rarity === 'legendary'),
-            'Mythic': [...armorItems.filter(a => a.rarity === 'mythic'), ...sets],
+            'Light': armorItems.filter(a => a.weight === 'Light').sort((a, b) => a.price - b.price),
+            'Medium': armorItems.filter(a => a.weight === 'Medium').sort((a, b) => a.price - b.price),
+            'Heavy': armorItems.filter(a => a.weight === 'Heavy').sort((a, b) => a.price - b.price),
+            'Legendary': armorItems.filter(a => a.rarity === 'legendary').sort((a, b) => a.price - b.price),
+            'Mythic': [...armorItems.filter(a => a.rarity === 'mythic'), ...sets].sort((a, b) => a.price - b.price),
         };
 
         for (const [cat, items] of Object.entries(categories)) {

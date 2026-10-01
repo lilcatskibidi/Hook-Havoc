@@ -49,61 +49,104 @@ const CONFIG = {
     CAMERA_ZOOM_SPEED: 0.06,
 
     // XP - Much harder progression
-    XP_LEVEL_BASE: 200,
-    XP_LEVEL_GROWTH: 1.5,
+    XP_LEVEL_BASE: 250,
+    XP_LEVEL_GROWTH: 1.6,
 
-    // Shop prices (cost per bullet when reloading / buying ammo)
+    // BRUTAL TIDE difficulty — applied to every catch in makeCatchInstance.
+    // Fish are tankier, angrier, and pay less. One place to tune it all.
+    DIFFICULTY: {
+        FISH_HP_MULT: 1.7,
+        FISH_STAMINA_MULT: 1.4,
+        FISH_ATK_MULT: 1.5,
+        FISH_VALUE_MULT: 0.7
+    },
+
+    // Shop prices (cost per bullet when reloading / buying ammo).
+    // Tuned so mid-game guns are comfortably affordable: a full magazine
+    // costs roughly 1-3 average fish, even at the top end.
     AMMO_PRICES: {
         pistol:          Infinity,   // infinite ammo — never reload
+        rusted_revolver: 1,
+        flare_gun:       2,
+        nailgun:         1,
         smg:             1,
+        scrap_smg:       1,
         shotgun:         2,
         dual_pistols:    2,
         rifle:           1,
+        tidecaller:      2,
         burst_rifle:     2,
-        marksman:        4,
-        harpoon:         15,
+        marksman:        3,
+        harpoon:         8,
+        storm_harpoon:   12,
+        lance:           15,
         auto_shotgun:    3,
+        scattergun:      3,
         flamethrower:    1,
-        grenade_launcher: 40,
-        railgun:         60,
+        grenade_launcher: 20,
+        depth_charge:    25,
+        kraken_maul:     22,
+        railgun:         25,
+        abyssal_cannon:  30,
+        sun_spear:       35,
         minigun:         1,
-        sniper_rail:     90,
-        plasma_caster:   30,
-        trident:         70,
-        crossbow:        25,
+        sniper_rail:     30,
+        plasma_caster:   15,
+        pulse_rifle:     12,
+        trident:         28,
+        crossbow:        12,
         tesla_gun:       2,
-        void_rifle:      120,
-        coral_launcher:  50,
-        frost_bow:       30,
-        magma_shotgun:   4,
-        sonic_pistol:    5
+        arc_caster:      3,
+        void_rifle:      40,
+        coral_launcher:  22,
+        frost_bow:       15,
+        recurve:         12,
+        magma_shotgun:   3,
+        sonic_pistol:    4,
+        foghorn:         6
     },
 
     // Magazine / reserve size per weapon
     MAX_AMMO: {
         pistol:          Infinity,
+        rusted_revolver: 120,
+        flare_gun:       40,
+        nailgun:         220,
         smg:             180,
+        scrap_smg:       150,
         shotgun:         50,
         dual_pistols:    60,
         rifle:           150,
+        tidecaller:      120,
         burst_rifle:     120,
         marksman:        40,
         harpoon:         30,
+        storm_harpoon:   24,
+        lance:           20,
         auto_shotgun:    48,
+        scattergun:      40,
         flamethrower:    500,
         grenade_launcher: 8,
+        depth_charge:     5,
+        kraken_maul:     6,
         railgun:         6,
+        abyssal_cannon:  5,
+        sun_spear:       4,
         minigun:         800,
         sniper_rail:     5,
         plasma_caster:   60,
+        pulse_rifle:     80,
         trident:         16,
         crossbow:        20,
         tesla_gun:       200,
+        arc_caster:      160,
         void_rifle:      8,
         coral_launcher:  6,
         frost_bow:       18,
+        recurve:         24,
         magma_shotgun:   24,
-        sonic_pistol:    50
+        sonic_pistol:    50,
+        foghorn:         40
     },
     //  FX — global particle density (0-1). Lowers visual clutter so
     // enemy projectiles stay readable. Does not touch damage.
@@ -119,37 +162,37 @@ const CONFIG = {
         boss:      '#ef4444'
     },
 
-    // Enemy Types Configuration
+    // Enemy Types Configuration (BRUTAL TIDE: more of them, tankier, meaner)
     ENEMIES: {
         // Land enemies (spawned from beached fish)
         LAND: {
-            maxCount: 8,
-            spawnInterval: 30, // seconds between spawn attempts
+            maxCount: 12,
+            spawnInterval: 20, // seconds between spawn attempts
         },
         
         // Seagulls - aerial enemies
         SEAGULL: {
-            maxCount: 4,
-            spawnInterval: 45,
-            spawnChance: 0.3, // per interval
-            hp: 80,
-            damage: 15,
-            speed: 120,
-            diveSpeed: 300,
-            diveCooldown: 8,
+            maxCount: 6,
+            spawnInterval: 30,
+            spawnChance: 0.45, // per interval
+            hp: 130,
+            damage: 22,
+            speed: 140,
+            diveSpeed: 340,
+            diveCooldown: 6,
             score: 50,
             xp: 25,
         },
         
         // Jumping Fish - fish that leap from water
         JUMPING_FISH: {
-            maxCount: 3,
-            spawnInterval: 60,
-            spawnChance: 0.25,
-            baseHp: 200,
-            damage: 25,
-            jumpSpeed: 250,
-            jumpHeight: 150,
+            maxCount: 4,
+            spawnInterval: 40,
+            spawnChance: 0.35,
+            baseHp: 320,
+            damage: 34,
+            jumpSpeed: 280,
+            jumpHeight: 170,
             landTime: 3, // seconds on land before returning
             score: 100,
             xp: 50,
@@ -157,13 +200,13 @@ const CONFIG = {
         
         // Crab - beach walker
         BEACH_CRAB: {
-            maxCount: 3,
-            spawnInterval: 90,
-            spawnChance: 0.2,
-            hp: 300,
-            damage: 20,
-            speed: 40,
-            burrowCooldown: 10,
+            maxCount: 5,
+            spawnInterval: 60,
+            spawnChance: 0.3,
+            hp: 480,
+            damage: 30,
+            speed: 55,
+            burrowCooldown: 8,
             score: 75,
             xp: 40,
         },

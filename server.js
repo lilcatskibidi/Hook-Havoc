@@ -185,13 +185,12 @@ function handleMessage(clientId, msg) {
             relayPlayerInput(clientId, msg);
             break;
 
-        case 'heal':
-        case 'healRequest':
-            relayHealRequest(clientId, msg);
-            break;
-
-        case 'chat':
-            relayChat(clientId, msg);
+        // Shared-world actions (clients -> host only).
+        // Loot is first-come: whoever picks it up keeps it personally,
+        // the host just deletes it so nobody else can grab it too.
+        case 'lootDelete':
+        case 'beachClaim':
+            relayToHost(clientId, msg);
             break;
 
         // Lobby -> in-game transition + sync handshake.
@@ -206,6 +205,18 @@ function handleMessage(clientId, msg) {
         default:
             console.warn(`Unknown message type from ${clientId}:`, msg.type);
     }
+}
+
+// Forward a client message to the room host only
+function relayToHost(fromId, msg) {
+    const client = clients.get(fromId);
+    if (!client || !client.roomId || client.isHost) return;
+    const room = rooms.get(client.roomId);
+    if (!room) return;
+    const host = clients.get(room.hostId);
+    if (!host) return;
+    const payload = { ...msg, from: fromId };
+    safeSend(host.ws, payload);
 }
 
 // Broadcast a payload to every other member of the sender's room
@@ -396,44 +407,13 @@ function relayPlayerInput(fromId, msg) {
 }
 
 function relayHealRequest(fromId, msg) {
-    const client = clients.get(fromId);
-    if (!client || !client.roomId) return;
-    const room = rooms.get(client.roomId);
-    if (!room) return;
-
-    const amount = msg.amount || 25;
-
-    room.clients.forEach(toId => {
-        if (toId === fromId) return;
-        const to = clients.get(toId);
-        if (to) {
-            safeSend(to.ws, {
-                type: 'heal',
-                amount,
-                from: fromId,
-                targetId: msg.targetId || 'all'
-            });
-        }
-    });
+    // Heal feature removed — ignore legacy messages.
+    void fromId; void msg;
 }
 
 function relayChat(fromId, msg) {
-    const client = clients.get(fromId);
-    if (!client || !client.roomId) return;
-    const room = rooms.get(client.roomId);
-    if (!room) return;
-
-    room.clients.forEach(toId => {
-        const to = clients.get(toId);
-        if (to) {
-            safeSend(to.ws, {
-                type: 'chat',
-                from: client.isHost ? 'Host' : 'Client',
-                isHost: client.isHost,
-                message: msg.message
-            });
-        }
-    });
+    // Chat feature removed — ignore legacy messages.
+    void fromId; void msg;
 }
 
 // --- Cleanup ----------------------------------------------------------------

@@ -65,13 +65,9 @@ const Multiplayer = {
     _lastGameStateTs: 0,
     _lastInputSent: 0,
     
-    // Healing system
-    healCooldown: 0,
-    healCooldownMax: 10, // seconds
-    healAmount: 30,
-    sharedHeals: 3, // max heals per player per session
-    healsUsed: 0,
-    
+    // Healing system (removed — no heal feature)
+    // Chat system (removed — no chat feature)
+
     // Config
     signalingUrl: 'ws://localhost:8080', // Will be overridden by current host
     iceServers: [
@@ -90,19 +86,32 @@ const Multiplayer = {
     
     // Callbacks
     onStatusChange: null,
-    onChatMessage: null,
-    onHealReceived: null,
     onPlayerJoined: null,
     onPlayerLeft: null,
     onGameStart: null,
     onError: null,
+
+    // Client outbox (bullets fired since last input send)
+    _outboxBullets: null,
+    _awardSeq: 0,
+    _pendingAwards: null, // host: pid -> { aid, coins, xp }
+    _appliedAwards: null, // client: aid -> true
+    _fxOutbox: null,
+    _suppressFxEmit: false,
+    _ownBulletIds: null,
+    _fishHitClaims: null, // client outbox: hits on ANOTHER player's hooked fish
+    _fishHitOutbox: null, // host: targetPid -> [hits] to forward
+    _fishHitApplied: null, // catcher dedupe: bid -> timestamp
+
+    // True when this peer is a non-host member of a room
+    isClient() {
+        return !this.isHost && !!this.roomCode;
+    },
     
     // Initialize multiplayer system
     init(state, callbacks = {}) {
         this.state = state;
         this.onStatusChange = callbacks.onStatusChange || (() => {});
-        this.onChatMessage = callbacks.onChatMessage || (() => {});
-        this.onHealReceived = callbacks.onHealReceived || (() => {});
         this.onPlayerJoined = callbacks.onPlayerJoined || (() => {});
         this.onPlayerLeft = callbacks.onPlayerLeft || (() => {});
         this.onGameStart = callbacks.onGameStart || (() => {});
@@ -110,8 +119,118 @@ const Multiplayer = {
         
         // Resolve the signaling server URL
         this.signalingUrl = resolveSignalingUrl();
-        
+        this._installFxTap();
         this.updateStatus('Ready to play multiplayer');
+    },
+
+    // Tap shared Particles helpers so every splash / blood / muzzle puff /
+    // floating text spawned locally is mirrored to the other peer(s).
+    // Remote-applied FX run with _suppressFxEmit so they never echo back.
+    _installFxTap() {
+        if (this._fxTapInstalled) return;
+        this._fxTapInstalled = true;
+        const self = this;
+        const tap = (name) => {
+            try {
+                if (typeof Particles === 'undefined' || !Particles[name]) return;
+                if (Particles[name]._mpTapped) return;
+                const orig = Particles[name].bind(Particles);
+                const fn = function (...args) {
+                    const r = orig(...args);
+                    try {
+                        if (!self._suppressFxEmit && self.roomCode && self.state && !self.state.paused) {
+                            if (!self._fxOutbox) self._fxOutbox = [];
+                            if (self._fxOutbox.length < 60) {
+                                // Quantize positions to cut bandwidth; keep color/count.
+                                const q = (v) => Math.round((v || 0) * 2) / 2;
+                                const st = self.state;
+                                const rel = (x, y) => ({ x: q(x), y: q(y) });
+                                if (name === 'showFloatingText' && args.length >= 4) {
+                                    const p = rel(args[2], args[3]);
+                                    self._fxOutbox.push({ fn: name, t: String(args[1]).slice(0, 40), x: p.x, y: p.y, c: String(args[4] || '#fff').slice(0, 24) });
+                                } else if (args.length >= 3) {
+                                    const p = rel(args[1], args[2]);
+                                    self._fxOutbox.push({ fn: name, x: p.x, y: p.y, c: String(args[3] || '#fff').slice(0, 24), n: Math.min(24, args[4] | 0 || 8) });
+                                }
+                            }
+                        }
+                    } catch (e) {}
+                    return r;
+                };
+                fn._mpTapped = true;
+                Particles[name] = fn;
+            } catch (e) {}
+        };
+        // Defer a tick: Particles may load after this file.
+        const names = ['spawnParticles', 'spawnBloodImpact', 'spawnWaterSplashes', 'spawnDragTrail', 'spawnLightning', 'showFloatingText'];
+        names.forEach(tap);
+        try { setTimeout(() => names.forEach(tap), 1500); } catch (e) {}
+    },
+
+    _drainFx() {
+        const out = this._fxOutbox && this._fxOutbox.length ? this._fxOutbox : null;
+        this._fxOutbox = [];
+        return out || [];
+    },
+
+    _applyFx(list) {
+        if (!Array.isArray(list) || !list.length) return;
+        if (typeof Particles === 'undefined' || !this.state) return;
+        this._suppressFxEmit = true;
+        try {
+            for (const e of list.slice(0, 60)) {
+                if (!e || !e.fn) continue;
+                try {
+                    if (e.fn === 'showFloatingText') Particles.showFloatingText(this.state, e.t, e.x, e.y, e.c);
+                    else if (e.fn === 'spawnBloodImpact') Particles.spawnBloodImpact(this.state, e.x, e.y, e.c, e.n);
+                    else if (e.fn === 'spawnWaterSplashes') Particles.spawnWaterSplashes(this.state, e.x, e.y, e.n);
+                    else if (e.fn === 'spawnDragTrail') Particles.spawnDragTrail(this.state, e.x, e.y);
+                    else if (e.fn === 'spawnLightning' && Particles.spawnLightning) Particles.spawnLightning(this.state, e.x, e.y, e.x + 40, e.y, e.c);
+                    else Particles.spawnParticles(this.state, e.x, e.y, e.c, e.n);
+                } catch (err) {}
+            }
+        } finally {
+            this._suppressFxEmit = false;
+        }
+    },
+
+    // Someone else's bullet hit MY hooked fish (same math as a local hit,
+    // deduped by bullet id so overlap + claim can never double-apply).
+    _applyFishHit(fh) {
+        try {
+            if (!this._fishHitApplied) this._fishHitApplied = {};
+            if (this._fishHitApplied[fh.bid]) return;
+            this._fishHitApplied[fh.bid] = Date.now();
+            // Prune old ids
+            const keys = Object.keys(this._fishHitApplied);
+            if (keys.length > 200) {
+                keys.slice(0, keys.length - 200).forEach(k => delete this._fishHitApplied[k]);
+            }
+            const st = this.state;
+            const hooked = st && st.fishing && st.fishing.mode === 'HOOKED' ? st.fishing.hookedFish : null;
+            if (!hooked || hooked.isDead) return;
+            let dmg = Math.max(1, Math.round(fh.dmg || 0));
+            if (hooked.isInflated) dmg = Math.max(1, Math.round(dmg * 0.5));
+            hooked.hp -= dmg;
+            hooked.stamina -= dmg * ((typeof CONFIG !== 'undefined' && CONFIG.STAMINA_DRAIN_PER_BULLET) || 0.5);
+            if (fh.burn) { hooked.burnTimer = Math.max(hooked.burnTimer || 0, 3.0); hooked.burnDps = fh.burnDps || 12; }
+            if (fh.poison) { hooked.poisonTimer = Math.max(hooked.poisonTimer || 0, 5.0); hooked.poisonDps = Math.round(dmg * (fh.poisonDpsMult || 0.3)); }
+            if (fh.freeze) { hooked.freezeTimer = Math.max(hooked.freezeTimer || 0, fh.freezeTime || 2.5); }
+            if (fh.stun) { hooked.stunTimer = Math.max(hooked.stunTimer || 0, fh.stunTime || 1.5); }
+            if (fh.slowHook) { hooked.slowTimer = Math.max(hooked.slowTimer || 0, 3.0); hooked.slowMult = fh.slowHook; }
+            if (fh.explosive) {
+                hooked.hp -= dmg * 0.15;
+                hooked.stamina -= dmg * 0.15 * ((typeof CONFIG !== 'undefined' && CONFIG.STAMINA_DRAIN_PER_BULLET) || 0.5);
+                Particles.spawnParticles(st, hooked.x, hooked.y, '#f97316', 6, { size: 5 });
+            }
+            try { audio.playHit(); } catch (e) {}
+            Particles.spawnWaterSplashes(st, hooked.x, hooked.y, 5);
+            Particles.showFloatingText(st, `-${Math.round(dmg)}`, hooked.x, hooked.y - 20, '#38bdf8');
+            if (hooked.hp <= 0) {
+                hooked.hp = 0;
+                if (typeof Fishing !== 'undefined') Fishing.killHookedFish(st);
+            }
+        } catch (e) {}
     },
     
     // Create a new room (host)
@@ -190,9 +309,33 @@ const Multiplayer = {
     },
     
     // Connect to signaling server
+    // On hosted pages (itch.io) there is no LAN server to auto-find, so
+    // failures explain where to paste a public wss:// URL.
+    _signalHelp() {
+        try {
+            const host = window.location.hostname || '';
+            const onItch = /itch(\.io|zone)$/.test(host) || /itch\.io/.test(host);
+            if (onItch || window.location.protocol === 'https:' && (host && host !== 'localhost' && host !== '127.0.0.1')) {
+                return 'On itch.io you need a PUBLIC signaling server: deploy server.js (free on Render), then paste its wss:// URL in Multiplayer menu → SIGNALING SERVER → Save. Same URL on both PCs.';
+            }
+        } catch (e) {}
+        return 'Make sure server.js is running (npm start), both PCs are on the same Wi-Fi, and the port 8080 is allowed through the firewall.';
+    },
+
     connectSignaling() {
         return new Promise((resolve, reject) => {
-            this.signalingWs = new WebSocket(this.signalingUrl);
+            let url = this.signalingUrl;
+            // Never try ws(s)://<itch-host>:8080 — browsers block it and it
+            // can never work (no server runs on itch's CDN).
+            try {
+                const host = window.location.hostname || '';
+                const u = new URL(url);
+                if (host && u.hostname === host && !/localhost|127\.0\.0\.1/.test(host)) {
+                    reject(new Error(this._signalHelp()));
+                    return;
+                }
+            } catch (e) {}
+            this.signalingWs = new WebSocket(url);
             let resolved = false;
             
             this.signalingWs.onopen = () => {
@@ -205,7 +348,7 @@ const Multiplayer = {
                 console.error('Signaling connection error:', err);
                 if (!resolved) {
                     resolved = true;
-                    reject(new Error('Cannot connect to signaling server. Make sure server.js is running.'));
+                    reject(new Error('Cannot connect to signaling server. ' + this._signalHelp()));
                 }
             };
             
@@ -213,7 +356,7 @@ const Multiplayer = {
                 console.log('Disconnected from signaling server', event.code, event.reason);
                 if (!resolved) {
                     resolved = true;
-                    reject(new Error('Signaling connection closed before handshake'));
+                    reject(new Error('Signaling connection closed before handshake. ' + this._signalHelp()));
                 } else {
                     this.handleDisconnect();
                 }
@@ -233,7 +376,7 @@ const Multiplayer = {
                 if (!resolved && this.signalingWs && this.signalingWs.readyState !== WebSocket.OPEN) {
                     resolved = true;
                     this.signalingWs.close();
-                    reject(new Error('Signaling connection timeout'));
+                    reject(new Error('Signaling connection timeout (' + url + '). ' + this._signalHelp()));
                 }
             }, 10000);
         });
@@ -351,22 +494,6 @@ const Multiplayer = {
                 
             case 'playerInput':
                 this.handlePlayerInput(msg.playerId, msg.input);
-                break;
-                
-            case 'healRequest':
-                this.handleHealRequest(msg.from, msg.targetId, msg.amount);
-                break;
-                
-            case 'heal':
-                // Direct heal from peer
-                if (msg.targetId === this.localClientId || msg.targetId === 'all') {
-                    this.applyHeal(this.localClientId, msg.amount);
-                    this.onHealReceived(msg.amount, msg.from === this.localClientId);
-                }
-                break;
-                
-            case 'chat':
-                this.onChatMessage(msg.from, msg.message, msg.isHost);
                 break;
                 
             case 'gameStart':
@@ -507,13 +634,13 @@ const Multiplayer = {
                 this.handleGameState(msg.state);
                 break;
             case 'playerInput':
-                this.handlePlayerInput(this.remoteClientId, msg.input);
+                this.handlePlayerInput((msg.input && msg.input._from) || this.remoteClientId, msg.input);
                 break;
-            case 'healRequest':
-                this.handleHealRequest(this.remoteClientId, msg.targetId, msg.amount);
+            case 'lootDelete':
+                if (this.isHost) this.handleLootDelete((msg.input && msg.input._from) || msg.from || this.remoteClientId, msg.lootId);
                 break;
-            case 'chat':
-                this.onChatMessage(this.remoteClientId, msg.message, false);
+            case 'beachClaim':
+                if (this.isHost) this.handleBeachClaim((msg.input && msg.input._from) || msg.from || this.remoteClientId, msg.fish);
                 break;
             case 'syncRequest':
                 if (this.isHost) this.sendLocalState();
@@ -614,15 +741,43 @@ const Multiplayer = {
         const R1 = (v) => Math.round((v || 0) * 10) / 10;
         const RI = (v) => Math.round(v || 0);
 
+        // Drop peers silent for >12s (left without a clean leaveRoom).
+        // Live peers send input at ~15Hz, so this only kills real ghosts.
+        try {
+            const now = Date.now();
+            for (const pid of Object.keys(this.hostPeers || {})) {
+                const rp = this.hostPeers[pid];
+                if (!rp || !rp._lastUpdate || now - rp._lastUpdate > 12000) {
+                    delete this.hostPeers[pid];
+                    if (Array.isArray(this.hostPeerOrder)) {
+                        this.hostPeerOrder = this.hostPeerOrder.filter(id => id !== pid);
+                    }
+                    if (this.state && this.state.remotePlayers) delete this.state.remotePlayers[pid];
+                }
+            }
+        } catch (e) {}
         // Lobby snapshots: host + every known peer (clients render all)
-        const players = [this._packPlayer(p, this.localClientId || 'host', 'Host')];
+        try {
+            if (this.state && this.state.mouse) {
+                p.aim = Math.atan2(this.state.mouse.worldY - p.y, this.state.mouse.worldX - p.x);
+            }
+        } catch (e) {}
+        const players = [this._packPlayer(p, this.localClientId || 'host', 'Host', this.state.fishing)];
         for (const [pid, rp] of Object.entries(this.hostPeers || {})) {
             if (rp && typeof rp.x === 'number') players.push(this._packPlayer(rp, pid, rp.label || 'Player ?'));
         }
+        // Pending kill-credit awards for clients (cleared on ack)
+        const awards = {};
+        for (const [pid, a] of Object.entries(this._pendingAwards || {})) {
+            if (a && (a.coins > 0 || a.xp > 0)) awards[pid] = a;
+        }
 
-        // Only send essential state for synchronization (quantized)
+        // Only send essential state for synchronization (quantized).
+        // NOTE: wallets/inventories are PERSONAL — each player owns their
+        // own file. Only the shared world (below) is broadcast.
         const gameState = {
             players,
+            awards,
             // Host player state (authoritative)
             player: {
                 x: RI(p.x),
@@ -681,6 +836,8 @@ const Multiplayer = {
                 isEnraged: m.isEnraged
             })),
             bullets: this.state.bullets.filter(b => b.owner === 'player').slice(-80).map(b => ({
+                id: b.id,
+                pid: b.pid || null,
                 x: RI(b.x),
                 y: RI(b.y),
                 vx: RI(b.vx),
@@ -691,7 +848,20 @@ const Multiplayer = {
                 explosive: b.explosive,
                 burn: b.burn
             })),
+            // Host monster skill shots (clients take hits, never simulate)
+            enemyBullets: this.state.bullets.filter(b => b.owner !== 'player').slice(-30).map(b => ({
+                id: b.id,
+                x: RI(b.x),
+                y: RI(b.y),
+                vx: RI(b.vx),
+                vy: RI(b.vy),
+                damage: b.damage,
+                color: b.color,
+                radius: b.radius,
+                life: R1(b.life)
+            })),
             groundLoot: this.state.groundLoot.map(l => ({
+                id: l.id,
                 species: l.species,
                 x: RI(l.x),
                 y: RI(l.y)
@@ -715,6 +885,38 @@ const Multiplayer = {
                 leaveHazard: b.leaveHazard,
                 hazardType: b.hazardType
             })),
+            // Open-world enemies (host spawns; clients render + touch, host kills)
+            enemies: (this.state.enemies || []).slice(0, 24).map(e => ({
+                enemyType: e.enemyType,
+                speciesId: e.species ? e.species.id : null,
+                x: RI(e.x),
+                y: RI(e.y),
+                vx: RI(e.vx),
+                vy: RI(e.vy),
+                hp: RI(e.hp),
+                maxHp: RI(e.maxHp),
+                damage: e.damage,
+                hitFlash: e.hitFlash || 0,
+                isBoss: !!e.isBoss,
+                bossName: e.bossName || null,
+                enraged: !!e.enraged,
+                state: e.state || null,
+                leapH: e.leapH || 0,
+                jumpT: e.jumpT || 0,
+                jumpDur: e.jumpDur || 0
+            })),
+            // Enemy skill shots (host simulates; clients take the hits)
+            projectiles: (this.state.projectiles || []).slice(0, 40).map(b => ({
+                id: b.id,
+                x: RI(b.x),
+                y: RI(b.y),
+                vx: RI(b.vx),
+                vy: RI(b.vy),
+                damage: b.damage,
+                color: b.color,
+                radius: b.radius,
+                life: R1(b.life)
+            })),
             waterBoundaryX: this.state.waterBoundaryX,
             time: R1(this.state.time),
             screenShake: RI(this.state.screenShake),
@@ -727,7 +929,19 @@ const Multiplayer = {
                 maxHp: RI(this.state.activeBoss.maxHp),
                 phase: this.state.activeBoss.phase
             } : null,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            fx: this._drainFx(),
+            fishHits: (() => {
+                const out = [];
+                for (const arr of Object.values(this._fishHitOutbox || {})) {
+                    for (const fh of arr) {
+                        if (out.length >= 20) break;
+                        out.push(fh);
+                    }
+                }
+                this._fishHitOutbox = {};
+                return out;
+            })()
         };
 
         const payload = JSON.stringify({
@@ -800,9 +1014,19 @@ const Multiplayer = {
             const seen = {};
             for (const pl of remoteState.players) {
                 if (!pl || pl.id === this.localClientId) continue;
+                if (!pl.id || pl.id === 'peer') continue; // never render unknowns
                 seen[pl.id] = true;
                 const cur = this.state.remotePlayers[pl.id] || {};
-                Object.assign(cur, pl, { _pid: pl.id });
+                const firstSeen = !cur._seen;
+                Object.assign(cur, pl, { _pid: pl.id, _seen: true });
+                if (firstSeen || typeof cur.rx !== 'number') {
+                    cur.rx = pl.x; cur.ry = pl.y;
+                    cur._lastFxMode = cur.fishing && cur.fishing.mode;
+                    cur._hx = cur.fishing && cur.fishing.hooked ? cur.fishing.hooked.x : null;
+                    cur._hy = cur.fishing && cur.fishing.hooked ? cur.fishing.hooked.y : null;
+                    cur._bx = cur.fishing && cur.fishing.bobber ? cur.fishing.bobber.x : null;
+                    cur._by = cur.fishing && cur.fishing.bobber ? cur.fishing.bobber.y : null;
+                }
                 this.state.remotePlayers[pl.id] = cur;
             }
             for (const id of Object.keys(this.state.remotePlayers)) {
@@ -815,16 +1039,56 @@ const Multiplayer = {
             this.state.remotePlayer = remoteState.player;
         }
         
-        // For non-host, we don't override local player but we sync world state
+        // For non-host, we don't override local player but we sync world state.
+        // Progression stays PERSONAL — only kill-credit awards apply here.
         if (!this.isHost) {
+            // Kill-credit awards from the host (acked, applied once)
+            if (remoteState.awards && remoteState.awards[this.localClientId]) {
+                const a = remoteState.awards[this.localClientId];
+                if (!this._appliedAwards) this._appliedAwards = {};
+                if (a && a.aid && !this._appliedAwards[a.aid]) {
+                    this._appliedAwards[a.aid] = true;
+                    this._awardAckPending = a.aid;
+                    const p = this.state.player;
+                    if (a.coins) {
+                        p.coins += a.coins;
+                        if (typeof Particles !== 'undefined') Particles.showFloatingText(this.state, `+${a.coins}c bounty!`, p.x, p.y - 50, '#facc15');
+                    }
+                    if (a.xp && typeof Player !== 'undefined') {
+                        try { Player.addXP(this.state, a.xp); } catch (e) {}
+                    }
+                    if (typeof Player !== 'undefined') {
+                        try { Player.refreshHUD(this.state); } catch (e) {}
+                    }
+                    if (typeof AntiCheat !== 'undefined') {
+                        try { AntiCheat.markLegit(); } catch (e) {}
+                    }
+                }
+            }
+
             // Sync monsters
             if (remoteState.monstersOnLand) {
                 this.syncMonsters(remoteState.monstersOnLand);
+            }
+
+            // Sync open-world enemies (host spawns them)
+            if (remoteState.enemies) {
+                this.syncEnemies(remoteState.enemies);
+            }
+
+            // Sync enemy skill shots (host simulates them)
+            if (remoteState.projectiles) {
+                this.syncProjectiles(remoteState.projectiles);
             }
             
             // Sync bullets
             if (remoteState.bullets) {
                 this.syncBullets(remoteState.bullets);
+            }
+
+            // Sync host monster skill shots
+            if (remoteState.enemyBullets) {
+                this.syncEnemyBullets(remoteState.enemyBullets);
             }
             
             // Sync loot
@@ -841,10 +1105,25 @@ const Multiplayer = {
             if (remoteState.delayedBlasts) {
                 this.syncDelayedBlasts(remoteState.delayedBlasts);
             }
-            
-            // Sync fishing (if not locally fishing)
-            if (remoteState.fishing && this.state.fishing.mode === 'IDLE') {
-                this.syncFishing(remoteState.fishing);
+
+            // NOTE: never copy the host's own fishing rig into the client's
+            // local fishing sim. The host rig is rendered via the players
+            // roster above — copying it here overwrote the client's own
+            // bobber/hooked fish and produced the ghost-line / snapped-line
+            // bugs. The client's personal fishing sim stays authoritative.
+
+            // Shared one-shot FX (splashes, blood, muzzle puffs, texts)
+            if (remoteState.fx) {
+                this._suppressFxEmit = true;
+                try { this._applyFx(remoteState.fx); }
+                finally { this._suppressFxEmit = false; }
+            }
+
+            // Helper hits on MY hooked fish (applied once per bullet id)
+            if (Array.isArray(remoteState.fishHits)) {
+                for (const fh of remoteState.fishHits) {
+                    if (fh && fh.to === this.localClientId) this._applyFishHit(fh);
+                }
             }
             
             // Sync boss
@@ -868,23 +1147,75 @@ const Multiplayer = {
         }));
     },
     
-    // Sync bullets
+    // Sync bullets: keep enemy shots + our own local bullets, take the
+    // host sim for everything else (skips our own echo by bullet id).
+    // Host monster skill shots merge in as enemy bullets (hit once by id).
     syncBullets(remoteBullets) {
-        // Remove old remote bullets, add new ones
-        this.state.bullets = this.state.bullets.filter(b => b.owner === 'enemy');
+        if (!this._ownBulletIds) this._ownBulletIds = {};
+        const now = Date.now();
+        const mine = new Set(Object.keys(this._ownBulletIds));
+        this.state.bullets = this.state.bullets.filter(b => {
+            if (b.owner === 'enemy') return true;
+            if (b.local) {
+                if (b.id) {
+                    mine.add(b.id);
+                    this._ownBulletIds[b.id] = now + 4000;
+                }
+                return true;
+            }
+            return false;
+        });
+        // Expire old ids so the registry can't grow forever
+        for (const id of Object.keys(this._ownBulletIds)) {
+            if (this._ownBulletIds[id] < now) delete this._ownBulletIds[id];
+        }
         remoteBullets.forEach(b => {
+            if (b.id && mine.has(b.id)) return;
             this.state.bullets.push({ ...b, owner: 'player', hitSet: new Set() });
         });
     },
+
+    // Merge host monster skill shots (called with snapshot.enemyBullets)
+    syncEnemyBullets(remoteBullets) {
+        if (!Array.isArray(remoteBullets)) return;
+        const seen = new Set((this.state.bullets || []).filter(b => b.owner === 'enemy' && b.id).map(b => b.id));
+        this.state.bullets = this.state.bullets.filter(b => b.owner !== 'enemy' || (b.id && seen.has(b.id) && remoteBullets.some(rb => rb.id === b.id)));
+        // Drop local enemy-bullet entries the host no longer has, add new ones
+        const remoteIds = new Set(remoteBullets.map(b => b.id).filter(Boolean));
+        this.state.bullets = this.state.bullets.filter(b => b.owner !== 'enemy' || (b.id && remoteIds.has(b.id)));
+        for (const b of remoteBullets) {
+            if (b.id && seen.has(b.id)) continue;
+            this.state.bullets.push({ ...b, owner: 'enemy', life: b.life || 2.5, radius: b.radius || 6, color: b.color || '#facc15', trail: [] });
+        }
+    },
     
-    // Sync loot
+    // Sync loot (ids preserved for first-come delete messages)
     syncLoot(remoteLoot) {
         this.state.groundLoot = remoteLoot.map(l => ({
             ...l,
             species: this.findSpecies(l.species.id) || l.species
         }));
     },
-    
+
+    // Sync enemies from host
+    syncEnemies(remoteEnemies) {
+        this.state.enemies = remoteEnemies.map(e => {
+            const out = { ...e, hitFlash: e.hitFlash || 0, vx: e.vx || 0, vy: e.vy || 0, leapH: e.leapH || 0 };
+            if (e.enemyType === 'jumpingFish' && e.speciesId) {
+                out.species = this.findSpecies(e.speciesId) || { id: e.speciesId, name: 'Fish', color: '#38bdf8', size: 16 };
+            }
+            return out;
+        });
+    },
+
+    // Sync enemy skill shots from host (host simulates them).
+    // Client's own hooked-fish shots (local:true) are preserved.
+    syncProjectiles(remoteBullets) {
+        const mine = (this.state.projectiles || []).filter(b => b.local);
+        this.state.projectiles = (remoteBullets || []).map(b => ({ ...b, trail: [] }));
+        for (const b of mine) this.state.projectiles.push(b);
+    },
+
     // Sync hazards
     syncHazards(remoteHazards) {
         this.state.groundHazards = remoteHazards;
@@ -920,13 +1251,68 @@ const Multiplayer = {
         return null;
     },
     
-    // Send player input to host (client only) — throttled to ~15Hz
+    // Send player input to host (client only) — throttled to ~15Hz.
+    // Carries fresh bullets, fishing state and grant acks.
     sendInput(input) {
         if (this.isHost) return; // Host handles input locally
 
         const now = Date.now();
         if (now - (this._lastInputSent || 0) < 66) return;
         this._lastInputSent = now;
+
+        input = input || {};
+        // Self-identifying: the host files this under input._from, so a
+        // stale/missing transport id can never create a 'peer' ghost copy
+        // that trails the real player.
+        try { input._from = this.localClientId || null; } catch (e) {}
+        // Drain fired-bullet outbox (spawn events with ids)
+        if (this._outboxBullets && this._outboxBullets.length) {
+            input.bullets = this._outboxBullets;
+            this._outboxBullets = [];
+            if (!this._ownBulletIds) this._ownBulletIds = {};
+            const exp = Date.now() + 4000;
+            for (const b of input.bullets) if (b && b.id) this._ownBulletIds[b.id] = exp;
+        }
+        // Fishing snapshot for remote visibility
+        try {
+            const f = this.state.fishing;
+            const rod = this.state.player.equippedRod;
+            if (f && f.mode !== 'IDLE') {
+                input.fishing = this._packPlayer(
+                    { x: 0, y: 0, hp: 0, maxHp: 1, facing: 1, activeSlot: 0, equippedRod: rod },
+                    'self', '', f.hookedFish ? {
+                        mode: f.mode,
+                        bobber: f.bobber,
+                        lineTension: f.lineTension,
+                        tensionMax: (rod && rod.tensionMax) || 100,
+                        hookedFish: f.hookedFish
+                    } : { mode: f.mode, bobber: f.bobber, castPower: f.castPower, lineTension: f.lineTension, tensionMax: (rod && rod.tensionMax) || 100 }
+                ).fishing;
+            } else if (f) {
+                input.fishing = { mode: f.mode, bobber: null, hooked: null };
+            }
+        } catch (e) {}
+        try {
+            input.muzzleFlash = this.state.player.muzzleFlash || 0;
+            input.weaponRecoil = this.state.player.weaponRecoil || 0;
+            input.reloading = !!this.state.player.reloading;
+            if (this.state.mouse) {
+                input.aim = Math.atan2(this.state.mouse.worldY - this.state.player.y, this.state.mouse.worldX - this.state.player.x);
+            }
+        } catch (e) {}
+        const fx = this._drainFx();
+        if (fx.length) input.fx = fx;
+        // Hits my bullets scored on ANOTHER player's hooked fish (the
+        // catcher applies these — my screen only showed a visual splash).
+        if (this._fishHitClaims && this._fishHitClaims.length) {
+            input.fishHits = this._fishHitClaims.slice(0, 10);
+            this._fishHitClaims = [];
+        }
+        // Kill-credit award ack
+        if (this._awardAckPending) {
+            input.awardAck = this._awardAckPending;
+            this._awardAckPending = null;
+        }
         if (this.dataChannel && this.dataChannel.readyState === 'open') {
             try { this.dataChannel.send(JSON.stringify({ type: 'playerInput', input })); } catch (e) {}
         } else if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
@@ -938,6 +1324,28 @@ const Multiplayer = {
             }
         }
     },
+
+    // Queue a locally-fired bullet for the host sim (client only)
+    queueBullet(bullet) {
+        if (!this._outboxBullets) this._outboxBullets = [];
+        this._outboxBullets.push(bullet);
+        if (this._outboxBullets.length > 40) this._outboxBullets.splice(0, this._outboxBullets.length - 40);
+    },
+
+    // My bullet visually overlapped ANOTHER player's hooked fish. The
+    // catcher owns that fish, so the hit is claimed here and applied
+    // there (once per bullet id — never double damage).
+    queueFishHit(hit) {
+        if (!hit || !hit.to || !hit.bid) return;
+        if (this.isHost) {
+            if (!this._fishHitOutbox) this._fishHitOutbox = {};
+            const arr = this._fishHitOutbox[hit.to] || (this._fishHitOutbox[hit.to] = []);
+            if (arr.length < 20) arr.push(hit);
+            return;
+        }
+        if (!this._fishHitClaims) this._fishHitClaims = [];
+        if (this._fishHitClaims.length < 10) this._fishHitClaims.push(hit);
+    },
     
     // Handle player input (host receives from each client).
     // Positions every remote player so the host sees the whole lobby.
@@ -945,11 +1353,14 @@ const Multiplayer = {
         if (!input) return;
         if (!this.hostPeers) this.hostPeers = {};
         if (!Array.isArray(this.hostPeerOrder)) this.hostPeerOrder = [];
-        const pid = playerId || 'peer';
+        // Prefer the sender-stamped id (DC messages carry no envelope).
+        const pid = (input && input._from) || playerId;
+        if (!pid) return; // never file under a 'peer' key — that's the ghost bug
         if (!this.hostPeers[pid]) {
             this.hostPeerOrder.push(pid);
         }
         const rp = this.hostPeers[pid] || {};
+        rp._lastUpdate = Date.now();
         if (input.player && typeof input.player.x === 'number') {
             rp.x = input.player.x;
             rp.y = input.player.y;
@@ -958,10 +1369,63 @@ const Multiplayer = {
             if (typeof input.player.facing !== 'undefined') rp.facing = input.player.facing;
             if (typeof input.player.activeSlot !== 'undefined') rp.activeSlot = input.player.activeSlot;
             if (input.player.equippedWeapons) rp.equippedWeapons = input.player.equippedWeapons;
+            if (input.player.gunSkins) rp.gunSkins = input.player.gunSkins;
         }
         if (input.mouse) rp.input = input;
         else if (input.mouseX !== undefined) rp.input = input;
         rp._pid = pid;
+        if (typeof input.aim === 'number') rp.aim = input.aim;
+        else if (input.player && typeof input.player.aim === 'number') rp.aim = input.player.aim;
+        if (typeof input.muzzleFlash === 'number') rp.muzzleFlash = input.muzzleFlash;
+        if (typeof input.weaponRecoil === 'number') rp.weaponRecoil = input.weaponRecoil;
+        if (typeof input.reloading === 'boolean') rp.reloading = input.reloading;
+        if (input.fishing) rp.fishing = input.fishing;
+        // Forwarded helper hits: my bullets -> someone else's hooked fish
+        if (Array.isArray(input.fishHits) && input.fishHits.length) {
+            if (!this._fishHitOutbox) this._fishHitOutbox = {};
+            for (const fh of input.fishHits.slice(0, 10)) {
+                if (!fh || !fh.to || !fh.bid) continue;
+                // Hits on the HOST's own hooked fish apply right here —
+                // the host never reads its own gameState snapshots.
+                if (fh.to === this.localClientId) { this._applyFishHit(fh); continue; }
+                const arr = this._fishHitOutbox[fh.to] || (this._fishHitOutbox[fh.to] = []);
+                if (arr.some(x => x.bid === fh.bid)) continue;
+                if (arr.length < 20) arr.push(fh);
+            }
+        }
+        if (Array.isArray(input.fx) && input.fx.length && this.state) {
+            this._suppressFxEmit = true;
+            try { this._applyFx(input.fx); }
+            finally { this._suppressFxEmit = false; }
+        }
+        // Award ack: client confirms kill-credit receipt
+        if (input.awardAck && this._pendingAwards) {
+            for (const [apid, a] of Object.entries(this._pendingAwards)) {
+                if (apid === pid && a && a.aid === input.awardAck) delete this._pendingAwards[apid];
+            }
+        }
+        // Merge this client's fresh bullets into the host sim (dedupe by id)
+        if (Array.isArray(input.bullets)) {
+            if (!this.state.bullets) this.state.bullets = [];
+            const known = new Set(this.state.bullets.map(b => b.id));
+            for (const nb of input.bullets) {
+                if (!nb || !nb.id || known.has(nb.id)) continue;
+                known.add(nb.id);
+                this.state.bullets.push({
+                    id: nb.id,
+                    pid: nb.pid || pid,
+                    x: nb.x, y: nb.y, vx: nb.vx, vy: nb.vy,
+                    damage: nb.damage, range: nb.range, distTraveled: 0,
+                    type: nb.type, owner: 'player',
+                    pierce: !!nb.pierce, explosive: !!nb.explosive, burn: !!nb.burn,
+                    burnDps: nb.burnDps, poison: !!nb.poison, poisonDpsMult: nb.poisonDpsMult,
+                    chain: !!nb.chain, chainMult: nb.chainMult, lifesteal: nb.lifesteal || 0,
+                    coral: !!nb.coral, coralDps: nb.coralDps, freeze: !!nb.freeze,
+                    freezeTime: nb.freezeTime, stun: !!nb.stun, stunTime: nb.stunTime,
+                    slowHook: nb.slowHook, hitSet: new Set(), trail: []
+                });
+            }
+        }
         // Player 2/3/4 by join order (host is Player 1)
         const idx = this.hostPeerOrder.indexOf(pid);
         rp.label = idx >= 0 ? `Player ${idx + 2}` : 'Player ?';
@@ -974,8 +1438,44 @@ const Multiplayer = {
         }
     },
 
-    // Compact player snapshot for the wire (quantized to cut bandwidth)
-    _packPlayer(p, id, label) {
+    // Compact player snapshot for the wire (quantized to cut bandwidth).
+    // Fishing accepts both shapes: host {mode,bobber,hookedFish} and
+    // client {mode,bobber,hooked}.
+    _packPlayer(p, id, label, fishingOverride) {
+        const f = fishingOverride || p.fishing || null;
+        let hooked = null;
+        if (f && f.mode === 'HOOKED') {
+            if (f.hooked) {
+                hooked = f.hooked;
+                // Ensure the full model keys exist for Render.drawFishModel
+                if (hooked && !hooked.shape && hooked.color) hooked.shape = hooked.shape || 'oval';
+            }
+            else if (f.hookedFish && f.hookedFish.species) {
+                const sp = f.hookedFish.species;
+                hooked = {
+                    id: sp.id,
+                    name: sp.name || 'Fish',
+                    color: sp.color || '#38bdf8',
+                    shape: sp.shape || 'oval',
+                    rarity: sp.rarity || 'common',
+                    size: sp.size || 16,
+                    shiny: !!sp.shiny,
+                    pattern: sp.pattern || null,
+                    skillName: sp.skillName || '',
+                    x: Math.round(f.hookedFish.x),
+                    y: Math.round(f.hookedFish.y),
+                    hp: Math.round(f.hookedFish.hp),
+                    maxHp: Math.round(f.hookedFish.maxHp || 1),
+                    stamina: Math.round(f.hookedFish.stamina),
+                    staminaMax: Math.round(f.hookedFish.staminaMax || 1),
+                    rotation: f.hookedFish.rotation || 0,
+                    skillCooldown: Math.round((f.hookedFish.skillCooldown || 0) * 100) / 100,
+                    isDead: !!f.hookedFish.isDead,
+                    isRaging: !!f.hookedFish.isRaging,
+                    isInflated: !!f.hookedFish.isInflated
+                };
+            }
+        }
         return {
             id,
             label,
@@ -984,100 +1484,114 @@ const Multiplayer = {
             hp: Math.round(p.hp || 0),
             maxHp: Math.round(p.maxHp || 100),
             facing: p.facing || 1,
+            aim: typeof p.aim === 'number' ? Math.round(p.aim * 100) / 100 : undefined,
             activeSlot: p.activeSlot || 0,
-            equippedWeapons: p.equippedWeapons || []
+            equippedWeapons: p.equippedWeapons || [],
+            gunSkins: p.gunSkins || {},
+            muzzleFlash: p.muzzleFlash || 0,
+            weaponRecoil: Math.round((p.weaponRecoil || 0) * 10) / 10,
+            reloading: !!p.reloading,
+            fishing: f ? {
+                mode: f.mode,
+                castPower: f.castPower || 0,
+                lineTension: Math.round((f.lineTension || 0) * 10) / 10,
+                tensionMax: (p.equippedRod && p.equippedRod.tensionMax) || f.tensionMax || 100,
+                bobber: f.bobber ? { x: Math.round(f.bobber.x), y: Math.round(f.bobber.y) } : null,
+                bobberModel: (p.equippedRod && p.equippedRod.bobberModel) || f.bobberModel || 'classic',
+                lineColor: (p.equippedRod && p.equippedRod.lineColor) || f.lineColor || '#94a3b8',
+                hooked
+            } : null
         };
     },
     
-    // Request heal for a player
-    requestHeal(targetId, amount = this.healAmount) {
-        if (this.healCooldown > 0) {
-            this.updateStatus(`Heal on cooldown: ${this.healCooldown.toFixed(1)}s`);
-            return false;
-        }
-        
-        if (this.healsUsed >= this.sharedHeals) {
-            this.updateStatus('No heals remaining this session');
-            return false;
-        }
-        
-        this.healCooldown = this.healCooldownMax;
-        this.healsUsed++;
-        
-        const healData = {
-            type: 'healRequest',
-            targetId: targetId,
-            amount: amount
-        };
-        
-        // Send via data channel
+    // ---- Personal-ownership actions (client -> host) ----
+    // Loot is first-come: client already took it personally, host just
+    // deletes the shared drop so it can't be grabbed twice.
+    sendLootDelete(lootId) {
+        if (!this.isClient() || !lootId) return;
+        const msg = JSON.stringify({ type: 'lootDelete', lootId });
         if (this.dataChannel && this.dataChannel.readyState === 'open') {
-            this.dataChannel.send(JSON.stringify(healData));
-        } else if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
-            this.signalingWs.send(JSON.stringify(healData));
+            try { this.dataChannel.send(msg); } catch (e) {}
         }
-        
-        // Apply locally immediately for responsiveness
-        this.applyHeal(targetId, amount);
-        
-        this.updateStatus(`Heal sent! (${this.sharedHeals - this.healsUsed} remaining)`);
-        return true;
-    },
-    
-    // Handle incoming heal request
-    handleHealRequest(fromId, targetId, amount) {
-        // If target is me, apply heal
-        if (targetId === this.localClientId || targetId === 'all') {
-            this.applyHeal(this.localClientId, amount);
-            this.onHealReceived(amount, fromId === this.localClientId);
+        if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
+            try { this.signalingWs.send(msg); } catch (e) {}
         }
     },
-    
-    // Apply heal to player
-    applyHeal(targetId, amount) {
-        if (typeof Player !== 'undefined' && Player.heal) {
-            Player.heal(this.state, amount);
-        } else {
-            // Fallback
-            const p = this.state.player;
-            const oldHp = p.hp;
-            p.hp = Math.min(p.maxHp, p.hp + amount);
-            
-            if (p.hp > oldHp) {
-                if (typeof Particles !== 'undefined') {
-                    Particles.showFloatingText(this.state, `+${p.hp - oldHp} HP`, p.x, p.y - 40, '#34d399');
-                }
-                if (typeof UI !== 'undefined' && UI.triggerDamageFlash) {
-                    const el = document.getElementById('damage-flash');
-                    if (el) {
-                        el.style.background = 'rgba(52, 211, 153, 0.3)';
-                        el.classList.remove('active');
-                        void el.offsetWidth;
-                        el.classList.add('active');
-                        setTimeout(() => el.style.background = '', 300);
-                    }
-                }
-                if (typeof Player !== 'undefined') {
-                    Player.refreshHUD(this.state);
-                }
+
+    handleLootDelete(fromId, lootId) {
+        if (!this.isHost || !lootId) return;
+        if (this.state.groundLoot) {
+            this.state.groundLoot = this.state.groundLoot.filter(l => l.id !== lootId);
+        }
+    },
+
+    // Client beached a fish: host spawns it as a SHARED monster (or shared
+    // loot if already dead) so everyone sees and fights the same thing.
+    sendBeachClaim(fish) {
+        if (!this.isClient() || !fish || !fish.species) return false;
+        const sp = fish.species;
+        const msg = JSON.stringify({
+            type: 'beachClaim',
+            fish: {
+                species: { id: sp.id, name: sp.name, value: sp.value, size: sp.size, shiny: !!sp.shiny, color: sp.color, rarity: sp.rarity, maxHp: sp.maxHp, attack: sp.attack, staminaMax: sp.staminaMax },
+                x: Math.round(fish.x), y: Math.round(fish.y),
+                hp: Math.round(fish.hp), isDead: !!fish.isDead
+            }
+        });
+        let sent = false;
+        if (this.dataChannel && this.dataChannel.readyState === 'open') {
+            try { this.dataChannel.send(msg); sent = true; } catch (e) {}
+        }
+        if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
+            try { this.signalingWs.send(msg); sent = true; } catch (e) {}
+        }
+        return sent;
+    },
+
+    handleBeachClaim(fromId, data) {
+        if (!this.isHost || !data) return;
+        let species = null;
+        if (typeof FISH_SPECIES !== 'undefined' && data.species) {
+            const base = FISH_SPECIES.find(s => s.id === data.species.id);
+            if (base) {
+                species = Object.assign({}, base);
+                if (data.species.shiny) { species.shiny = true; species.name = data.species.name || species.name; species.value = data.species.value || species.value; }
+                if (typeof data.species.size === 'number') species.size = data.species.size;
             }
         }
-    },
-    
-    // Send chat message
-    sendChat(message) {
-        const chatData = {
-            type: 'chat',
-            message: message
+        if (!species && data.species) species = data.species;
+        if (!species) return;
+        const fish = {
+            species,
+            x: data.x, y: data.y,
+            hp: data.hp, maxHp: species.maxHp || data.hp,
+            stamina: species.staminaMax || 100, staminaMax: species.staminaMax || 100,
+            vx: 0, vy: 0, rotation: 0,
+            isDead: !!data.isDead, isRaging: false, rageTimer: 0,
+            isInflated: false, inflateTimer: 0,
+            dragState: 'BEACHED', beachedTimer: 99,
+            skillCooldown: 2, targetAngle: 0,
+            seaTimer: 0, seaEscapeLimit: 999
         };
-        
-        if (this.dataChannel && this.dataChannel.readyState === 'open') {
-            this.dataChannel.send(JSON.stringify(chatData));
-        } else if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
-            this.signalingWs.send(JSON.stringify(chatData));
+        if (typeof Fishing !== 'undefined' && Fishing.beachFish) {
+            try { Fishing.beachFish(this.state, fish); } catch (e) {}
         }
     },
-    
+
+    // Kill credit: a client's killing blow pays THEM (coins + xp).
+    // Queued per-player, acked, applied once.
+    queueAward(pid, coins, xp) {
+        if (!pid) return;
+        this._awardSeq = (this._awardSeq || 0) + 1;
+        if (!this._pendingAwards) this._pendingAwards = {};
+        const prev = this._pendingAwards[pid];
+        this._pendingAwards[pid] = {
+            aid: this._awardSeq,
+            coins: (prev ? prev.coins : 0) + (coins || 0),
+            xp: (prev ? prev.xp : 0) + (xp || 0)
+        };
+    },
+
     // Send game start signal (host only) — both channels so the client
     // gets it even when the WebRTC data channel isn't open yet.
     sendGameStart() {
@@ -1133,11 +1647,9 @@ const Multiplayer = {
         }
     },
     
-    // Update heal cooldown
+    // Per-frame tick (cooldown-free since heal removal)
     update(delta) {
-        if (this.healCooldown > 0) {
-            this.healCooldown = Math.max(0, this.healCooldown - delta);
-        }
+        void delta;
     },
     
     // Update status display
@@ -1215,6 +1727,11 @@ const Multiplayer = {
         this.hostPeers = {};
         this.hostPeerOrder = [];
         this._lastGameStateTs = 0;
+        this._fxOutbox = [];
+        this._fishHitClaims = [];
+        this._fishHitOutbox = {};
+        this._fishHitApplied = {};
+        this._ownBulletIds = {};
         if (this.state) {
             this.state.remotePlayer = null;
             this.state.remotePlayers = {};
@@ -1229,9 +1746,7 @@ const Multiplayer = {
             isHost: this.isHost,
             isConnected: this.isConnected,
             roomCode: this.roomCode,
-            playerCount: this._lobbyCount || 1,
-            healsRemaining: this.sharedHeals - this.healsUsed,
-            healCooldown: this.healCooldown
+            playerCount: this._lobbyCount || 1
         };
     },
     
@@ -1253,61 +1768,111 @@ const Multiplayer = {
 
         const canvas = ctx.canvas;
         const cam = this.state.camera;
-        // Cheap smoothing between 12Hz snapshots (no extra bandwidth)
+        const now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+        const dt = Math.min(0.1, Math.max(0.001, now - (rp._lastDraw || now)));
+        rp._lastDraw = now;
+        // Frame-rate independent smoothing; snap on teleports/respawns
+        // so no ghost trail is left behind.
         if (typeof rp.rx !== 'number') { rp.rx = rp.x; rp.ry = rp.y; }
-        rp.rx += (rp.x - rp.rx) * 0.35;
-        rp.ry += (rp.y - rp.ry) * 0.35;
+        const distJump = Math.hypot(rp.x - rp.rx, rp.y - rp.ry);
+        if (distJump > 320) { rp.rx = rp.x; rp.ry = rp.y; }
+        else {
+            const k = 1 - Math.pow(0.0001, dt); // ~12Hz -> smooth, 60fps -> stable
+            rp.rx += (rp.x - rp.rx) * k;
+            rp.ry += (rp.y - rp.ry) * k;
+        }
         const sx = (rp.rx - cam.x) * cam.zoom + canvas.width / 2;
         const sy = (rp.ry - cam.y) * cam.zoom + canvas.height / 2;
         const margin = 60;
         if (sx < -margin || sx > canvas.width + margin || sy < -margin || sy > canvas.height + margin) return;
 
         const sc = cam.zoom;
-        ctx.save();
-        ctx.translate(sx, sy);
-
-        // Aim angle from input or mouse
-        let aimAngle = 0;
-        if (rp.input) {
+        // Aim: explicit wire field first (identical on both peers),
+        // fall back to the legacy mouse-world derivation.
+        let aimAngle = (typeof rp.aim === 'number') ? rp.aim : 0;
+        let aimKnown = (typeof rp.aim === 'number');
+        if (!aimKnown && rp.input) {
             const ix = rp.input.mouseX !== undefined ? rp.input.mouseX : (rp.input.mouse && rp.input.mouse.worldX);
             const iy = rp.input.mouseY !== undefined ? rp.input.mouseY : (rp.input.mouse && rp.input.mouse.worldY);
             if (typeof ix === 'number' && typeof iy === 'number') {
-                aimAngle = Math.atan2(iy - rp.y, ix - rp.x);
+                aimAngle = Math.atan2(iy - rp.ry, ix - rp.rx);
+                aimKnown = true;
             }
         }
+        if (!aimKnown) aimAngle = (rp.facing === -1 ? Math.PI : 0);
 
-        // Shadow
+        // Muzzle edge -> local puff so shots look the same everywhere
+        // (the heavier smoke/sound already arrives via the shared FX tap).
+        const flash = rp.muzzleFlash || 0;
+        if (flash > 0.4 && !rp._wasFlashing && typeof Particles !== 'undefined' && this.state) {
+            try {
+                this._suppressFxEmit = true;
+                Particles.spawnParticles(this.state, rp.rx + Math.cos(aimAngle) * 26, rp.ry + Math.sin(aimAngle) * 26, '#fbbf24', 3, { size: 3 });
+            } catch (e) {}
+            finally { this._suppressFxEmit = false; }
+        }
+        rp._wasFlashing = flash > 0.4;
+
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.scale(sc, sc); // world units from here — identical to drawPlayer
+
+        // Shadow (same as single player)
         ctx.fillStyle = 'rgba(0,0,0,0.3)';
         ctx.beginPath();
-        ctx.ellipse(2 * sc, 4 * sc, 16 * sc, 11 * sc, 0, 0, Math.PI * 2);
+        ctx.ellipse(2, 4, 16, 11, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // Body (pink = remote player)
-        const g = ctx.createRadialGradient(-4 * sc, -4 * sc, 2, 0, 0, 16 * sc);
+        // Body — same shape as single player, pink so you can tell who's who
+        const g = ctx.createRadialGradient(-4, -4, 2, 0, 0, 16);
         g.addColorStop(0, '#f472b6');
         g.addColorStop(1, '#be185d');
         ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(0, 0, 16 * sc, 0, Math.PI * 2);
+        ctx.arc(0, 0, 16, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = '#f472b6';
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Gun rotated toward aim
+        // Facing visor: makes turns/spins visible even though the body
+        // is a circle (single-player aim is mirrored 1:1 via rp.aim).
+        ctx.save();
+        ctx.rotate(aimAngle);
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.beginPath();
+        ctx.arc(9, -5, 3, 0, Math.PI * 2);
+        ctx.arc(9, 5, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.arc(10, -5, 1.5, 0, Math.PI * 2);
+        ctx.arc(10, 5, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Gun — the REAL single-player model via Render.drawGun
+        // (same shapes, same rarity accents, same muzzle flash/recoil)
         ctx.save();
         ctx.rotate(aimAngle);
         const w = rp.equippedWeapons && rp.equippedWeapons[rp.activeSlot];
-        if (w) {
-            ctx.strokeStyle = '#e5e7eb';
-            ctx.lineWidth = 4 * sc;
-            ctx.beginPath();
-            ctx.moveTo(10 * sc, 0);
-            ctx.lineTo(30 * sc, 0);
-            ctx.stroke();
+        if (w && typeof WEAPONS !== 'undefined' && typeof Render !== 'undefined' && Render.drawGun) {
+            const def = WEAPONS.find(x => x.id === w);
+            if (def) Render.drawGun(ctx, { muzzleFlash: rp.muzzleFlash || 0, weaponRecoil: rp.weaponRecoil || 0, gunSkins: rp.gunSkins || {} }, def);
+            if (rp.reloading) {
+                ctx.fillStyle = '#fbbf24';
+                ctx.font = 'bold 11px Work Sans';
+                ctx.textAlign = 'center';
+                ctx.fillText('R…', 0, -20);
+            }
         }
         ctx.restore();
         ctx.restore();
+
+        // Remote fishing: bobber + line + hooked catch (same models)
+        if (rp.fishing && rp.fishing.mode && rp.fishing.mode !== 'IDLE') {
+            this._drawRemoteFishing(ctx, rp, sx, sy, sc);
+        }
 
         // Name tag + HP bar (screen space)
         ctx.save();
@@ -1326,6 +1891,159 @@ const Multiplayer = {
         ctx.fillRect(sx - barW / 2, sy - 45 * sc, barW, 5);
         ctx.fillStyle = '#34d399';
         ctx.fillRect(sx - barW / 2, sy - 45 * sc, hpRatio * barW, 5);
+        ctx.restore();
+    },
+
+    _drawRemoteFishing(ctx, rp, sx, sy, sc) {
+        const cam = this.state.camera;
+        const canvas = ctx.canvas;
+        const toScreen = (wx, wy) => ({
+            x: (wx - cam.x) * cam.zoom + canvas.width / 2,
+            y: (wy - cam.y) * cam.zoom + canvas.height / 2
+        });
+        const f = rp.fishing;
+        const t = (this.state.time || 0);
+        // Smooth bobber + hooked-fish targets so the line never snaps
+        // between quantized 12Hz snapshots (the "broke line" jitter).
+        const smoothTo = (key, tx, ty, snap) => {
+            if (typeof tx !== 'number' || typeof ty !== 'number') return null;
+            const kx = key + 'x', ky = key + 'y';
+            if (typeof rp[kx] !== 'number' || Math.hypot(tx - rp[kx], ty - rp[ky]) > (snap || 320)) {
+                rp[kx] = tx; rp[ky] = ty;
+            } else {
+                rp[kx] += (tx - rp[kx]) * 0.4;
+                rp[ky] += (ty - rp[ky]) * 0.4;
+            }
+            return { x: rp[kx], y: rp[ky] };
+        };
+        // Tension color identical to single player (grey -> rod color -> red)
+        const tensionMax = f.tensionMax || 100;
+        const tensionRatio = Math.min(1, (f.lineTension || 0) / tensionMax);
+        const rodLine = f.lineColor || '#38bdf8';
+        const lineColor = tensionRatio > 0.8 ? '#f43f5e' : (f.mode === 'HOOKED' && f.hooked && f.hooked.isDead ? '#94a3b8' : rodLine);
+        ctx.save();
+        if (f.mode === 'CASTING') {
+            // Same power meter as single player
+            const meterW = 80 * sc;
+            ctx.fillStyle = 'rgba(15,23,42,0.9)';
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(sx - 40 * sc, sy - 55 * sc, meterW, 12 * sc, 4);
+            ctx.fill(); ctx.stroke();
+            const g = ctx.createLinearGradient(sx - 40 * sc, 0, sx + 40 * sc, 0);
+            g.addColorStop(0, '#10b981');
+            g.addColorStop(0.6, '#fbbf24');
+            g.addColorStop(1, '#ef4444');
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.roundRect(sx - 38 * sc, sy - 53 * sc, ((f.castPower || 0) / 100) * (meterW - 4 * sc), 8 * sc, 3);
+            ctx.fill();
+        } else if ((f.mode === 'WAITING_BITES' || f.mode === 'BITING' || f.mode === 'CAST_FLY') && f.bobber) {
+            // Same bobber as single player: ripple rings + red/white float + line
+            const sm = smoothTo('_b', f.bobber.x, f.bobber.y) || f.bobber;
+            const b = toScreen(sm.x, sm.y);
+            const bob = Math.sin(t * 4) * 3 * sc;
+            ctx.strokeStyle = 'rgba(125,211,252,0.5)';
+            ctx.lineWidth = 2;
+            for (let i = 0; i < 3; i++) {
+                ctx.globalAlpha = 0.5 - i * 0.15;
+                ctx.beginPath();
+                ctx.arc(b.x, b.y + bob, (8 + i * 8) * sc + Math.sin(t * 3 + i) * 2, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            ctx.globalAlpha = 1;
+            if (typeof Render !== 'undefined' && Render.drawBobberModel) {
+                try { Render.drawBobberModel(ctx, b.x, b.y + bob, f.bobberModel || 'classic', rodLine, sc, t); } catch (e) {}
+            }
+            ctx.strokeStyle = rodLine;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            ctx.quadraticCurveTo((sx + b.x) / 2, (sy + b.y) / 2 + 30 * sc, b.x, b.y + bob);
+            ctx.stroke();
+        } else if (f.mode === 'HOOKED' && f.hooked) {
+            const h = f.hooked;
+            const sm = smoothTo('_h', h.x, h.y) || h;
+            const hp = toScreen(sm.x, sm.y);
+            // Same tension line as single player (red when nearly snapping)
+            ctx.strokeStyle = lineColor;
+            ctx.lineWidth = tensionRatio > 0.8 ? 3 : 2;
+            ctx.shadowColor = lineColor;
+            ctx.shadowBlur = tensionRatio > 0.8 ? 12 : 6;
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            const sag = 30 * sc + (f.lineTension || 0) * 0.3 * sc;
+            ctx.quadraticCurveTo((sx + hp.x) / 2, (sy + hp.y) / 2 + sag, hp.x, hp.y);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            // THE SAME fish model: base species for the shape drawer, but
+            // per-catch instance fields (size/shiny/pattern/color) win, so
+            // viewers see exactly what the catcher sees.
+            let species = null;
+            if (h.id && typeof this.findSpecies === 'function') {
+                try { species = this.findSpecies(h.id); } catch (e) {}
+            }
+            if (species) {
+                species = Object.assign({}, species, {
+                    name: h.name || species.name,
+                    color: h.color || species.color,
+                    size: h.size || species.size,
+                    shiny: !!h.shiny,
+                    pattern: (h.pattern !== undefined ? h.pattern : species.pattern) || null
+                });
+            }
+            if (!species) {
+                species = { id: h.id || 'remote', name: h.name || 'Fish', color: h.color || '#38bdf8', accent: h.color || '#38bdf8', shape: h.shape || 'oval', size: h.size || 16, rarity: h.rarity || 'common', shiny: !!h.shiny, pattern: h.pattern || null };
+            }
+            if (typeof Render !== 'undefined' && Render.drawFishModel) {
+                try {
+                    Render.drawFishModel(ctx, hp.x, hp.y, (species.size || h.size || 16) * sc, species, {
+                        angle: h.rotation || 0,
+                        isRaging: !!h.isRaging && !h.isDead,
+                        isInflated: !!h.isInflated,
+                        glow: species.rarity === 'legendary' && !h.isDead ? 1 : 0
+                    });
+                } catch (e) {}
+            }
+            if (h.isDead) {
+                ctx.font = `bold ${20 * sc}px Work Sans`;
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#ef4444';
+                ctx.fillText('☠', hp.x, hp.y - (species.size || 16) * sc - 12);
+            } else {
+                // Same hp + stamina bars as single player
+                const barW = 60 * sc;
+                const barY = hp.y - (species.size || 16) * sc - 24;
+                const ratio = Math.max(0, Math.min(1, (h.hp || 0) / (h.maxHp || 1)));
+                ctx.fillStyle = 'rgba(15,23,42,0.9)';
+                ctx.beginPath();
+                ctx.roundRect(hp.x - barW / 2 - 2, barY - 2, barW + 4, 16 * sc, 4);
+                ctx.fill();
+                ctx.fillStyle = '#38bdf8';
+                ctx.beginPath();
+                ctx.roundRect(hp.x - barW / 2, barY, ratio * barW, 5 * sc, 2);
+                ctx.fill();
+                if (h.staminaMax) {
+                    ctx.fillStyle = '#facc15';
+                    ctx.beginPath();
+                    ctx.roundRect(hp.x - barW / 2, barY + 7 * sc, Math.max(0, (h.stamina || 0) / h.staminaMax) * barW, 5 * sc, 2);
+                    ctx.fill();
+                }
+                // Same labels as single player: always the catch name, plus
+                // the red skill warning right before it fires.
+                ctx.textAlign = 'center';
+                if ((h.skillCooldown || 99) < 0.5 && !h.isDead) {
+                    ctx.fillStyle = '#ef4444';
+                    ctx.font = `bold ${11 * sc}px Work Sans`;
+                    ctx.fillText(`⚠ ${h.skillName || 'SKILL'}`, hp.x, barY - 8);
+                } else {
+                    ctx.fillStyle = '#f472b6';
+                    ctx.font = `bold ${10 * sc}px Work Sans`;
+                    ctx.fillText(`🎣 ${h.name || species.name || ''}`, hp.x, barY - 6);
+                }
+            }
+        }
         ctx.restore();
     }
 };

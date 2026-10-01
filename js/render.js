@@ -1,10 +1,306 @@
+// ============================================================
+//  GUN SKIN LOADER — custom PNG art per weapon from assets/guns/
+//  Drop `<weapon-id>.png` (e.g. `railgun.png`) in that folder and any
+//  owned gun of that type can wear it. Art must face RIGHT (muzzle +x)
+//  on a transparent background, any size/aspect — it is fitted into the
+//  gun's footprint without stretching pixels.
+//  Per-weapon override: `skin: 'shared-name'` reuses one file,
+//  `skin: false` forces the procedural model.
+// ============================================================
+const GunSkinLoader = {
+    cache: new Map(),
+    loading: new Map(),
+    failed: new Set(),
+    available: {},
+    onReady: null, // Shop hooks this to refresh the skin buttons
+
+    load(id) {
+        if (this.cache.has(id)) return this.cache.get(id);
+        if (this.failed.has(id)) return Promise.resolve(null);
+        if (this.loading.has(id)) return this.loading.get(id);
+        const promise = new Promise((resolve) => {
+            const img = new Image();
+            img.src = `assets/guns/${id}.png`;
+            img.onload = () => {
+                this.cache.set(id, img);
+                this.loading.delete(id);
+                this.available[id] = true;
+                try { if (typeof this.onReady === 'function') this.onReady(id); } catch (e) {}
+                resolve(img);
+            };
+            img.onerror = () => {
+                this.loading.delete(id);
+                this.failed.add(id); // probe once per session — no log spam
+                resolve(null); // no file -> procedural model
+            };
+        });
+        this.loading.set(id, promise);
+        return promise;
+    },
+
+    get(id) {
+        return this.cache.get(id) || null;
+    },
+
+    has(id) {
+        return !!this.available[id];
+    },
+
+    // Player uploads (local only — each PC uses its own files).
+    // Downscaled to <=256px so a skin survives localStorage quotas.
+    storageKey(id) {
+        return 'ah_gunskin_' + id;
+    },
+
+    saveUpload(id, file) {
+        return new Promise((resolve, reject) => {
+            try {
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = () => {
+                    try {
+                        const k = Math.min(1, 256 / Math.max(img.naturalWidth, img.naturalHeight));
+                        const cw = Math.max(1, Math.round(img.naturalWidth * k));
+                        const ch = Math.max(1, Math.round(img.naturalHeight * k));
+                        const cv = document.createElement('canvas');
+                        cv.width = cw; cv.height = ch;
+                        cv.getContext('2d').drawImage(img, 0, 0, cw, ch);
+                        const dataUrl = cv.toDataURL('image/png');
+                        URL.revokeObjectURL(url);
+                        const done = new Image();
+                        done.onload = () => {
+                            this.cache.set(id, done);
+                            this.available[id] = true;
+                            try { localStorage.setItem(this.storageKey(id), dataUrl); } catch (se) {
+                                reject(new Error('STORAGE FULL — skin kept for this session only'));
+                                try { if (typeof this.onReady === 'function') this.onReady(id); } catch (e) {}
+                                resolve({ sessionOnly: true });
+                                return;
+                            }
+                            try { if (typeof this.onReady === 'function') this.onReady(id); } catch (e) {}
+                            resolve({ sessionOnly: false });
+                        };
+                        done.onerror = () => reject(new Error('BAD IMAGE'));
+                        done.src = dataUrl;
+                    } catch (e) { reject(e); }
+                };
+                img.onerror = () => reject(new Error('BAD IMAGE'));
+                img.src = url;
+            } catch (e) { reject(e); }
+        });
+    },
+
+    clearUpload(id) {
+        try { localStorage.removeItem(this.storageKey(id)); } catch (e) {}
+        // Drop the uploaded bitmap; a shipped assets/guns file (if any)
+        // will be picked back up by preload below.
+        this.cache.delete(id);
+        this.available[id] = false;
+        try { this.load(id); } catch (e) {}
+    },
+
+    restoreUploads(ids) {
+        (ids || []).forEach(id => {
+            let raw = null;
+            try { raw = localStorage.getItem(this.storageKey(id)); } catch (e) {}
+            if (!raw) return;
+            const img = new Image();
+            img.onload = () => {
+                this.cache.set(id, img);
+                this.available[id] = true;
+                try { if (typeof this.onReady === 'function') this.onReady(id); } catch (e) {}
+            };
+            img.onerror = () => { try { localStorage.removeItem(this.storageKey(id)); } catch (e) {} };
+            img.src = raw;
+        });
+    },
+
+    preload(ids) {
+        (ids || []).forEach(id => {
+            try { this.load(id); } catch (e) {}
+        });
+    }
+};
+
+window.GunSkinLoader = GunSkinLoader;
+
+// ============================================================
+//  BOBBER LOADER — custom PNG art per bobber model from
+//  assets/bobbers/<model>.png (classic/slim/bulb/glow/feather/rocket).
+//  Same rules as gun skins: any size, fitted without stretching,
+//  plus per-file player uploads (localStorage ah_bobber_<model>).
+// ============================================================
+const BobberLoader = {
+    cache: new Map(),
+    loading: new Map(),
+    failed: new Set(),
+    available: {},
+    onReady: null,
+
+    load(id) {
+        if (this.cache.has(id)) return this.cache.get(id);
+        if (this.failed.has(id)) return Promise.resolve(null);
+        if (this.loading.has(id)) return this.loading.get(id);
+        const promise = new Promise((resolve) => {
+            const img = new Image();
+            img.src = `assets/bobbers/${id}.png`;
+            img.onload = () => {
+                this.cache.set(id, img);
+                this.loading.delete(id);
+                this.available[id] = true;
+                try { if (typeof this.onReady === 'function') this.onReady(id); } catch (e) {}
+                resolve(img);
+            };
+            img.onerror = () => {
+                this.loading.delete(id);
+                this.failed.add(id); // probe once per session — no log spam
+                resolve(null);
+            };
+        });
+        this.loading.set(id, promise);
+        return promise;
+    },
+
+    get(id) {
+        return this.cache.get(id) || null;
+    },
+
+    has(id) {
+        return !!this.available[id];
+    },
+
+    storageKey(id) {
+        return 'ah_bobber_' + id;
+    },
+
+    saveUpload(id, file) {
+        return new Promise((resolve, reject) => {
+            try {
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = () => {
+                    try {
+                        const k = Math.min(1, 256 / Math.max(img.naturalWidth, img.naturalHeight));
+                        const cw = Math.max(1, Math.round(img.naturalWidth * k));
+                        const ch = Math.max(1, Math.round(img.naturalHeight * k));
+                        const cv = document.createElement('canvas');
+                        cv.width = cw; cv.height = ch;
+                        cv.getContext('2d').drawImage(img, 0, 0, cw, ch);
+                        const dataUrl = cv.toDataURL('image/png');
+                        URL.revokeObjectURL(url);
+                        const done = new Image();
+                        done.onload = () => {
+                            this.cache.set(id, done);
+                            this.available[id] = true;
+                            try { localStorage.setItem(this.storageKey(id), dataUrl); } catch (se) {
+                                try { if (typeof this.onReady === 'function') this.onReady(id); } catch (e) {}
+                                resolve({ sessionOnly: true });
+                                return;
+                            }
+                            try { if (typeof this.onReady === 'function') this.onReady(id); } catch (e) {}
+                            resolve({ sessionOnly: false });
+                        };
+                        done.onerror = () => reject(new Error('BAD IMAGE'));
+                        done.src = dataUrl;
+                    } catch (e) { reject(e); }
+                };
+                img.onerror = () => reject(new Error('BAD IMAGE'));
+                img.src = url;
+            } catch (e) { reject(e); }
+        });
+    },
+
+    clearUpload(id) {
+        try { localStorage.removeItem(this.storageKey(id)); } catch (e) {}
+        this.cache.delete(id);
+        this.available[id] = false;
+        try { this.load(id); } catch (e) {}
+    },
+
+    restoreUploads(ids) {
+        (ids || []).forEach(id => {
+            let raw = null;
+            try { raw = localStorage.getItem(this.storageKey(id)); } catch (e) {}
+            if (!raw) return;
+            const img = new Image();
+            img.onload = () => {
+                this.cache.set(id, img);
+                this.available[id] = true;
+                try { if (typeof this.onReady === 'function') this.onReady(id); } catch (e) {}
+            };
+            img.onerror = () => { try { localStorage.removeItem(this.storageKey(id)); } catch (e) {} };
+            img.src = raw;
+        });
+    },
+
+    preload(ids) {
+        (ids || []).forEach(id => {
+            try { this.load(id); } catch (e) {}
+        });
+    }
+};
+
+window.BobberLoader = BobberLoader;
+
 const Render = {
+    // Visible world rect (with margin) — culls the heavy decor loops
+    // so they cost the same on a 4K screen as on a phone.
+    _view(state, ctx, margin = 120) {
+        const cam = state.camera;
+        const w = ctx.canvas.width / cam.zoom / 2 + margin;
+        const h = ctx.canvas.height / cam.zoom / 2 + margin;
+        return { x0: cam.x - w, x1: cam.x + w, y0: cam.y - h, y1: cam.y + h };
+    },
+
+    // Decor density scale: keeps screen-space density constant so zooming
+    // out doesn't multiply grain/ripple/arc counts (the far-zoom stutter
+    // and moire bug). 1x at zoom >= 1, up to 4x steps when zoomed far out.
+    _ds(state) {
+        try {
+            const z = (state.camera && state.camera.zoom) || 1;
+            return Utils.clamp(1 / Math.max(0.25, z), 1, 4);
+        } catch (e) { return 1; }
+    },
+
+    // Decor fade: high-frequency detail (sand grain, water arcs, foam
+    // bubbles) aliases into crawling shimmer when zoomed far out, so it
+    // fades away below 1x zoom instead of sparkling. Full detail >= 1.0.
+    _fade(state) {
+        try {
+            const z = (state.camera && state.camera.zoom) || 1;
+            return Utils.clamp((z - 0.55) / 0.45, 0, 1);
+        } catch (e) { return 1; }
+    },
+
+    // Adaptive quality: sustained slow frames -> halve decor work
+    _adapt(state, delta) {
+        state._ft = (state._ft || 0) * 0.95 + delta * 1000 * 0.05;
+        if (!state._lowFx && state._ft > 26) state._lowFx = true;
+        else if (state._lowFx && state._ft < 17) state._lowFx = false;
+    },
+
     drawWorld(state, ctx) {
         const canvas = ctx.canvas;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        // Frame-time tracking for adaptive quality
+        try {
+            const now = performance.now();
+            if (state._lastFrame) this._adapt(state, (now - state._lastFrame) / 1000);
+            state._lastFrame = now;
+        } catch (e) {}
+
         ctx.save();
         Camera.apply(state, ctx);
+
+        // Base fill over the whole visible view: at far zoom the camera sees
+        // past the painted land/water rects — without this that's flickering
+        // clear-color void.
+        try {
+            const v0 = this._view(state, ctx, 600);
+            ctx.fillStyle = '#020617';
+            ctx.fillRect(v0.x0, v0.y0, v0.x1 - v0.x0, v0.y1 - v0.y0);
+        } catch (e) {}
 
         this.drawLand(state, ctx);
         this.drawWater(state, ctx);
@@ -17,6 +313,7 @@ const Render = {
         this.drawLandMonsters(state, ctx);
         this.drawEnemies(state, ctx);
         this.drawShopZones(state, ctx);
+        if (typeof NPC !== 'undefined' && NPC.drawWorld) NPC.drawWorld(state, ctx);
         this.drawBullets(state, ctx);
         this.drawPlayer(state, ctx);
         this.drawParticles(state, ctx);
@@ -49,7 +346,7 @@ const Render = {
         ctx.fillStyle = dryGrad;
         ctx.fillRect(beachStart, beachTop, beachEnd - beachStart, beachBot - beachTop);
 
-        const tideWobble = Math.sin(t * 0.35) * 12 + Math.sin(t * 0.8) * 6;
+        const tideWobble = Math.sin(t * 0.35) * 8 + Math.sin(t * 0.8) * 3;
         const wetWidthBase = 140;
         const wetStart = w - wetWidthBase - tideWobble;
         const wetEnd   = w + 20;
@@ -65,8 +362,10 @@ const Render = {
         ctx.save();
         ctx.globalAlpha = 0.55;
         ctx.fillStyle = '#7cb0c9';
-        for (let px = B.MIN_X; px < w; px += 420) {
-            for (let py = B.MIN_Y; py < B.MAX_Y; py += 380) {
+        const vw0 = this._view(state, ctx);
+        const pudStep = this._ds(state);
+        for (let px = Math.max(B.MIN_X, vw0.x0 - 420); px < Math.min(w, vw0.x1); px += 420 * pudStep) {
+            for (let py = Math.max(B.MIN_Y, vw0.y0 - 380); py < Math.min(B.MAX_Y, vw0.y1); py += 380 * pudStep) {
                 const seedX = px * 0.913 + py * 0.417;
                 const seedY = py * 0.731 + px * 0.223;
                 const rx = 30 + (Math.sin(seedX) * 0.5 + 0.5) * 45;
@@ -82,11 +381,14 @@ const Render = {
         }
         ctx.restore();
 
+        const grainFade = this._fade(state);
+        if (grainFade > 0) {
         ctx.save();
-        ctx.globalAlpha = 0.18;
-        const grainStep = 14;
-        for (let gx = beachStart; gx < beachEnd; gx += grainStep) {
-            for (let gy = beachTop; gy < beachBot; gy += grainStep) {
+        ctx.globalAlpha = 0.18 * grainFade;
+        const vwGrain = this._view(state, ctx);
+        const grainStep = (state._lowFx ? 30 : 14) * this._ds(state);
+        for (let gx = Math.max(beachStart, vwGrain.x0); gx < Math.min(beachEnd, vwGrain.x1); gx += grainStep) {
+            for (let gy = Math.max(beachTop, vwGrain.y0); gy < Math.min(beachBot, vwGrain.y1); gy += grainStep) {
                 const h1 = Math.sin(gx * 12.9898 + gy * 78.233) * 43758.5453;
                 const h2 = Math.sin(gx * 39.346 + gy * 11.135) * 24634.6345;
                 const ox = (h1 - Math.floor(h1)) * grainStep;
@@ -97,10 +399,13 @@ const Render = {
             }
         }
         ctx.restore();
+        }
 
         ctx.save();
-        for (let px = B.MIN_X; px < w; px += 260) {
-            for (let py = B.MIN_Y; py < B.MAX_Y; py += 240) {
+        const vw1 = this._view(state, ctx);
+        const decStep = this._ds(state);
+        for (let px = Math.max(B.MIN_X, vw1.x0 - 260); px < Math.min(w, vw1.x1); px += 260 * decStep) {
+            for (let py = Math.max(B.MIN_Y, vw1.y0 - 240); py < Math.min(B.MAX_Y, vw1.y1); py += 240 * decStep) {
                 const h = Math.sin(px * 0.317 + py * 0.921) * 61728.35;
                 const r = h - Math.floor(h);
                 if (r < 0.25) {
@@ -146,10 +451,16 @@ const Render = {
         ctx.globalAlpha = 0.10;
         ctx.strokeStyle = '#7e5c37';
         ctx.lineWidth = 1;
-        for (let y = B.MIN_Y + 40; y < B.MAX_Y; y += 22) {
+        const vwRip = this._view(state, ctx);
+        const ripStep = this._ds(state);
+        let ripRow = 0;
+        for (let y = Math.max(B.MIN_Y + 40, vwRip.y0); y < Math.min(B.MAX_Y, vwRip.y1); y += 22 * ripStep) {
+            if (state._lowFx && (ripRow++ % 2)) continue;
             ctx.beginPath();
-            for (let x = B.MIN_X; x < w - 40; x += 24) {
-                const wy = y + Math.sin(x * 0.02 + y * 0.05 + t * 0.4) * 2;
+            for (let x = Math.max(B.MIN_X, vwRip.x0); x < Math.min(w - 40, vwRip.x1); x += 24 * ripStep) {
+                // Carved static sand ripples: shape comes from position only.
+                // (The old time-driven crawl made the whole beach shimmer.)
+                const wy = y + Math.sin(x * 0.02 + y * 0.05) * 2;
                 if (x === B.MIN_X) ctx.moveTo(x, wy);
                 else ctx.lineTo(x, wy);
             }
@@ -189,16 +500,26 @@ const Render = {
 
         ctx.strokeStyle = 'rgba(125,211,252,0.12)';
         ctx.lineWidth = 1.5;
-        for (let x = w + 30; x < B.MAX_X + 200; x += 70) {
-            for (let y = B.MIN_Y - 100; y < B.MAX_Y + 200; y += 70) {
+        const vwWater = this._view(state, ctx);
+        const arcStep = (state._lowFx ? 140 : 70) * this._ds(state);
+        const arcFade = this._fade(state);
+        if (arcFade > 0) {
+        ctx.save();
+        ctx.globalAlpha = arcFade;
+        for (let x = Math.max(w + 30, vwWater.x0); x < Math.min(B.MAX_X + 200, vwWater.x1); x += arcStep) {
+            for (let y = Math.max(B.MIN_Y - 100, vwWater.y0); y < Math.min(B.MAX_Y + 200, vwWater.y1); y += arcStep) {
+                // Gentle breathing sway only — the old ±12px crawl made the
+                // whole sea look like it was shimmering.
                 ctx.beginPath();
                 ctx.arc(
-                    x + Math.sin(t * 1.5 + y * 0.02) * 12,
-                    y + Math.cos(t * 1.2 + x * 0.02) * 8,
+                    x + Math.sin(t * 1.5 + y * 0.02) * 2,
+                    y + Math.cos(t * 1.2 + x * 0.02) * 1.5,
                     18, 0, Math.PI
                 );
                 ctx.stroke();
             }
+        }
+        ctx.restore();
         }
 
         ctx.save();
@@ -229,14 +550,15 @@ const Render = {
             ctx.save();
             ctx.strokeStyle = 'rgba(56, 189, 248, 0.06)';
             ctx.lineWidth = 1;
+            const vwGrid = this._view(state, ctx);
             ctx.beginPath();
-            for (let x = B.MIN_X; x <= B.MAX_X; x += B.GRID_SIZE) {
-                ctx.moveTo(x, B.MIN_Y);
-                ctx.lineTo(x, B.MAX_Y);
+            for (let x = Math.max(B.MIN_X, vwGrid.x0 - B.GRID_SIZE); x <= Math.min(B.MAX_X, vwGrid.x1); x += B.GRID_SIZE) {
+                ctx.moveTo(x, Math.max(B.MIN_Y, vwGrid.y0));
+                ctx.lineTo(x, Math.min(B.MAX_Y, vwGrid.y1));
             }
-            for (let y = B.MIN_Y; y <= B.MAX_Y; y += B.GRID_SIZE) {
-                ctx.moveTo(B.MIN_X, y);
-                ctx.lineTo(B.MAX_X, y);
+            for (let y = Math.max(B.MIN_Y, vwGrid.y0 - B.GRID_SIZE); y <= Math.min(B.MAX_Y, vwGrid.y1); y += B.GRID_SIZE) {
+                ctx.moveTo(Math.max(B.MIN_X, vwGrid.x0), y);
+                ctx.lineTo(Math.min(B.MAX_X, vwGrid.x1), y);
             }
             ctx.stroke();
             ctx.restore();
@@ -388,6 +710,7 @@ const Render = {
         ctx.restore();
 
         ctx.save();
+        ctx.globalAlpha = this._fade(state);
         ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
         for (let y = B.MIN_Y - 50; y < B.MAX_Y + 50; y += 24) {
             const phase = Math.sin(y * 0.02 + t * 1.8) * 0.5 + 0.5;
@@ -421,8 +744,16 @@ const Render = {
         state.groundLoot.forEach(item => {
             const bob = Math.sin(state.time * 3 + item.x) * 3;
             const distToP = Math.hypot(p.x - item.x, p.y - item.y);
+            // Sinking out: fade + settle + shrink over the sink timer
+            let alpha = 1, sinkY = 0, sinkScale = 1;
+            if (item.sinking) {
+                const k = Math.max(0, item.sinking / (item.sinkMax || 1.2));
+                alpha = k;
+                sinkY = (1 - k) * 26;
+                sinkScale = 0.4 + 0.6 * k;
+            }
 
-            if (distToP < 90) {
+            if (distToP < 90 && !item.sinking) {
                 ctx.save();
                 ctx.strokeStyle = `rgba(56,189,248,${0.5 * (1 - distToP / 90)})`;
                 ctx.lineWidth = 2;
@@ -433,19 +764,115 @@ const Render = {
             }
 
             ctx.save();
+            ctx.globalAlpha = alpha;
             ctx.shadowColor = item.species.color;
             ctx.shadowBlur = 15;
-            this.drawFishModel(ctx, item.x, item.y + bob, item.species.size * 0.6, item.species, {});
+            this.drawFishModel(ctx, item.x, item.y + bob + sinkY, item.species.size * 0.6 * sinkScale, item.species, {});
             ctx.restore();
 
+            ctx.save();
+            ctx.globalAlpha = alpha;
             ctx.font = 'bold 11px Work Sans';
             ctx.textAlign = 'center';
             ctx.strokeStyle = '#000';
             ctx.lineWidth = 3;
-            ctx.strokeText(item.species.name, item.x, item.y - 22 + bob);
+            ctx.strokeText(item.species.name, item.x, item.y - 22 + bob + sinkY);
             ctx.fillStyle = '#fff';
-            ctx.fillText(item.species.name, item.x, item.y - 22 + bob);
+            ctx.fillText(item.species.name, item.x, item.y - 22 + bob + sinkY);
+            ctx.restore();
         });
+    },
+
+    // Per-rod bobber art. PNG (assets/bobbers/<model>.png or player
+    // upload) wins when present, fitted without stretching; otherwise one
+    // of the 6 procedural models. accent = rod color, sc = scale, t = time.
+    drawBobberModel(ctx, x, y, model, accent, sc, t) {
+        sc = sc || 1;
+        accent = accent || '#ef4444';
+        const img = (typeof BobberLoader !== 'undefined' && model) ? BobberLoader.get(model) : null;
+        if (img && img.complete && img.naturalWidth > 0) {
+            const iw = img.naturalWidth, ih = img.naturalHeight;
+            const k = Math.min(30 * sc / iw, 30 * sc / ih);
+            ctx.drawImage(img, x - iw * k / 2, y - ih * k / 2, iw * k, ih * k);
+            return;
+        }
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(sc, sc);
+        switch (model) {
+            case 'slim': {
+                ctx.fillStyle = '#f8fafc';
+                ctx.beginPath(); ctx.roundRect(-2.5, -9, 5, 18, 2.5); ctx.fill();
+                ctx.fillStyle = accent;
+                ctx.fillRect(-2.5, -9, 5, 5);
+                ctx.fillStyle = '#0f172a';
+                ctx.beginPath(); ctx.arc(0, -11, 2, 0, Math.PI * 2); ctx.fill();
+                break;
+            }
+            case 'bulb': {
+                ctx.fillStyle = '#f8fafc';
+                ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = accent;
+                ctx.fillRect(-8, -2.5, 16, 5);
+                ctx.fillStyle = '#f8fafc';
+                ctx.beginPath(); ctx.arc(0, -8, 2.5, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = accent; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.stroke();
+                break;
+            }
+            case 'glow': {
+                const pulse = 14 + Math.sin((t || 0) * 5) * 5;
+                ctx.shadowColor = accent; ctx.shadowBlur = pulse;
+                ctx.fillStyle = accent;
+                ctx.beginPath(); ctx.arc(0, 0, 6.5, 0, Math.PI * 2); ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath(); ctx.arc(0, 0, 2.5, 0, Math.PI * 2); ctx.fill();
+                break;
+            }
+            case 'feather': {
+                ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(0, 10); ctx.lineTo(0, -10); ctx.stroke();
+                ctx.fillStyle = '#f8fafc';
+                ctx.beginPath(); ctx.ellipse(0, -2, 3.5, 9, 0.15, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = accent;
+                ctx.beginPath(); ctx.ellipse(0, -8, 2.5, 4.5, 0.15, 0, Math.PI * 2); ctx.fill();
+                break;
+            }
+            case 'rocket': {
+                ctx.fillStyle = accent;
+                ctx.beginPath();
+                ctx.moveTo(0, -11); ctx.lineTo(5, 2); ctx.lineTo(-5, 2);
+                ctx.closePath(); ctx.fill();
+                ctx.fillStyle = '#f8fafc';
+                ctx.fillRect(-5, 2, 10, 5);
+                ctx.fillStyle = accent;
+                ctx.beginPath();
+                ctx.moveTo(-5, 4); ctx.lineTo(-9, 10); ctx.lineTo(-5, 10);
+                ctx.closePath(); ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(5, 4); ctx.lineTo(9, 10); ctx.lineTo(5, 10);
+                ctx.closePath(); ctx.fill();
+                ctx.fillStyle = '#fde047';
+                ctx.beginPath(); ctx.arc(0, -6, 2, 0, Math.PI * 2); ctx.fill();
+                break;
+            }
+            case 'classic':
+            default: {
+                ctx.fillStyle = '#ef4444';
+                ctx.beginPath();
+                ctx.arc(0, 0, 7, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(0, 0, 7, Math.PI, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(15,23,42,0.6)'; ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.stroke();
+                break;
+            }
+        }
+        ctx.restore();
     },
 
     drawBobber(state, ctx) {
@@ -472,8 +899,31 @@ const Render = {
             ctx.fill();
         }
 
+        if (f.mode === 'CAST_FLY') {
+            const rod = p.equippedRod || {};
+            const model = rod.bobberModel || 'classic';
+            const lineCol = rod.lineColor || 'rgba(148,163,184,0.9)';
+            const t = Math.min(1, (f.castT || 0) / (f.castDur || 0.5));
+            const h = Math.sin(t * Math.PI); // 0 -> 1 -> 0 across the throw
+            const lift = h * 50;
+            const bx = f.bobber.x, by = f.bobber.y - lift;
+            // Stretching line from the rod tip to the flying bobber
+            ctx.strokeStyle = lineCol;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.quadraticCurveTo((p.x + bx) / 2, (p.y + by) / 2 + 20 * (1 - h), bx, by);
+            ctx.stroke();
+            // The bobber itself, riding high mid-flight
+            this.drawBobberModel(ctx, bx, by, model, rod.color || lineCol, 1 + h * 0.4, state.time);
+            return;
+        }
+
         if (f.mode === 'WAITING_BITES') {
             const bob = Math.sin(state.time * 4) * 3;
+            const rod = p.equippedRod || {};
+            const model = rod.bobberModel || 'classic';
+            const lineCol = rod.lineColor || 'rgba(148,163,184,0.7)';
             ctx.strokeStyle = 'rgba(125,211,252,0.5)';
             ctx.lineWidth = 2;
             for (let i = 0; i < 3; i++) {
@@ -485,17 +935,10 @@ const Render = {
             }
             ctx.globalAlpha = 1;
 
-            ctx.fillStyle = '#ef4444';
-            ctx.beginPath();
-            ctx.arc(f.bobber.x, f.bobber.y + bob, 7, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = '#ffffff';
-            ctx.beginPath();
-            ctx.arc(f.bobber.x, f.bobber.y + bob, 7, Math.PI, Math.PI * 2);
-            ctx.fill();
+            this.drawBobberModel(ctx, f.bobber.x, f.bobber.y + bob, model, rod.color || lineCol, 1, state.time);
 
-            ctx.strokeStyle = 'rgba(148,163,184,0.7)';
-            ctx.lineWidth = 1;
+            ctx.strokeStyle = lineCol;
+            ctx.lineWidth = 1.5;
             ctx.beginPath();
             ctx.moveTo(p.x, p.y);
             ctx.quadraticCurveTo((p.x + f.bobber.x) / 2,
@@ -512,8 +955,9 @@ const Render = {
 
         const fish = f.hookedFish;
         const isHighTension = f.lineTension / p.equippedRod.tensionMax > 0.8;
+        const rodCol = (p.equippedRod && p.equippedRod.lineColor) || '#38bdf8';
 
-        ctx.strokeStyle = isHighTension ? '#f43f5e' : (fish.isDead ? '#94a3b8' : '#38bdf8');
+        ctx.strokeStyle = isHighTension ? '#f43f5e' : (fish.isDead ? '#94a3b8' : rodCol);
         ctx.lineWidth = isHighTension ? 3 : 2;
         ctx.shadowColor = ctx.strokeStyle;
         ctx.shadowBlur = isHighTension ? 12 : 6;
@@ -787,31 +1231,35 @@ const Render = {
         state.enemies.forEach(e => {
             if (e.enemyType === 'seagull' && typeof renderSeagull === 'function') {
                 renderSeagull(ctx, e);
+            } else if (e.enemyType === 'gullMissile' && typeof renderGullMissile === 'function') {
+                renderGullMissile(ctx, e);
             } else if (e.enemyType === 'jumpingFish' && typeof renderJumpingFish === 'function') {
                 renderJumpingFish(ctx, e);
             } else if (e.enemyType === 'beachCrab' && typeof renderBeachCrab === 'function') {
                 renderBeachCrab(ctx, e);
             }
             
-            // Health bar for enemies
+            // Health bar for enemies (boss gets a wider bar)
             if (e.maxHp && e.hp < e.maxHp) {
-                const barW = 40;
+                const barW = e.isBoss ? 90 : 40;
                 ctx.fillStyle = 'rgba(15,23,42,0.9)';
-                ctx.fillRect(e.x - barW / 2, e.y - 30, barW, 5);
-                ctx.fillStyle = '#ef4444';
-                ctx.fillRect(e.x - barW / 2, e.y - 30, (e.hp / e.maxHp) * barW, 5);
+                ctx.fillRect(e.x - barW / 2, e.y - (e.isBoss ? 52 : 30), barW, e.isBoss ? 7 : 5);
+                ctx.fillStyle = e.isBoss ? '#f59e0b' : '#ef4444';
+                ctx.fillRect(e.x - barW / 2, e.y - (e.isBoss ? 52 : 30), (e.hp / e.maxHp) * barW, e.isBoss ? 7 : 5);
             }
             
             // Enemy type label
-            ctx.font = 'bold 9px Work Sans';
+            ctx.font = e.isBoss ? 'black 13px Work Sans' : 'bold 9px Work Sans';
             ctx.textAlign = 'center';
-            ctx.fillStyle = '#fbbf24';
+            ctx.fillStyle = e.isBoss ? '#f87171' : '#fbbf24';
             ctx.strokeStyle = 'rgba(0,0,0,0.8)';
             ctx.lineWidth = 2;
-            const label = e.enemyType === 'seagull' ? 'Seagull (loot!)' :
-                         e.enemyType === 'jumpingFish' ? `${(e.species && e.species.name) || 'Jumping Fish'} (loot!)` : 'Beach Crab (loot!)';
-            ctx.strokeText(label, e.x, e.y - 35);
-            ctx.fillText(label, e.x, e.y - 35);
+            const label = e.isBoss ? `⛈ ${(e.bossName || 'STORMCALLER')} (MINIBOSS)` :
+                e.enemyType === 'seagull' ? 'Seagull (loot!)' :
+                e.enemyType === 'gullMissile' ? '!' :
+                e.enemyType === 'jumpingFish' ? `${(e.species && e.species.name) || 'Jumping Fish'}` : 'Beach Crab (loot!)';
+            ctx.strokeText(label, e.x, e.y - (e.isBoss ? 58 : 35));
+            ctx.fillText(label, e.x, e.y - (e.isBoss ? 58 : 35));
         });
     },
 
@@ -821,7 +1269,9 @@ const Render = {
     // ============================================================
     getShopZones(state) {
         const B = CONFIG.WORLD;
-        const x = state.waterBoundaryX - 140;
+        // Deep inside the beach, away from the surf (playable on any screen
+        // width — clamped so the pads never leave the sand).
+        const x = Utils.clamp(state.waterBoundaryX - 320, B.MIN_X + 130, state.waterBoundaryX - 110);
         const clampY = (y) => Utils.clamp(y, B.MIN_Y + 120, B.MAX_Y - 120);
         return [
             { id: 'shop',   x, y: clampY(B.MIN_Y + 560),  radius: 90, color: '#f59e0b', label: 'SHOP',   icon: '🏪' },
@@ -1051,253 +1501,359 @@ const Render = {
         const STEEL  = '#cbd5e1';
         const DARK   = '#334155';
         const BLACK  = '#0f172a';
+        const GRIP   = '#1e293b';
+        const WOOD   = '#7c4a21';
         const ACCENT = w.rarity === 'mythic'    ? '#e879f9'
                      : w.rarity === 'legendary' ? '#f59e0b'
                      : w.rarity === 'epic'      ? '#a855f7'
                      : w.rarity === 'rare'      ? '#38bdf8'
                      : '#94a3b8';
+        // Helpers: filled rounded box + trigger guard stroke. Everything
+        // points +x; origin sits at the shooter's hand.
+        const box = (c, x, y, ww, hh, r) => {
+            ctx.fillStyle = c;
+            ctx.beginPath();
+            ctx.roundRect(x, y, ww, hh, r === undefined ? 2 : r);
+            ctx.fill();
+        };
+        const guard = (x, y, ww, hh) => {
+            ctx.strokeStyle = DARK;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(x, y, ww, hh, 3);
+            ctx.stroke();
+        };
+        const dot = (c, x, y, r, glow, glowC) => {
+            if (glow) { ctx.shadowColor = glowC || c; ctx.shadowBlur = glow; }
+            ctx.fillStyle = c;
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        };
 
-        switch (w.type) {
+        // Custom PNG skin: fitted into the 80x40 gun footprint at (22, 0),
+        // aspect preserved, never stretched. Falls through to procedural.
+        const skinPref = (p.gunSkins && p.gunSkins[w.id]) || 'auto';
+        let skinImg = null;
+        if (w.skin !== false && skinPref !== 'classic' && typeof GunSkinLoader !== 'undefined') {
+            skinImg = GunSkinLoader.get(w.skin || w.id);
+        }
+        if (skinImg && skinImg.complete && skinImg.naturalWidth > 0) {
+            const iw = skinImg.naturalWidth, ih = skinImg.naturalHeight;
+            const k = Math.min(80 / iw, 40 / ih);
+            ctx.drawImage(skinImg, 22 - iw * k / 2, -ih * k / 2, iw * k, ih * k);
+        } else switch (w.type) {
 
             case 'pistol': {
-                ctx.fillStyle = STEEL; ctx.fillRect(8, -4, 22, 8);
-                ctx.fillStyle = DARK;  ctx.fillRect(8, -4, 22, 3);
-                ctx.fillStyle = BLACK; ctx.fillRect(11, 3, 8, 10);
-                ctx.strokeStyle = DARK; ctx.lineWidth = 1.5;
-                ctx.beginPath(); ctx.arc(20, 4, 5, 0, Math.PI); ctx.stroke();
+                box(DARK, 0, -3, 12, 6);            // frame
+                box(STEEL, 6, -6, 26, 9);           // slide
+                box(BLACK, 6, -6, 26, 3, 1);        // slide shading
+                box(BLACK, 8, -9, 5, 3, 1);         // rear sight
+                box(BLACK, 28, -9, 3, 3, 1);        // front sight
+                box(BLACK, 32, -4, 5, 8, 1);        // muzzle
+                box('#000', 35, -1.5, 2, 3, 1);     // bore
+                box(GRIP, 6, 3, 10, 13);            // grip
+                box(ACCENT, 8, 5, 6, 2, 1);         // grip medallion
+                guard(15, 3, 10, 6);                // trigger guard
+                box(DARK, -4, -4, 5, 5, 1);         // hammer
                 break;
             }
 
             case 'smg': {
-                ctx.fillStyle = STEEL; ctx.fillRect(6, -3, 26, 6);
-                ctx.fillStyle = DARK;  ctx.fillRect(6, -3, 26, 2);
-                ctx.fillStyle = BLACK; ctx.fillRect(14, 3, 6, 14);
-                ctx.fillStyle = BLACK; ctx.fillRect(22, 3, 6, 10);
-                ctx.fillStyle = DARK;  ctx.fillRect(6, 3, 4, 8);
+                box(BLACK, -12, -2, 12, 5);         // stock
+                box(DARK, 0, -4, 32, 9);            // receiver
+                box(ACCENT, 2, -1, 28, 2, 1);       // side stripe
+                box(STEEL, 4, -7, 18, 3, 1);        // top rail
+                box(BLACK, 6, -10, 4, 3, 1);        // rear sight
+                box(STEEL, 32, -3, 8, 6);           // barrel shroud
+                box(BLACK, 40, -4, 11, 8, 3);       // suppressor
+                box(DARK, 44, -4, 3, 8, 1);         // suppressor ring
+                box(GRIP, 12, 5, 8, 14, 1);         // magazine
+                box(GRIP, 26, 5, 7, 10);            // foregrip
+                guard(20, 4, 8, 5);
                 break;
             }
 
             case 'rifle': {
-                ctx.fillStyle = STEEL; ctx.fillRect(6, -4, 34, 8);
-                ctx.fillStyle = DARK;  ctx.fillRect(6, -4, 34, 3);
-                ctx.fillStyle = BLACK;
-                for (let i = 0; i < 4; i++) ctx.fillRect(8 + i * 3, -3, 1.5, 6);
-                ctx.fillStyle = DARK;  ctx.fillRect(0, -3, 8, 6);
-                ctx.fillStyle = BLACK; ctx.fillRect(20, 3, 7, 14);
-                ctx.fillStyle = BLACK; ctx.fillRect(28, 3, 6, 10);
+                box(BLACK, -14, -3, 14, 7);         // stock
+                box(STEEL, 0, -4, 28, 9);           // receiver
+                box(DARK, 2, -7, 20, 3, 1);         // carry rail
+                box(BLACK, 4, -10, 4, 3, 1);        // rear sight
+                box(DARK, 28, -4, 16, 8);           // handguard
+                ctx.fillStyle = BLACK;              // handguard ribs
+                for (let i = 0; i < 3; i++) ctx.fillRect(31 + i * 5, -4, 2, 8);
+                box(BLACK, 44, -2, 7, 4);           // barrel
+                box(STEEL, 51, -3, 4, 6, 1);        // muzzle brake
+                box(BLACK, 34, -10, 3, 3, 1);       // front sight
+                box(GRIP, 12, 5, 8, 12, 1);         // curved mag
+                box(GRIP, 12, 15, 8, 4, 1);
+                box(GRIP, 2, 5, 8, 11);             // grip
+                guard(9, 5, 8, 5);
+                box(ACCENT, 0, 2, 28, 2, 1);        // accent stripe
                 break;
             }
 
             case 'shotgun': {
-                ctx.fillStyle = STEEL; ctx.fillRect(6, -6, 34, 12);
-                ctx.fillStyle = DARK;  ctx.fillRect(6, -6, 34, 4);
-                ctx.strokeStyle = BLACK; ctx.lineWidth = 1;
-                ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(40, 0); ctx.stroke();
-                ctx.fillStyle = BLACK; ctx.fillRect(12, -3, 10, 6);
-                ctx.fillStyle = DARK;  ctx.fillRect(0, -4, 8, 8);
-                ctx.fillStyle = BLACK; ctx.fillRect(28, 3, 6, 10);
+                box(WOOD, -18, -4, 14, 9, 3);       // stock
+                box(DARK, -6, -5, 12, 10);          // receiver
+                box(STEEL, 4, -7, 34, 14, 4);       // thick barrel
+                box(DARK, 4, -7, 32, 3, 1);         // top rib
+                box(WOOD, 12, -5, 14, 10, 3);       // pump
+                ctx.fillStyle = DARK;               // pump grooves
+                ctx.fillRect(15, -5, 2, 10);
+                ctx.fillRect(21, -5, 2, 10);
+                box(BLACK, 38, -8, 5, 16, 2);       // muzzle
+                dot('#000', 40.5, 0, 3);            // bore
+                dot(ACCENT, 34, -8.5, 1.6);         // bead sight
+                guard(0, 5, 9, 5);
                 break;
             }
 
             case 'harpoon': {
-                ctx.fillStyle = '#0284c7'; ctx.fillRect(6, -3, 36, 6);
-                ctx.fillStyle = DARK;      ctx.fillRect(6, -3, 36, 2);
-                ctx.fillStyle = '#facc15';
+                box(DARK, 0, -5, 26, 10, 3);        // gun body
+                box(ACCENT, 8, -6, 3, 12, 1);       // power bands
+                box(ACCENT, 15, -6, 3, 12, 1);
+                box(STEEL, 26, -1.5, 26, 3);        // spear shaft
+                ctx.fillStyle = '#facc15';          // spear tip + barb
                 ctx.beginPath();
-                ctx.moveTo(44, 0); ctx.lineTo(54, -6); ctx.lineTo(54, 6);
+                ctx.moveTo(52, -5); ctx.lineTo(62, 0); ctx.lineTo(52, 5);
+                ctx.lineTo(55, 0);
                 ctx.closePath(); ctx.fill();
-                ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1;
-                ctx.beginPath(); ctx.moveTo(44, 0); ctx.lineTo(38, 0); ctx.stroke();
+                dot(DARK, 6, 9, 6);                 // line drum
+                dot(ACCENT, 6, 9, 2.5);             // drum hub
+                box(GRIP, 2, 5, 8, 11);             // grip
+                guard(9, 5, 8, 5);
                 break;
             }
 
             case 'launcher': {
-                ctx.fillStyle = '#92400e'; ctx.fillRect(4, -8, 34, 16);
-                ctx.fillStyle = BLACK;     ctx.fillRect(4, -8, 34, 4);
-                ctx.fillStyle = '#dc2626';
-                ctx.beginPath(); ctx.arc(40, 0, 7, 0, Math.PI * 2); ctx.fill();
-                ctx.strokeStyle = BLACK; ctx.lineWidth = 1; ctx.stroke();
-                ctx.fillStyle = BLACK; ctx.fillRect(20, 6, 6, 10);
+                box(BLACK, -8, -8, 8, 16, 3);       // rear cap
+                box('#7c2d12', -2, -10, 38, 20, 8); // fat tube
+                box('#fbbf24', 4, -8, 4, 5, 1);      // hazard stripes
+                box('#fbbf24', 4, 3, 4, 5, 1);
+                box(DARK, 10, -14, 10, 4, 1);       // top sight
+                box(BLACK, 34, -11, 8, 22, 4);      // muzzle ring
+                dot('#7f1d1d', 38, 0, 5);           // bore
+                dot('#ef4444', 38, 0, 2.5, 8);      // loaded glow
+                box(GRIP, 12, 10, 8, 11);           // grip
+                guard(19, 10, 8, 4);
                 break;
             }
 
             case 'flame': {
-                ctx.fillStyle = '#f97316'; ctx.fillRect(6, -3, 26, 6);
-                ctx.fillStyle = DARK;      ctx.fillRect(6, -3, 26, 2);
-                ctx.fillStyle = '#ea580c';
-                ctx.beginPath(); ctx.arc(-2, 0, 8, 0, Math.PI * 2); ctx.fill();
-                ctx.strokeStyle = BLACK; ctx.stroke();
-                ctx.fillStyle = '#fde047';
+                dot('#9a3412', 0, 0, 11);           // fuel tank
+                dot(ACCENT, 0, 0, 4);               // gauge
+                box('#c2410c', -4, -4, 18, 8, 3);   // tank body
+                box(DARK, 14, -4, 20, 8, 3);        // gun body
+                box('#fbbf24', 34, -3, 8, 6, 2);    // brass nozzle
+                box(BLACK, 42, -2, 4, 4, 1);        // nozzle tip
+                const fl = 3 + Math.abs(Math.sin(performance.now() / 90)) * 4;
+                ctx.fillStyle = '#fde047';          // pilot flame
                 ctx.beginPath();
-                ctx.moveTo(32, -5); ctx.lineTo(40, 0); ctx.lineTo(32, 5);
+                ctx.moveTo(46, -2); ctx.lineTo(46 + fl + 4, 0); ctx.lineTo(46, 2);
                 ctx.closePath(); ctx.fill();
+                box(GRIP, 18, 4, 8, 11);            // grip
+                guard(25, 4, 7, 5);
                 break;
             }
 
             case 'rail': {
-                ctx.fillStyle = ACCENT; ctx.fillRect(0, -3, 46, 6);
-                ctx.fillStyle = '#0f172a'; ctx.fillRect(0, -3, 46, 2);
-                ctx.fillStyle = '#38bdf8';
-                for (let i = 0; i < 5; i++) ctx.fillRect(8 + i * 6, -6, 3, 12);
-                ctx.fillStyle = BLACK; ctx.fillRect(46, -5, 6, 10);
+                box(BLACK, -14, -2, 12, 5);         // stock
+                box(DARK, -2, -4, 32, 9);           // base
+                box(ACCENT, 28, -6, 24, 2.5, 1);    // twin rails
+                box(ACCENT, 28, 3.5, 24, 2.5, 1);
+                ctx.fillStyle = STEEL;              // insulators
+                for (let i = 0; i < 4; i++) { ctx.fillRect(32 + i * 6, -6, 2.5, 12); }
+                dot('#164e63', 8, 0, 8);            // power cell
+                dot('#67e8f9', 8, 0, 4, 14);        // cell glow
+                dot('#fff', 8, 0, 1.8);
+                box(STEEL, 52, -5, 7, 3, 1);        // prongs
+                box(STEEL, 52, 2, 7, 3, 1);
+                box(GRIP, 2, 5, 8, 11);
+                guard(9, 5, 8, 5);
                 break;
             }
 
             case 'plasma': {
-                ctx.fillStyle = '#0e7490'; ctx.fillRect(6, -5, 28, 10);
-                ctx.fillStyle = '#22d3ee'; ctx.fillRect(8, -3, 24, 6);
-                ctx.shadowColor = '#67e8f9'; ctx.shadowBlur = 12;
-                ctx.fillStyle = '#a5f3fc';
-                ctx.beginPath(); ctx.arc(36, 0, 6, 0, Math.PI * 2); ctx.fill();
-                ctx.shadowBlur = 0;
-                ctx.fillStyle = BLACK; ctx.fillRect(18, 5, 6, 10);
+                dot('#164e63', -2, 0, 9);           // rear tank
+                box('#155e75', 2, -7, 30, 14, 5);   // body
+                box('#67e8f9', 6, -4, 15, 8, 3);    // cell window
+                dot('#ecfeff', 13, 0, 3, 10);       // cell core
+                ctx.strokeStyle = '#22d3ee';        // emitter rings
+                ctx.lineWidth = 2.5;
+                for (let i = 0; i < 3; i++) {
+                    ctx.beginPath(); ctx.arc(26 + i * 5, 0, 6 - i, 0, Math.PI * 2); ctx.stroke();
+                }
+                dot('#a5f3fc', 42, 0, 5, 16);       // muzzle orb
+                dot('#fff', 42, 0, 2);
+                box(GRIP, 10, 7, 8, 11);
                 break;
             }
 
             // NEW WEAPON TYPES
             case 'crossbow': {
-                // Abyssal Crossbow - elegant bow with string
-                ctx.fillStyle = '#1e293b'; ctx.fillRect(4, -2, 40, 4);
-                ctx.fillStyle = '#0f172a'; ctx.fillRect(4, -1, 40, 2);
-                // Bow limbs
-                ctx.fillStyle = '#475569';
-                ctx.beginPath(); ctx.moveTo(8, -2); ctx.quadraticCurveTo(-4, -15, 8, 15); ctx.fill();
-                ctx.beginPath(); ctx.moveTo(8, -2); ctx.quadraticCurveTo(-4, -15, 8, 15); ctx.fill();
-                // String
-                ctx.strokeStyle = '#fde047'; ctx.lineWidth = 2;
-                ctx.beginPath(); ctx.moveTo(8, -2); ctx.lineTo(8, 15); ctx.stroke();
-                // Bolt groove
-                ctx.fillStyle = '#a855f7';
-                ctx.beginPath(); ctx.arc(44, 0, 3, 0, Math.PI * 2); ctx.fill();
+                box(WOOD, -2, -2, 42, 5);           // tiller stock
+                box(DARK, -2, -2, 42, 2, 1);        // rail groove shade
+                ctx.strokeStyle = STEEL;            // bow limbs
+                ctx.lineWidth = 5;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(34, 0); ctx.quadraticCurveTo(18, -16, 6, -18);
+                ctx.moveTo(34, 0); ctx.quadraticCurveTo(18, 16, 6, 18);
+                ctx.stroke();
+                ctx.strokeStyle = '#fde047';        // string
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(6, -18); ctx.lineTo(30, 0); ctx.lineTo(6, 18);
+                ctx.stroke();
+                box(STEEL, 12, -1, 28, 2, 1);       // bolt shaft
+                ctx.fillStyle = ACCENT;             // bolt tip + fletching
+                ctx.beginPath();
+                ctx.moveTo(40, -2.5); ctx.lineTo(46, 0); ctx.lineTo(40, 2.5);
+                ctx.closePath(); ctx.fill();
+                box(ACCENT, 12, -3.5, 5, 2, 1);
+                ctx.strokeStyle = DARK;             // stirrup
+                ctx.lineWidth = 2.5;
+                ctx.beginPath(); ctx.arc(42, 0, 5, -1.2, 1.2); ctx.stroke();
+                dot(DARK, 2, -6, 3.5);              // scope
+                dot(ACCENT, 2, -6, 1.5);
                 break;
             }
 
             case 'tesla': {
-                // Tesla Coil Gun - electrical coils
-                ctx.fillStyle = '#334155'; ctx.fillRect(0, -6, 38, 12);
-                ctx.fillStyle = '#1e293b'; ctx.fillRect(2, -4, 34, 8);
-                // Tesla coils
-                ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 3;
-                for (let i = 0; i < 4; i++) {
-                    ctx.beginPath();
-                    ctx.moveTo(6 + i * 8, -6);
-                    for (let j = 0; j < 3; j++) {
-                        ctx.lineTo(6 + i * 8 + (j % 2 === 0 ? -3 : 3), -2 + j * 4);
-                    }
-                    ctx.lineTo(6 + i * 8, 6);
-                    ctx.stroke();
+                box(DARK, -2, -6, 32, 13, 3);       // housing
+                box(BLACK, -2, -6, 32, 4, 2);       // top shade
+                for (let i = 0; i < 3; i++) {       // coil towers
+                    const cx = 4 + i * 9;
+                    box(STEEL, cx, -16, 4, 11, 1);
+                    ctx.strokeStyle = ACCENT;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath(); ctx.arc(cx + 2, -11, 4, 0, Math.PI * 2); ctx.stroke();
+                    dot('#bae6fd', cx + 2, -17, 2.5, 10);
                 }
-                // Capacitor glow
-                ctx.shadowColor = '#38bdf8'; ctx.shadowBlur = 15;
-                ctx.fillStyle = '#bae6fd';
-                ctx.beginPath(); ctx.arc(38, 0, 5, 0, Math.PI * 2); ctx.fill();
-                ctx.shadowBlur = 0;
+                ctx.strokeStyle = '#38bdf8';        // emitter dish
+                ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.arc(30, 0, 8, -1.1, 1.1); ctx.stroke();
+                dot('#e0f2fe', 34, 0, 3, 12);       // dish core
+                ctx.fillStyle = DARK;               // side vents
+                for (let i = 0; i < 3; i++) ctx.fillRect(2, -2 + i * 3, 8, 1.5);
+                box(GRIP, 8, 7, 8, 11);
                 break;
             }
 
             case 'void': {
-                // Void Reaper - dark matter weapon
-                ctx.fillStyle = '#0f172a'; ctx.fillRect(0, -5, 44, 10);
-                // Void core
-                ctx.shadowColor = '#a855f7'; ctx.shadowBlur = 20;
-                const voidGrad = ctx.createRadialGradient(22, 0, 0, 22, 0, 18);
-                voidGrad.addColorStop(0, '#f472b6');
-                voidGrad.addColorStop(0.5, '#a855f7');
-                voidGrad.addColorStop(1, 'rgba(168,85,247,0)');
-                ctx.fillStyle = voidGrad;
-                ctx.beginPath(); ctx.arc(22, 0, 18, 0, Math.PI * 2); ctx.fill();
-                ctx.shadowBlur = 0;
-                // Dark frame
-                ctx.strokeStyle = '#581c87'; ctx.lineWidth = 3;
-                ctx.strokeRect(0, -5, 44, 10);
-                // Barrel
-                ctx.fillStyle = '#1e1b4b'; ctx.fillRect(44, -3, 12, 6);
+                box('#1e1b4b', -6, -7, 42, 14, 4);   // dark shroud
+                ctx.strokeStyle = '#7c3aed';
+                ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.roundRect(-6, -7, 42, 14, 4); ctx.stroke();
+                const vg = ctx.createRadialGradient(14, 0, 1, 14, 0, 13);
+                vg.addColorStop(0, '#fdf4ff');
+                vg.addColorStop(0.35, '#f472b6');
+                vg.addColorStop(0.7, '#a855f7');
+                vg.addColorStop(1, 'rgba(168,85,247,0)');
+                ctx.fillStyle = vg;                 // collapsing core
+                ctx.beginPath(); ctx.arc(14, 0, 13, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#1e1b4b';          // front prongs
+                for (let i = -1; i <= 1; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(34, i * 5 - 2);
+                    ctx.lineTo(50, i * 2.5);
+                    ctx.lineTo(34, i * 5 + 2);
+                    ctx.closePath(); ctx.fill();
+                }
+                dot('#f0abfc', 50, 0, 2.5, 12);     // tip spark
+                box(BLACK, -12, -2, 7, 5, 1);       // rear spike mount
                 break;
             }
 
             case 'coral_launcher': {
-                // Coral Mortar - organic coral weapon
-                ctx.fillStyle = '#0d9488'; ctx.fillRect(2, -8, 38, 16);
-                // Coral growths
-                ctx.fillStyle = '#14b8a6';
+                box('#0f766e', -2, -9, 36, 18, 7);   // mortar tube
+                box('#115e59', -2, -9, 36, 5, 3);    // top shade
+                ctx.fillStyle = '#14b8a6';          // coral branches
                 for (let i = 0; i < 5; i++) {
-                    const x = 6 + i * 7;
+                    const bx = 2 + i * 6;
                     ctx.beginPath();
-                    ctx.moveTo(x, -8);
-                    ctx.quadraticCurveTo(x - 3, -14, x + 2, -8);
-                    ctx.fill();
+                    ctx.moveTo(bx, -9);
+                    ctx.quadraticCurveTo(bx - 3, -16, bx + 3, -10);
+                    ctx.lineTo(bx + 5, -13); ctx.lineTo(bx + 3, -9);
+                    ctx.closePath(); ctx.fill();
                 }
-                // Barrel
-                ctx.fillStyle = '#0f172a'; ctx.fillRect(40, -5, 10, 10);
-                // Muzzle glow
-                ctx.shadowColor = '#22d3ee'; ctx.shadowBlur = 12;
-                ctx.fillStyle = '#5eead4';
-                ctx.beginPath(); ctx.arc(50, 0, 6, 0, Math.PI * 2); ctx.fill();
-                ctx.shadowBlur = 0;
+                dot('#042f2e', 34, 0, 6);           // mouth
+                dot('#5eead4', 34, 0, 3.5, 12);     // mouth glow
+                dot('#14b8a6', 0, 4, 2);            // barnacles
+                dot('#14b8a6', 24, 7, 1.6);
+                box(WOOD, 8, 9, 8, 10);             // grip
+                guard(15, 9, 7, 4);
                 break;
             }
 
             case 'frost_bow': {
-                // Glacial Bow - ice bow
-                ctx.fillStyle = '#0e7490'; ctx.fillRect(4, -2, 42, 4);
-                // Ice limbs with crystalline structure
-                ctx.fillStyle = '#67e8f9';
-                ctx.beginPath(); ctx.moveTo(10, -2); ctx.quadraticCurveTo(-2, -18, 10, 18); ctx.fill();
-                // Ice crystals on limbs
-                ctx.fillStyle = '#a5f3fc';
+                box('#0c4a6e', -2, -2, 42, 5);      // tiller
+                ctx.save();                         // ice limbs
+                ctx.globalAlpha = 0.9;
+                ctx.strokeStyle = '#7dd3fc';
+                ctx.lineWidth = 6;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(36, 0); ctx.quadraticCurveTo(20, -18, 8, -20);
+                ctx.moveTo(36, 0); ctx.quadraticCurveTo(20, 18, 8, 20);
+                ctx.stroke();
+                ctx.restore();
+                ctx.fillStyle = '#e0f2fe';          // ice crystals
                 for (let i = 0; i < 3; i++) {
+                    const cx = 16 + i * 7;
+                    const cy = i % 2 ? 11 : -11;
                     ctx.beginPath();
-                    ctx.moveTo(8 + i * 12, -6);
-                    ctx.lineTo(8 + i * 12 - 4, -12);
-                    ctx.lineTo(8 + i * 12 + 4, -12);
+                    ctx.moveTo(cx - 3, cy > 0 ? 6 : -6);
+                    ctx.lineTo(cx, cy);
+                    ctx.lineTo(cx + 3, cy > 0 ? 6 : -6);
                     ctx.closePath(); ctx.fill();
                 }
-                // String
-                ctx.strokeStyle = '#bae6fd'; ctx.lineWidth = 2;
-                ctx.beginPath(); ctx.moveTo(10, -2); ctx.lineTo(10, 18); ctx.stroke();
-                // Arrow nock
-                ctx.fillStyle = '#fde047';
-                ctx.beginPath(); ctx.arc(46, 0, 4, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = '#f0f9ff';        // string
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(8, -20); ctx.lineTo(32, 0); ctx.lineTo(8, 20);
+                ctx.stroke();
+                box('#bae6fd', 14, -1, 28, 2, 1);   // ice bolt
+                dot('#fff', 43, 0, 2.5, 10);        // bolt tip
+                dot(DARK, 0, -7, 3);                // snowflake sight
+                dot('#e0f2fe', 0, -7, 1.4);
                 break;
             }
 
             case 'magma_shotgun': {
-                // Magma Blunderbuss - volcanic shotgun
-                ctx.fillStyle = '#9a3412'; ctx.fillRect(4, -7, 36, 14);
-                ctx.fillStyle = '#c2410c'; ctx.fillRect(4, -7, 36, 4);
-                // Heat vents
-                ctx.fillStyle = '#f97316';
-                for (let i = 0; i < 4; i++) {
-                    ctx.beginPath(); ctx.arc(10 + i * 8, -3, 3, 0, Math.PI * 2); ctx.fill();
-                }
-                // Barrel
-                ctx.fillStyle = '#78350f'; ctx.fillRect(40, -6, 12, 12);
-                // Molten glow
-                ctx.shadowColor = '#f97316'; ctx.shadowBlur = 15;
-                ctx.fillStyle = '#fb923c';
-                ctx.beginPath(); ctx.arc(52, 0, 8, 0, Math.PI * 2); ctx.fill();
-                ctx.shadowBlur = 0;
+                box(WOOD, -18, -4, 14, 9, 3);       // stock
+                box('#7c2d12', -6, -6, 12, 12);      // receiver
+                box('#9a3412', 2, -8, 34, 16, 5);    // heavy barrels
+                box('#c2410c', 2, -8, 34, 4, 2);     // top heat shade
+                for (let i = 0; i < 4; i++)         // heat vents
+                    dot('#fb923c', 10 + i * 7, -4, 2.2, 8);
+                box(WOOD, 10, -6, 14, 12, 3);       // pump
+                box(BLACK, 36, -9, 6, 18, 3);       // muzzle
+                const mg = 4 + Math.abs(Math.sin(performance.now() / 130)) * 3;
+                dot('#f97316', 39, 0, mg, 14);      // molten core
+                dot('#fde047', 39, 0, 2);
+                guard(0, 6, 9, 5);
                 break;
             }
 
             case 'sonic': {
-                // Resonance Pistol - sonic weapon
-                ctx.fillStyle = '#334155'; ctx.fillRect(6, -4, 28, 8);
-                ctx.fillStyle = '#475569'; ctx.fillRect(6, -4, 28, 2);
-                // Resonance chamber
-                ctx.strokeStyle = '#22d3ee'; ctx.lineWidth = 2;
-                for (let i = 0; i < 4; i++) {
-                    ctx.beginPath();
-                    ctx.arc(12 + i * 5, 0, 3 + i * 1.5, 0, Math.PI * 2);
-                    ctx.stroke();
+                box(DARK, -2, -5, 30, 11, 3);       // body
+                box(BLACK, -2, -5, 30, 3, 1);       // top shade
+                box('#164e63', 2, -3, 8, 6, 1);      // power cells
+                box('#164e63', 2, 3 - 3, 8, 3, 1);
+                dot('#22d3ee', 6, 0, 1.6, 6);
+                ctx.strokeStyle = '#22d3ee';        // resonance rings
+                ctx.lineWidth = 2;
+                for (let i = 0; i < 3; i++) {
+                    ctx.beginPath(); ctx.arc(28, 0, 5 + i * 4, -1.1, 1.1); ctx.stroke();
                 }
-                // Grip
-                ctx.fillStyle = '#0f172a'; ctx.fillRect(8, 4, 6, 12);
-                // Emitter
-                ctx.shadowColor = '#22d3ee'; ctx.shadowBlur = 12;
-                ctx.fillStyle = '#67e8f9';
-                ctx.beginPath(); ctx.arc(34, 0, 4, 0, Math.PI * 2); ctx.fill();
-                ctx.shadowBlur = 0;
+                dot('#a5f3fc', 30, 0, 3.5, 12);     // emitter core
+                dot('#fff', 30, 0, 1.5);
+                box(GRIP, 4, 6, 8, 11);             // grip
+                guard(11, 6, 7, 4);
+                box(ACCENT, -2, 1, 30, 2, 1);       // accent stripe
                 break;
             }
 
@@ -1410,13 +1966,31 @@ const Render = {
             ctx.shadowBlur = 20 * glow;
         }
 
-        // Try to draw custom PNG sprite first
-        if (species.image !== false && typeof FishImageLoader !== 'undefined') {
-            const imgId = species.image || species.id;
-            const img = FishImageLoader.get(imgId);
+        // Custom art is OPT-IN only: player upload (by species id) wins,
+        // then explicit species.image. Everything else is procedural —
+        // no network request, no 404.
+        if (typeof FishImageLoader !== 'undefined') {
+            const customImg = FishImageLoader.get(species.id);
+            const imgId = customImg ? species.id
+                : (typeof species.image === 'string' && species.image.length > 0 ? species.image : null);
+            const img = imgId ? (customImg || FishImageLoader.get(imgId)) : null;
             if (img && img.complete && img.naturalWidth > 0) {
-                const drawSize = s * 2.5;
-                ctx.drawImage(img, -drawSize/2, -drawSize/2, drawSize, drawSize);
+                // Contain (never stretch): any shape — square, 1900x800,
+                // portrait — fits inside the s*2.5 box keeping its pixels.
+                const iw = img.naturalWidth, ih = img.naturalHeight;
+                const k = (s * 2.5) / Math.max(iw, ih);
+                ctx.drawImage(img, -iw * k / 2, -ih * k / 2, iw * k, ih * k);
+                // Shiny aura still applies on top of custom art
+                if (species.shiny) {
+                    ctx.strokeStyle = '#fde047';
+                    ctx.lineWidth = 3;
+                    ctx.shadowColor = '#fde047';
+                    ctx.shadowBlur = 22;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, s * 1.35, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.shadowBlur = 0;
+                }
                 ctx.restore();
                 return;
             }

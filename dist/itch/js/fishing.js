@@ -6,6 +6,16 @@ const Fishing = {
         const distToWater = state.waterBoundaryX - p.x;
         const f = state.fishing;
 
+        // The Stormcaller's storm scatters every fish — rods are useless
+        // until the miniboss dies.
+        try {
+            const storm = (state.enemies || []).some(e => e && e.isBoss && e.enemyType === 'seagull' && (e.hp || 0) > 0);
+            if (storm) {
+                Particles.showFloatingText(state, "Can't fish during the storm! Kill STORMCALLER!", p.x, p.y - 30, '#f87171');
+                return;
+            }
+        } catch (e) {}
+
         if (f.mode === 'IDLE') {
             if (distToWater > 160 || distToWater < -20) {
                 Particles.showFloatingText(state, "Move closer to the shore!", p.x, p.y - 30, '#f87171');
@@ -27,18 +37,47 @@ const Fishing = {
         const f = state.fishing;
         if (f.mode === 'CASTING') {
             try { audio.playCast(); } catch (e) {}
-            f.mode = 'WAITING_BITES';
+            // THROW: the bobber flies from the rod tip to the target along
+            // an arc instead of teleporting there (see update CAST_FLY).
             const castDist = CONFIG.CAST_MIN_DIST + (f.castPower / 100) * (CONFIG.CAST_MAX_DIST - CONFIG.CAST_MIN_DIST);
-            f.bobber.x = state.player.x + castDist;
-            f.bobber.y = state.player.y + Utils.rand(-50, 50);
-            f.waitingTime = 0;
-            const rod = state.player.equippedRod || {};
-            // Bait bonus: +5% catch rate ~ shorter wait handled via biteTimer scale
-            let biteMult = rod.biteTimeMult || 1.0;
-            if (state.player.baitTimer > 0) biteMult *= 0.8;
-            f.biteTimer = Utils.rand(CONFIG.BITE_MIN_DELAY, CONFIG.BITE_MAX_DELAY) * biteMult;
-            UI.updateStatusBanner('Waiting for a bite...', 'Step 2');
+            f.castFrom = { x: state.player.x, y: state.player.y };
+            f.castTo = {
+                x: state.player.x + castDist,
+                y: state.player.y + Utils.rand(-50, 50)
+            };
+            const flyDist = Math.hypot(f.castTo.x - f.castFrom.x, f.castTo.y - f.castFrom.y) || 1;
+            f.mode = 'CAST_FLY';
+            f.castT = 0;
+            f.castDur = Utils.clamp(flyDist / 600, 0.35, 0.8);
+            f.bobber.x = f.castFrom.x;
+            f.bobber.y = f.castFrom.y;
+            if (typeof Particles !== 'undefined') {
+                Particles.spawnParticles(state, state.player.x, state.player.y, '#fef3c7', 4, { size: 2 });
+            }
+            if (typeof Tutorial !== 'undefined') Tutorial.onCast(state);
         }
+    },
+
+    // Bobber touchdown: ripple + banner + bite countdown starts here
+    // (moved out of onSpaceUp so the throw animation plays first).
+    landBobber(state) {
+        const f = state.fishing;
+        f.mode = 'WAITING_BITES';
+        f.bobber.x = f.castTo.x;
+        f.bobber.y = f.castTo.y;
+        f.castFrom = null;
+        f.castTo = null;
+        f.waitingTime = 0;
+        const rod = state.player.equippedRod || {};
+        // Bait bonus: +5% catch rate ~ shorter wait handled via biteTimer scale
+        let biteMult = rod.biteTimeMult || 1.0;
+        if (state.player.baitTimer > 0) biteMult *= 0.8;
+        f.biteTimer = Utils.rand(CONFIG.BITE_MIN_DELAY, CONFIG.BITE_MAX_DELAY) * biteMult;
+        try { audio.playSplash(); } catch (e) {}
+        if (typeof Particles !== 'undefined') {
+            Particles.spawnWaterSplashes(state, f.bobber.x, f.bobber.y, 8);
+        }
+        UI.updateStatusBanner('Waiting for a bite...', 'Step 2');
     },
 
     escapeFish(state, message = "FISH ESCAPED!") {
@@ -51,6 +90,9 @@ const Fishing = {
         f.castPower = 0;
         f.biteTimer = 0;
         f.waitingTime = 0;
+        f.castFrom = null;
+        f.castTo = null;
+        f.castT = 0;
 
         try { audio.stopReelLoop(); } catch (e) {}
 
@@ -75,8 +117,10 @@ const Fishing = {
         const f = state.fishing;
         f.mode = 'HOOKED';
         f.lineTension = 15;
+        if (typeof Tutorial !== 'undefined') Tutorial.onHook(state);
         state.screenShake = 6;
 
+        const rod = state.player.equippedRod || { reelPower: 80 };
         const rolled = (typeof rollFishSpecies === 'function')
             ? rollFishSpecies(state)
             : { name: 'Common Bass', rarity: 'common', maxHp: 100, staminaMax: 100, speed: 100, color: '#38bdf8', value: 10 };
@@ -101,7 +145,6 @@ const Fishing = {
             boss:      160.0
         };
 
-        const rod = state.player.equippedRod || { reelPower: 80 };
         const rodBonus = 0.85 + (rod.reelPower / 280) * 1.05;
         const baseLimit = seaEscapeLimits[species.rarity] || 50.0;
         const escapeLimit = baseLimit * rodBonus;
@@ -179,7 +222,9 @@ const Fishing = {
     update(state, delta) {
         const f = state.fishing;
 
-        if (typeof Projectiles !== 'undefined' && Projectiles.update) {
+        // Host owns enemy skill shots — clients only take the hits (intake)
+        const isMPClient = (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient());
+        if (typeof Projectiles !== 'undefined' && Projectiles.update && !isMPClient) {
             Projectiles.update(state, delta);
         }
 
@@ -194,6 +239,18 @@ const Fishing = {
             f.castPower += f.castDir * CONFIG.CAST_CHARGE_RATE * delta;
             if (f.castPower >= 100) { f.castPower = 100; f.castDir = -1; }
             if (f.castPower <= 0) { f.castPower = 0; f.castDir = 1; }
+            return;
+        }
+
+        if (f.mode === 'CAST_FLY') {
+            f.castT = (f.castT || 0) + delta;
+            const t = Math.min(1, f.castT / (f.castDur || 0.5));
+            f.bobber.x = f.castFrom.x + (f.castTo.x - f.castFrom.x) * t;
+            f.bobber.y = f.castFrom.y + (f.castTo.y - f.castFrom.y) * t;
+            if (Math.random() < 0.35 && typeof Particles !== 'undefined') {
+                Particles.spawnWaterSplashes(state, f.bobber.x, f.bobber.y, 1);
+            }
+            if (t >= 1) this.landBobber(state);
             return;
         }
 
@@ -549,12 +606,26 @@ const Fishing = {
         if (typeof FISH_SKILLS !== 'undefined') {
             const handler = FISH_SKILLS[selectedSkillKey] || FISH_SKILLS.waterJet;
             if (typeof handler === 'function') {
+                // In co-op the client's own hooked fish fights back personally:
+                // flag its fresh projectiles local so the host snapshot keeps them.
+                let before = -1;
+                try {
+                    const isMPClient = (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient());
+                    if (isMPClient && state.projectiles) before = state.projectiles.length;
+                } catch (e) {}
                 handler(fish, {
                     state,
                     canvas: { width: state.canvasWidth, height: state.canvasHeight },
                     showFloatingText: (t, x, y, c) => Particles.showFloatingText(state, t, x, y, c),
                     spawnParticles: (x, y, c, n) => Particles.spawnParticles(state, x, y, c, n)
                 });
+                try {
+                    if (before >= 0 && state.projectiles) {
+                        for (let i = before; i < state.projectiles.length; i++) {
+                            state.projectiles[i].local = true;
+                        }
+                    }
+                } catch (e) {}
             }
         }
     },
@@ -575,6 +646,19 @@ const Fishing = {
 
         const speciesMaxHp = (fish.species && fish.species.maxHp) ? fish.species.maxHp : 100;
 
+        // Co-op: catches become SHARED world objects. The client sends the
+        // beached fish to the host (live ones spawn as shared monsters for
+        // everyone to fight, dead ones drop as shared loot).
+        try {
+            if (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient()) {
+                if (Multiplayer.sendBeachClaim && Multiplayer.sendBeachClaim(fish)) {
+                    Particles.showFloatingText(state, 'Shared with the party!', fish.x, fish.y - 40, '#34d399');
+                    this.escapeFish(state, "");
+                    return;
+                }
+            }
+        } catch (e) {}
+
         if (fish.isDead || fish.hp <= 0) {
             // Spawn loot safely inside the player's reachable zone
             const p = state.player;
@@ -583,6 +667,7 @@ const Fishing = {
             const lootY = Utils.clamp(fish.y, B.MIN_Y + p.radius + 4, B.MAX_Y - p.radius - 4);
 
             state.groundLoot.push({
+                id: 'l' + (state._lootSeq = (state._lootSeq || 0) + 1),
                 species: fish.species,
                 x: lootX,
                 y: lootY
@@ -605,6 +690,7 @@ const Fishing = {
             UI.updateStatusBanner('BEACHED! Shoot it to capture it!', 'Step 5', 'amber');
             try { audio.playRoar(); } catch (e) {}
         }
+        if (typeof Tutorial !== 'undefined') Tutorial.onBeach(state);
 
         this.escapeFish(state, "");
     }

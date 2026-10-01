@@ -15,18 +15,26 @@ const EnemySpawner = {
     
     update(delta) {
         if (!this.state) return;
-        
+
         // Don't spawn during menu
         if (this.state.paused) return;
-        
+
         // Only spawn if player is alive
         if (this.state.player.hp <= 0) return;
-        
+
+        // Co-op client: host owns ALL open-world enemies (spawn + movement).
+        // The client only takes contact damage from synced positions (intake).
+        if (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient()) return;
+
+        const isMPClient = false;
+
         this.updateTimers(delta);
-        this.trySpawnEnemies(delta);
+        // Host (or single player) spawns — clients get host enemies via sync
+        if (!isMPClient) this.trySpawnEnemies(delta);
         this.updateSeagulls(delta);
         this.updateJumpingFish(delta);
         this.updateBeachCrabs(delta);
+        this.updateGullMissiles(delta);
     },
     
     updateTimers(delta) {
@@ -104,7 +112,179 @@ const EnemySpawner = {
         });
     },
     
-    // Shared damage-over-time from gun effects (burn / poison) + stun.
+    // ---- MINIBOSS: STORMCALLER ----
+    // Summoned every 20 seagull kills. While it lives, rods are useless:
+    // the storm scatters every fish (see Fishing.onSpaceDown).
+    gullBossActive() {
+        if (!this.state || !this.state.enemies) return false;
+        return this.state.enemies.some(e => e && e.isBoss && e.enemyType === 'seagull' && (e.hp || 0) > 0);
+    },
+
+    spawnGullBoss() {
+        if (!this.state) return;
+        if (!this.state.enemies) this.state.enemies = [];
+        if (this.gullBossActive()) return;
+        const p = this.state.player;
+        const B = CONFIG.WORLD;
+        const waterX = this.state.waterBoundaryX;
+        const cfg = CONFIG.ENEMIES.SEAGULL;
+        // Rides in on the storm front, over the water
+        const x = Utils.clamp(waterX + 350 + Math.random() * 200, waterX + 100, B.MAX_X - 60);
+        const y = Utils.clamp(p.y + (Math.random() - 0.5) * 300, B.MIN_Y + 60, B.MAX_Y - 60);
+        this.state.enemies.push({
+            id: 'boss' + Date.now(),
+            enemyType: 'seagull',
+            isBoss: true,
+            bossName: 'STORMCALLER',
+            x, y, vx: 0, vy: 0,
+            hp: 2200, maxHp: 2200,
+            damage: 45,
+            speed: (cfg.speed || 120) + 50,
+            diveSpeed: (cfg.diveSpeed || 300) + 120,
+            diveCooldown: 0, diveTimer: 2,
+            state: 'circling',
+            targetX: p.x, targetY: p.y,
+            circleAngle: Math.random() * Math.PI * 2,
+            circleRadius: 220,
+            circleDirection: Math.random() < 0.5 ? 1 : -1,
+            skillCooldown: 2.5,
+            skillIdx: 0, // rotates: strike -> feathers -> roar
+            hitCd: 0,
+            enraged: false,
+            score: 1500,
+            xp: 800,
+            hitFlash: 0,
+        });
+        // The storm scatters every fish — no rod fishing during the fight
+        try {
+            if (typeof Fishing !== 'undefined' && this.state.fishing &&
+                (this.state.fishing.mode === 'CASTING' || this.state.fishing.mode === 'WAITING_BITES')) {
+                Fishing.escapeFish(this.state, 'The storm scatters the fish!');
+            }
+        } catch (e) {}
+        Particles.showFloatingText(this.state, '⛈ STORMCALLER HAS ARRIVED ⛈', p.x, p.y - 90, '#f87171');
+        Particles.showFloatingText(this.state, '20 GULLS SLAIN — THEIR MOTHER COMES', x, y - 60, '#fbbf24');
+        this.state.screenShake = Math.max(this.state.screenShake || 0, 16);
+        try { audio.playRoar(); } catch (e) {}
+    },
+
+    updateGullBoss(e, delta, p, dist) {
+        const B = CONFIG.WORLD;
+        // Enrage under 40%: faster, angrier, louder
+        if (!e.enraged && e.hp < e.maxHp * 0.4) {
+            e.enraged = true;
+            e.speed *= 1.35;
+            e.diveSpeed *= 1.3;
+            Particles.showFloatingText(this.state, '⛈ STORMCALLER ENRAGED ⛈', e.x, e.y - 70, '#ef4444');
+            try { audio.playRoar(); } catch (err) {}
+        }
+        // Tight storm circle around the player
+        e.circleAngle += e.circleDirection * delta * (e.enraged ? 1.1 : 0.7);
+        const gx = p.x + Math.cos(e.circleAngle) * e.circleRadius;
+        const gy = p.y + Math.sin(e.circleAngle) * e.circleRadius;
+        const tdx = gx - e.x, tdy = gy - e.y;
+        const td = Math.hypot(tdx, tdy) || 1;
+        e.vx += (tdx / td) * e.speed * delta;
+        e.vy += (tdy / td) * e.speed * delta;
+
+        // Close-range combat: wing buffet
+        e.hitCd = Math.max(0, (e.hitCd || 0) - delta);
+        if (dist < (p.radius || 15) + 34 && e.hitCd <= 0) {
+            e.hitCd = 0.8;
+            this.hitPlayer(e);
+            Particles.spawnParticles(this.state, p.x, p.y, '#e2e8f0', 10);
+        }
+
+        // Rotating skill kit: seagull strike -> feather barrage -> stunning roar
+        e.skillCooldown -= delta;
+        if (e.skillCooldown <= 0) {
+            const skill = ['strike', 'feathers', 'roar'][e.skillIdx % 3];
+            e.skillIdx++;
+            if (skill === 'strike') {
+                const alive = this.countEnemies('gullMissile');
+                const n = Math.min(e.enraged ? 5 : 3, Math.max(0, 6 - alive));
+                for (let i = 0; i < n; i++) {
+                    const a = Math.atan2(p.y - e.y, p.x - e.x) + (i - (n - 1) / 2) * 0.28;
+                    this.state.enemies.push({
+                        id: 'm' + Date.now() + Math.random() + i,
+                        enemyType: 'gullMissile',
+                        x: e.x, y: e.y,
+                        vx: Math.cos(a) * 520, vy: Math.sin(a) * 520,
+                        hp: 30, maxHp: 30,
+                        damage: 35,
+                        life: 4,
+                        score: 0, xp: 10,
+                        hitFlash: 0,
+                    });
+                }
+                Particles.showFloatingText(this.state, 'SEAGULL STRIKE!', e.x, e.y - 60, '#fbbf24');
+                try { audio.playFishScreech(); } catch (err) {}
+                e.skillCooldown = e.enraged ? 2.2 : 3.0;
+            } else if (skill === 'feathers') {
+                if (typeof Combat !== 'undefined' && Combat.spawnBullet) {
+                    const base = Math.atan2(p.y - e.y, p.x - e.x);
+                    for (let i = -4; i <= 4; i++) {
+                        const a = base + i * 0.14;
+                        Combat.spawnBullet(this.state, e.x, e.y,
+                            Math.cos(a) * 420, Math.sin(a) * 420,
+                            { radius: 7, damage: 25, color: '#e2e8f0', life: 2.2 });
+                    }
+                }
+                Particles.showFloatingText(this.state, 'FEATHER BARRAGE!', e.x, e.y - 60, '#e2e8f0');
+                try { audio.playWhoosh(); } catch (err) {}
+                e.skillCooldown = e.enraged ? 2.2 : 3.0;
+            } else {
+                p.stunTimer = Math.max(p.stunTimer || 0, 2.0);
+                this.state.screenShake = Math.max(this.state.screenShake || 0, 16);
+                Particles.spawnParticles(this.state, e.x, e.y, '#fbbf24', 30, { size: 5 });
+                Particles.showFloatingText(this.state, '⛈ ROAR — STUNNED 2s ⛈', p.x, p.y - 50, '#f87171');
+                try { audio.playRoar(); } catch (err) {}
+                e.skillCooldown = e.enraged ? 3.5 : 4.5;
+            }
+        }
+
+        e.x += e.vx * delta;
+        e.y += e.vy * delta;
+        e.vx *= 0.96;
+        e.vy *= 0.96;
+        e.x = Utils.clamp(e.x, B.MIN_X, this.state.waterBoundaryX + 500);
+        e.y = Utils.clamp(e.y, B.MIN_Y, B.MAX_Y);
+    },
+
+    updateGullMissiles(delta) {
+        if (!this.state.enemies) return;
+        const p = this.state.player;
+        for (let i = this.state.enemies.length - 1; i >= 0; i--) {
+            const e = this.state.enemies[i];
+            if (!e || e.enemyType !== 'gullMissile') continue;
+            if (this.tickStatus(e, delta)) continue;
+            // Living missile: steers into the player, then detonates
+            const dx = p.x - e.x, dy = p.y - e.y;
+            const d = Math.hypot(dx, dy) || 1;
+            e.vx += (dx / d) * 900 * delta;
+            e.vy += (dy / d) * 900 * delta;
+            const spd = Math.hypot(e.vx, e.vy) || 1;
+            const MAX = 560;
+            if (spd > MAX) { e.vx = e.vx / spd * MAX; e.vy = e.vy / spd * MAX; }
+            e.x += e.vx * delta;
+            e.y += e.vy * delta;
+            e.life -= delta;
+            if (Math.random() < 0.5) {
+                Particles.spawnParticles(this.state, e.x, e.y, '#e2e8f0', 1, { size: 2 });
+            }
+            const hit = Math.hypot(p.x - e.x, p.y - e.y) < (p.radius || 15) + 12;
+            if (hit) {
+                this.hitPlayer(e);
+                Particles.spawnParticles(this.state, e.x, e.y, '#f97316', 16, { size: 5 });
+                this.state.screenShake = Math.max(this.state.screenShake || 0, 10);
+                try { audio.playExplosion(); } catch (err) {}
+                this.state.enemies.splice(i, 1);
+            } else if (e.life <= 0) {
+                Particles.spawnParticles(this.state, e.x, e.y, '#94a3b8', 6);
+                this.state.enemies.splice(i, 1);
+            }
+        }
+    },
     // Returns true if the tick killed the enemy.
     tickStatus(e, delta) {
         let died = false;
@@ -138,32 +318,69 @@ const EnemySpawner = {
         const B = CONFIG.WORLD;
         const waterX = this.state.waterBoundaryX;
 
-        // Beached flopper: spawns DIRECTLY on land near the player — no
-        // fishing required. It flops toward the player and stays until killed.
+        // LEAP-IN: the fish launches itself out of the SEA in an arc and
+        // crash-lands on the beach near the player. Rarity rolls exactly
+        // like a rod catch (rod luck included), and it keeps ALL its
+        // species skills for the land fight.
         const cfg = CONFIG.ENEMIES.JUMPING_FISH;
-        const base = FISH_SPECIES[Math.floor(Math.random() * FISH_SPECIES.length)];
-        const species = (typeof makeCatchInstance === 'function') ? makeCatchInstance(base, 0) : Object.assign({}, base);
-        const x = Utils.clamp(p.x + (Math.random() < 0.5 ? -1 : 1) * (90 + Math.random() * 120), B.MIN_X + 30, waterX - 30);
-        const y = Utils.clamp(p.y + (Math.random() - 0.5) * 240, B.MIN_Y + 30, B.MAX_Y - 30);
+        let base = null;
+        for (let tries = 0; tries < 10 && !base; tries++) {
+            const cand = (typeof rollFishSpecies === 'function')
+                ? rollFishSpecies(this.state)
+                : FISH_SPECIES[Math.floor(Math.random() * FISH_SPECIES.length)];
+            if (cand && !cand.isBoss) base = cand; // bosses stay hook-only
+        }
+        if (!base) base = FISH_SPECIES.find(f => f.rarity === 'common') || FISH_SPECIES[0];
+        const rod = p.equippedRod || {};
+        const luck = (typeof rod.luck === 'number') ? rod.luck : 0;
+        const species = (typeof makeCatchInstance === 'function') ? makeCatchInstance(base, luck) : Object.assign({}, base);
+        // Launch point: out in the water near the player's height...
+        let sx = Utils.clamp(waterX + 120 + Math.random() * 250, waterX + 40, B.MAX_X - 30);
+        let sy = Utils.clamp(p.y + (Math.random() - 0.5) * 500, B.MIN_Y + 30, B.MAX_Y - 30);
+        // ...crash point: on the sand near the player.
+        const tx = Utils.clamp(p.x + (Math.random() < 0.5 ? -1 : 1) * (60 + Math.random() * 100), B.MIN_X + 30, waterX - 30);
+        const ty = Utils.clamp(p.y + (Math.random() - 0.5) * 200, B.MIN_Y + 30, B.MAX_Y - 30);
+        // Never make it fly across the whole map: pull the launch closer
+        // when the player is far from the surf.
+        const leapDist = Math.hypot(tx - sx, ty - sy);
+        if (leapDist > 700) {
+            const k = 550 / leapDist;
+            sx = tx + (sx - tx) * k;
+            sy = ty + (sy - ty) * k;
+        }
+        const dist = Math.hypot(tx - sx, ty - sy) || 1;
 
         this.state.enemies.push({
             id: Date.now() + Math.random(),
             enemyType: 'jumpingFish',
             species: species,
-            x, y,
-            vx: 0, vy: 0,
+            x: sx, y: sy,
+            vx: (tx - sx), vy: (ty - sy),
             hp: Math.max(60, (species.maxHp || cfg.baseHp) * 0.4),
             maxHp: Math.max(60, (species.maxHp || cfg.baseHp) * 0.4),
             damage: cfg.damage,
-            state: 'onLand', // always starts beached on land now
-            landTimer: 60,   // flops back after 60s if ignored
+            state: 'leaping', // leaping -> onLand
+            jumpT: 0,
+            jumpDur: Utils.clamp(dist / 550, 0.7, 1.4),
+            sx, sy, tx, ty,
+            leapH: 0,
+            landTimer: 60,   // flops back to sea after 60s on land if ignored
             hopTimer: 0.5,
             hitCd: 0,
+            skillCooldown: 1.5 + Math.random() * 2, // full species skill kit
+            isRaging: false,
+            rageTimer: 0,
+            isInflated: false,
+            inflateTimer: 0,
             score: Math.max(20, Math.round((species.value || 100) * 0.3)),
             xp: cfg.xp,
             hitFlash: 0,
         });
-        Particles.showFloatingText(this.state, `🐟 ${species.name} flopped ashore!`, x, y - 40, species.color || '#38bdf8');
+        const rc = (typeof CONFIG !== 'undefined' && CONFIG.RARITY_COLORS && CONFIG.RARITY_COLORS[species.rarity]) || species.color || '#38bdf8';
+        Particles.showFloatingText(this.state, `🐟 ${species.rarity ? species.rarity.toUpperCase() + ' ' : ''}${species.name} leaps ashore!`, tx, ty - 50, rc);
+        Particles.spawnWaterSplashes(this.state, sx, sy, 12);
+        try { audio.playSplash(); } catch (e) {}
+        this.state.screenShake = Math.max(this.state.screenShake || 0, 4);
     },
     
     spawnBeachCrab() {
@@ -212,6 +429,12 @@ const EnemySpawner = {
             const dx = p.x - e.x;
             const dy = p.y - e.y;
             const dist = Math.hypot(dx, dy);
+
+            // Miniboss runs its own storm AI
+            if (e.isBoss) {
+                this.updateGullBoss(e, delta, p, dist);
+                return;
+            }
             
             switch (e.state) {
                 case 'circling':
@@ -293,8 +516,61 @@ const EnemySpawner = {
         for (let idx = this.state.enemies.length - 1; idx >= 0; idx--) {
             const e = this.state.enemies[idx];
             if (e.enemyType !== 'jumpingFish') continue;
+
+            // Revenge complete: the player actually died (death stamp — die()
+            // restores HP instantly, so hp<=0 can never be observed after).
+            // Every jumper, mid-leap or on land, heads back to the sea.
+            const deaths = this.state._deathSeq || 0;
+            if (deaths > (this.state._jfAvengedSeq || 0)) {
+                this.state._jfAvengedSeq = deaths;
+                const gone = (this.state.enemies || []).filter(en => en && en.enemyType === 'jumpingFish');
+                for (const g of gone) {
+                    Particles.showFloatingText(this.state, 'Revenge done — back to the sea...', g.x, g.y - 30, '#38bdf8');
+                }
+                this.state.enemies = (this.state.enemies || []).filter(en => !en || en.enemyType !== 'jumpingFish');
+                continue;
+            }
+
+            // Player died -> floppers escape back to the sea
+            if (!p || p.isDead || p.hp <= 0) {
+                Particles.showFloatingText(this.state, 'Fish escaped back to sea...', e.x, e.y - 30, '#38bdf8');
+                this.state.enemies = this.state.enemies.filter(en => en !== e);
+                continue;
+            }
+
             if (this.tickStatus(e, delta)) continue;
             if (e.stunTimer > 0) continue;
+
+            // Mid-air leap from the sea: parametric arc, no attacks, no
+            // contact — it can't hurt you (or be body-blocked) until it lands.
+            if (e.state === 'leaping') {
+                e.jumpT = (e.jumpT || 0) + delta;
+                const t = Math.min(1, e.jumpT / (e.jumpDur || 1));
+                e.x = (e.sx || e.x) + ((e.tx || e.x) - (e.sx || e.x)) * t;
+                e.y = (e.sy || e.y) + ((e.ty || e.y) - (e.sy || e.y)) * t;
+                e.leapH = Math.sin(t * Math.PI);
+                e.vx = ((e.tx || 0) - (e.sx || 0)) / (e.jumpDur || 1);
+                e.vy = ((e.ty || 0) - (e.sy || 0)) / (e.jumpDur || 1);
+                if (Math.random() < 0.5 && typeof Particles !== 'undefined') {
+                    Particles.spawnWaterSplashes(this.state, e.x, e.y, 1);
+                }
+                e.y = Utils.clamp(e.y, B.MIN_Y + 20, B.MAX_Y - 20);
+                if (t >= 1) {
+                    // Crash landing: sand burst, then the land fight begins
+                    e.state = 'onLand';
+                    e.leapH = 0;
+                    e.vx = 0; e.vy = 0;
+                    e.hopTimer = 0.4;
+                    e.hitCd = 0.5; // grace moment before it can bite
+                    if (typeof Particles !== 'undefined') {
+                        Particles.spawnParticles(this.state, e.x, e.y, '#fef3c7', 14);
+                        Particles.showFloatingText(this.state, 'BEACHED!', e.x, e.y - 40, '#facc15');
+                    }
+                    try { audio.playSplash(); } catch (err) {}
+                    this.state.screenShake = Math.max(this.state.screenShake || 0, 6);
+                }
+                continue;
+            }
 
             const dx = p.x - e.x;
             const dy = p.y - e.y;
@@ -314,6 +590,21 @@ const EnemySpawner = {
             if (dist < 32 && e.hitCd <= 0) {
                 this.hitPlayer(e);
                 e.hitCd = 0.8;
+            }
+
+            // Full species skill kit — same cooldowns as hooked fish
+            e.skillCooldown = (e.skillCooldown === undefined ? 2.0 : e.skillCooldown) - delta;
+            if (e.skillCooldown <= 0) {
+                const rarity = (e.species && e.species.rarity) || 'common';
+                e.skillCooldown = { common: 4.0, rare: 2.8, epic: 2.0, legendary: 1.4, mythic: 0.9 }[rarity] || 3.0;
+                if (typeof Fishing !== 'undefined' && Fishing.triggerSkill) {
+                    try { Fishing.triggerSkill(this.state, e); } catch (err) {}
+                }
+            }
+            if (e.rageTimer > 0) e.rageTimer -= delta;
+            if (e.inflateTimer > 0) {
+                e.inflateTimer -= delta;
+                if (e.inflateTimer <= 0) e.isInflated = false;
             }
 
             e.x += e.vx * delta;
@@ -445,10 +736,43 @@ const EnemySpawner = {
 
     // Called when enemy is killed by player
     onEnemyKilled(enemy) {
+        // Living missiles just pop — no coins, no loot, no fanfare
+        if (enemy.enemyType === 'gullMissile') {
+            Particles.spawnParticles(this.state, enemy.x, enemy.y, '#e2e8f0', 8);
+            this.state.enemies = this.state.enemies.filter(e => e !== enemy);
+            return;
+        }
+        // MP clients: host owns awards + shared loot — just despawn locally
+        if (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient()) {
+            this.state.enemies = this.state.enemies.filter(e => e !== enemy);
+            return;
+        }
+        // Miniboss down: storm breaks, big celebration, no meat loot
+        if (enemy.isBoss) {
+            this.state.screenShake = Math.max(this.state.screenShake || 0, 20);
+            Particles.spawnParticles(this.state, enemy.x, enemy.y, '#f59e0b', 50, { size: 6 });
+            Particles.spawnParticles(this.state, enemy.x, enemy.y, '#e2e8f0', 30, { size: 4 });
+            Particles.showFloatingText(this.state, `⛈ ${(enemy.bossName || 'BOSS')} SLAIN! ⛈`, enemy.x, enemy.y - 70, '#f59e0b');
+            try { audio.playBossKilled(); } catch (e) {}
+        }
+        // Every 20th gull calls down its mother (only while no boss lives)
+        if (enemy.enemyType === 'seagull' && !enemy.isBoss && this.state.player) {
+            this.state.player.seagullKills = ((this.state.player.seagullKills || 0) + 1);
+            if (this.state.player.seagullKills % 20 === 0 && !this.gullBossActive()) {
+                this.spawnGullBoss();
+            }
+        }
         // Award score and XP
         if (this.state.player) {
-            this.state.player.coins += enemy.score || 0;
-            Player.addXP(this.state, enemy.xp || 0);
+            // Kill credit: a client's killing blow pays THEM via award queue.
+            const killer = enemy._lastPid;
+            if (typeof Multiplayer !== 'undefined' && Multiplayer.isHost && killer && killer !== Multiplayer.localClientId && killer !== 'host' && killer !== 'solo' && Multiplayer.queueAward) {
+                Multiplayer.queueAward(killer, enemy.score || 0, enemy.xp || 0);
+                Particles.showFloatingText(this.state, `Kill credited: ${killer}`, enemy.x, enemy.y - 30, '#facc15');
+            } else {
+                this.state.player.coins += enemy.score || 0;
+                Player.addXP(this.state, enemy.xp || 0);
+            }
 
             // Check achievements
             if (typeof Achievements !== 'undefined') {
@@ -463,7 +787,7 @@ const EnemySpawner = {
         // their real species. Pick it up and sell it in the shop like fish.
         if (!this.state.groundLoot) this.state.groundLoot = [];
         let loot = null;
-        if (enemy.enemyType === 'seagull') {
+        if (enemy.enemyType === 'seagull' && !enemy.isBoss) {
             loot = { id: 'seagull_meat', name: 'Seagull Meat', value: Math.max(15, enemy.score || 50), color: '#e2e8f0', rarity: 'common', size: 14 };
         } else if (enemy.enemyType === 'beachCrab') {
             loot = { id: 'crab_meat', name: 'Crab Meat', value: Math.max(20, enemy.score || 75), color: '#d97706', rarity: 'common', size: 16 };
@@ -471,7 +795,7 @@ const EnemySpawner = {
             loot = enemy.species;
         }
         if (loot) {
-            this.state.groundLoot.push({ species: loot, x: enemy.x, y: enemy.y });
+            this.state.groundLoot.push({ id: 'l' + (this.state._lootSeq = (this.state._lootSeq || 0) + 1), species: loot, x: enemy.x, y: enemy.y });
             Particles.showFloatingText(this.state, `+1 ${loot.name}!`, enemy.x, enemy.y - 65, '#34d399');
         }
 
@@ -480,10 +804,12 @@ const EnemySpawner = {
     }
 };
 
-// Seagull rendering
+// Seagull rendering (boss gets 2x scale + storm crown)
 function renderSeagull(ctx, e) {
     ctx.save();
     ctx.translate(e.x, e.y);
+    const sc = e.isBoss ? 2 : 1;
+    ctx.scale(sc, sc);
     
     const angle = Math.atan2(e.vy, e.vx);
     ctx.rotate(angle);
@@ -524,23 +850,110 @@ function renderSeagull(ctx, e) {
     ctx.beginPath();
     ctx.arc(20, -3, 2, 0, Math.PI * 2);
     ctx.fill();
+
+    // Storm crown for the miniboss (drawn unrotated above the head)
+    if (e.isBoss) {
+        ctx.rotate(-angle);
+        ctx.fillStyle = '#f59e0b';
+        ctx.shadowColor = '#f59e0b';
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.moveTo(-8, -14);
+        ctx.lineTo(-8, -20); ctx.lineTo(-4, -16);
+        ctx.lineTo(0, -22);  ctx.lineTo(4, -16);
+        ctx.lineTo(8, -20);  ctx.lineTo(8, -14);
+        ctx.closePath();
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        // Enrage sparks
+        if (e.enraged && Math.random() < 0.4) {
+            ctx.fillStyle = '#ef4444';
+            ctx.beginPath();
+            ctx.arc((Math.random() - 0.5) * 40, -18, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
     
     // Hit flash
     if (e.hitFlash > 0) {
         ctx.fillStyle = `rgba(248,113,113,${e.hitFlash * 2})`;
         ctx.beginPath();
-        ctx.arc(0, 0, 30, 0, Math.PI * 2);
+        ctx.arc(0, 0, e.isBoss ? 55 : 30, 0, Math.PI * 2);
         ctx.fill();
     }
     
     ctx.restore();
 }
 
+// Living missile: a small gull, folded into a dart, trailing sparks
+function renderGullMissile(ctx, e) {
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    // Speed lines
+    ctx.strokeStyle = 'rgba(226,232,240,0.5)';
+    ctx.lineWidth = 2;
+    const spd = Math.hypot(e.vx || 0, e.vy || 0) || 1;
+    ctx.beginPath();
+    ctx.moveTo(-e.vx / spd * 34, -e.vy / spd * 34);
+    ctx.lineTo(-e.vx / spd * 14, -e.vy / spd * 14);
+    ctx.stroke();
+    const angle = Math.atan2(e.vy, e.vx);
+    ctx.rotate(angle);
+    ctx.scale(0.62, 0.62);
+    // Folded body (dart profile)
+    ctx.fillStyle = '#e2e8f0';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 20, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Swept wings
+    ctx.fillStyle = '#f1f5f9';
+    ctx.beginPath();
+    ctx.moveTo(-2, 0); ctx.lineTo(-22, -12); ctx.lineTo(-16, 0); ctx.lineTo(-22, 12);
+    ctx.closePath();
+    ctx.fill();
+    // Beak first
+    ctx.fillStyle = '#fbbf24';
+    ctx.beginPath();
+    ctx.moveTo(20, 0); ctx.lineTo(28, -3); ctx.lineTo(28, 3);
+    ctx.closePath();
+    ctx.fill();
+    // Angry eye
+    ctx.fillStyle = '#dc2626';
+    ctx.beginPath();
+    ctx.arc(12, -3, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+    // Fuse spark
+    ctx.fillStyle = '#fde047';
+    ctx.shadowColor = '#f97316';
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc(-20, 0, 3 + Math.random() * 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+
 // Jumping Fish rendering (uses fish model)
 function renderJumpingFish(ctx, e) {
     if (e.species && typeof Render !== 'undefined') {
-        Render.drawFishModel(ctx, e.x, e.y, e.species.size * 0.8, e.species, { 
-            angle: Math.atan2(e.vy, e.vx),
+        const h = e.leapH || 0;
+        // Ground shadow while airborne — sells the arc in top-down view
+        if (h > 0.02) {
+            ctx.save();
+            ctx.globalAlpha = 0.35 * (1 - h * 0.5);
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.ellipse(e.x, e.y, (e.species.size || 16) * 0.7, (e.species.size || 16) * 0.45, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+        let ang = Math.atan2(e.vy, e.vx);
+        if (e.state === 'leaping' && e.jumpDur) {
+            // Full barrel roll across the leap
+            const t = Math.min(1, (e.jumpT || 0) / e.jumpDur);
+            ang += t * Math.PI * 2;
+        }
+        Render.drawFishModel(ctx, e.x, e.y - h * 70, (e.species.size || 16) * 0.8 * (1 + h * 0.5), e.species, {
+            angle: ang,
             glow: e.hitFlash
         });
     }
@@ -628,6 +1041,7 @@ function renderBeachCrab(ctx, e) {
 
 // Register renderers globally
 window.renderSeagull = renderSeagull;
+window.renderGullMissile = renderGullMissile;
 window.renderJumpingFish = renderJumpingFish;
 window.renderBeachCrab = renderBeachCrab;
 window.EnemySpawner = EnemySpawner;
