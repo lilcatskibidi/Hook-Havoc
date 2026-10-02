@@ -1330,15 +1330,16 @@ const FISH_SPECIES = [
         id: 'stormlord_hydra',
         name: 'Stormlord Hydra',
         color: '#10b981', accent: '#047857',
-        size: 74, maxHp: 28000, staminaMax: 9000, attack: 380, speed: 3.6,
+        size: 74, maxHp: 34000, staminaMax: 9000, attack: 470, speed: 3.6,
         value: 62000,
         rarity: 'boss',
         shape: 'serpent',
         finColor: '#064e3b',
-        desc: 'Every head casts. Summons storm orbs and chains lightning across the arena.',
-        skills: ['summonStormOrbs', 'chainLightning', 'bossWhirlpool', 'stormField'],
-        skillName: 'Storm Orbs / Chain Lightning',
-        isBoss: true
+        desc: 'NINE heads, one storm. Every head casts — orbs, lightning and a nine-bolt volley across the arena.',
+        skills: ['summonStormOrbs', 'nineHeadVolley', 'chainLightning', 'bossWhirlpool', 'stormField'],
+        skillName: '9-Head Volley / Storm Orbs / Chain Lightning',
+        isBoss: true,
+        heads: 9
     },
     {
         id: 'void_shepherd',
@@ -1986,8 +1987,20 @@ const Projectiles = {
             // 2. Player Collision Check
             const dist = Math.hypot(p.x - proj.x, p.y - proj.y);
             if (dist < p.radius + proj.radius) {
-                p.hp -= proj.damage;
-                if (audio.playHit) audio.playHit();
+                // Armor counts vs fish skillshots (was raw hp-=, unfair).
+                // damagePlayer handles HUD + flash + death — never die() twice.
+                const seq0 = state._deathSeq || 0;
+                let dealt = proj.damage;
+                if (typeof Combat !== 'undefined' && Combat.damagePlayer) {
+                    dealt = Combat.damagePlayer(state, proj.damage, { knockback: 0 });
+                } else {
+                    p.hp -= proj.damage;
+                    Player.refreshHUD(state);
+                    if (typeof UI !== 'undefined' && UI.triggerDamageFlash) UI.triggerDamageFlash();
+                    if (p.hp <= 0) Player.die(state);
+                }
+                const died = (state._deathSeq || 0) > seq0;
+                if (typeof audio !== 'undefined' && audio.playHit) audio.playHit();
                 
                 // Burst impact visual (kept small to stay readable)
                 Particles.spawnParticles(state, proj.x, proj.y, proj.glowColor || proj.color, 6, {
@@ -1995,22 +2008,40 @@ const Projectiles = {
                     size: proj.radius
                 });
 
-                Particles.showFloatingText(state, `-${proj.damage}`, p.x, p.y - 25, proj.color);
+                Particles.showFloatingText(state, `-${dealt}`, p.x, p.y - 25, proj.color);
                 Player.refreshHUD(state);
-                UI.triggerDamageFlash();
                 state.screenShake = proj.impactShake || 10;
 
-                // Knockback away from projectile trajectory
-                p.x += (proj.vx > 0 ? 1 : -1) * (proj.knockback || 25);
-                p.y += (proj.vy > 0 ? 1 : -1) * (proj.knockback || 25);
+                if (!died) {
+                    // Knockback away from projectile trajectory
+                    p.x += (proj.vx > 0 ? 1 : -1) * (proj.knockback || 25);
+                    p.y += (proj.vy > 0 ? 1 : -1) * (proj.knockback || 25);
+                    // On-hit riders: stun / slow / shove / grapple / screen fx.
+                    // Everything lands ONLY on a real hit — dodge the missile,
+                    // dodge the effect.
+                    if (proj.stunOnHit) p.stunTimer = Math.max(p.stunTimer || 0, proj.stunOnHit);
+                    if (proj.slowOnHit) p.slowTimer = Math.max(p.slowTimer || 0, proj.slowOnHit);
+                    if (proj.pushOnHit) {
+                        const pv = Math.hypot(proj.vx, proj.vy) || 1;
+                        p.x += (proj.vx / pv) * proj.pushOnHit;
+                        p.y += (proj.vy / pv) * proj.pushOnHit;
+                    }
+                    if (proj.pullOnHit && proj.pullX !== undefined && proj.pullY !== undefined) {
+                        const pdx = proj.pullX - p.x, pdy = proj.pullY - p.y;
+                        const pd = Math.hypot(pdx, pdy) || 1;
+                        p.x += (pdx / pd) * proj.pullOnHit;
+                        p.y += (pdy / pd) * proj.pullOnHit;
+                    }
+                    if (proj.flashOnHit) p.flashTimer = Math.max(p.flashTimer || 0, proj.flashOnHit);
+                    if (proj.blurOnHit) p.blurTimer = Math.max(p.blurTimer || 0, proj.blurOnHit);
 
-                // Clamp player within world bounds
-                p.x = Utils.clamp(p.x, B.MIN_X + p.radius, state.waterBoundaryX - p.radius);
-                p.y = Utils.clamp(p.y, B.MIN_Y + p.radius, B.MAX_Y - p.radius);
+                    // Clamp player within world bounds
+                    p.x = Utils.clamp(p.x, B.MIN_X + p.radius, state.waterBoundaryX - p.radius);
+                    p.y = Utils.clamp(p.y, B.MIN_Y + p.radius, B.MAX_Y - p.radius);
+                }
 
                 // Remove projectile
                 state.projectiles.splice(i, 1);
-                if (p.hp <= 0) Player.die(state);
                 continue;
             }
 
@@ -2044,47 +2075,35 @@ const Projectiles = {
             particleDensity: options.particleDensity || 0.6,
             trailCount: options.trailCount || 1,
             impactShake: options.impactShake || 10,
-            knockback: options.knockback || 25
+            knockback: options.knockback || 25,
+            // On-hit riders (all dodgeable — they land only on real impact)
+            stunOnHit: options.stunOnHit || 0,
+            slowOnHit: options.slowOnHit || 0,
+            pullOnHit: options.pullOnHit || 0, // px dragged toward (pullX, pullY)
+            pullX: options.pullX, pullY: options.pullY,
+            pushOnHit: options.pushOnHit || 0, // px shoved along flight dir
+            flashOnHit: options.flashOnHit || 0, // sec of white screen flash
+            blurOnHit: options.blurOnHit || 0    // sec of blurred screen
         });
     }
 };
 
-const FISH_ROLL_TABLE = [
-    { species: FISH_SPECIES.find(f => f.id === 'celestial_ray'),    weight: 0.05 },
-    { species: FISH_SPECIES.find(f => f.id === 'elder_dragon'),     weight: 0.10 },
-    { species: FISH_SPECIES.find(f => f.id === 'chronos_squid'),    weight: 0.15 },
-    { species: FISH_SPECIES.find(f => f.id === 'sun_fish'),         weight: 0.20 },
-    { species: FISH_SPECIES.find(f => f.id === 'void_drake'),       weight: 0.40 },
-    { species: FISH_SPECIES.find(f => f.id === 'leviathan_turtle'), weight: 0.60 },
-    { species: FISH_SPECIES.find(f => f.id === 'star_ray'),         weight: 0.90 },
-    { species: FISH_SPECIES.find(f => f.id === 'storm_hydra'),      weight: 1.20 },
-    { species: FISH_SPECIES.find(f => f.id === 'tsunami_whale'),    weight: 1.50 },
-    { species: FISH_SPECIES.find(f => f.id === 'golden'),           weight: 1.80 },
-    { species: FISH_SPECIES.find(f => f.id === 'kraken'),           weight: 2.20 },
-    { species: FISH_SPECIES.find(f => f.id === 'coral_dragon'),     weight: 3.50 },
-    { species: FISH_SPECIES.find(f => f.id === 'thunder_ray'),      weight: 4.00 },
-    { species: FISH_SPECIES.find(f => f.id === 'frost_manta'),      weight: 4.50 },
-    { species: FISH_SPECIES.find(f => f.id === 'ghost_ray'),        weight: 5.00 },
-    { species: FISH_SPECIES.find(f => f.id === 'magma_pike'),       weight: 5.50 },
-    { species: FISH_SPECIES.find(f => f.id === 'shark'),            weight: 6.00 },
-    { species: FISH_SPECIES.find(f => f.id === 'lionfish'),         weight: 6.80 },
-    { species: FISH_SPECIES.find(f => f.id === 'sea_turtle'),       weight: 7.20 },
-    { species: FISH_SPECIES.find(f => f.id === 'stingray'),         weight: 7.60 },
-    { species: FISH_SPECIES.find(f => f.id === 'prism_squid'),      weight: 8.00 },
-    { species: FISH_SPECIES.find(f => f.id === 'angler'),           weight: 8.40 },
-    { species: FISH_SPECIES.find(f => f.id === 'viperfish'),        weight: 8.80 },
-    { species: FISH_SPECIES.find(f => f.id === 'puffer'),           weight: 9.20 },
-    { species: FISH_SPECIES.find(f => f.id === 'eel'),              weight: 9.60 },
-    { species: FISH_SPECIES.find(f => f.id === 'neon_tetra'),       weight: 10.0 },
-    { species: FISH_SPECIES.find(f => f.id === 'catfish'),          weight: 10.4 },
-    { species: FISH_SPECIES.find(f => f.id === 'mudcrab'),          weight: 10.8 },
-    { species: FISH_SPECIES.find(f => f.id === 'snapper'),          weight: 11.2 },
-    { species: FISH_SPECIES.find(f => f.id === 'bass'),             weight: 11.6 },
-    { species: FISH_SPECIES.find(f => f.id === 'sardine'),          weight: 12.0 },
-    { species: FISH_SPECIES.find(f => f.id === 'seahorse'),         weight: 6.5 },
-    { species: FISH_SPECIES.find(f => f.id === 'cuttlefish'),       weight: 6.0 },
-    { species: FISH_SPECIES.find(f => f.id === 'moon_jelly'),       weight: 4.2 }
-];
+// Full-roster roll table: EVERY unique non-boss species is catchable.
+// (The old hand-picked 34-entry table left 204 species — incl. 44 of the
+// 50 commons — impossible to hook, which is why indexes stalled at ~25.)
+// Bosses are excluded on purpose: BOSS_TIDE (below) is their only hook.
+const FISH_ROLL_TABLE = (() => {
+    const base = { common: 12, rare: 8, epic: 4.2, legendary: 1.5, mythic: 0.45 };
+    const seen = new Set();
+    const out = [];
+    FISH_SPECIES.forEach((s, i) => {
+        if (!s || !s.id || s.isBoss || seen.has(s.id)) return;
+        seen.add(s.id);
+        const w = (base[s.rarity] || 6) * (0.85 + 0.3 * (((i * 37) % 100) / 100));
+        out.push({ species: s, weight: Math.max(0.05, w) });
+    });
+    return out;
+})();
 // ============================================================
 //  LUCK-AWARE FISH ROLL
 //  The rod's `luck` value raises the weight of rare+ species.
@@ -2095,12 +2114,19 @@ function rollFishSpecies(state) {
     // Pull the active rod's luck value (default 0 if none)
     const rod = state && state.player && state.player.equippedRod;
     const luck = rod && typeof rod.luck === 'number' ? rod.luck : 0;
+    // Equipped bait luck stacks on top (1 bait eaten per hook)
+    let baitLuck = 0;
+    try {
+        const hb = (typeof Ritual !== 'undefined' && Ritual.equippedBait && state) ? Ritual.equippedBait(state) : null;
+        if (hb && hb.luckBonus) baitLuck = hb.luckBonus;
+    } catch (e) {}
+    const effLuck = luck + baitLuck;
 
     // BOSS TIDE — very rare hook. Bosses previously could never be rolled,
     // so the boss bar / boss fights were unreachable. High level + luck
     // slightly raise the odds.
     const pLevel = (state && state.player && state.player.level) || 1;
-    const bossChance = 0.004 + luck * 0.002 + (pLevel >= 10 ? 0.002 : 0);
+    const bossChance = 0.004 + effLuck * 0.002 + (pLevel >= 10 ? 0.002 : 0);
     if (Math.random() < bossChance) {
         const bosses = FISH_SPECIES.filter(f => f.isBoss);
         if (bosses.length) {
@@ -2116,11 +2142,11 @@ function rollFishSpecies(state) {
     // Build a weighted table (recompute each roll so it always uses current luck)
     const luckMult = {
         common:    1.0,                       // never boosted
-        rare:      1.0 + luck * 0.10,         // small bump
-        epic:      1.0 + luck * 0.35,         // medium bump
-        legendary: 1.0 + luck * 0.65,         // big bump
-        mythic:    1.0 + luck * 1.00,         // full luck multiplier
-        boss:      1.0 + luck * 1.00
+        rare:      1.0 + effLuck * 0.10,      // small bump
+        epic:      1.0 + effLuck * 0.35,      // medium bump
+        legendary: 1.0 + effLuck * 0.65,      // big bump
+        mythic:    1.0 + effLuck * 1.00,      // full luck multiplier
+        boss:      1.0 + effLuck * 1.00
     };
 
     let total = 0;
@@ -2171,6 +2197,27 @@ function makeCatchInstance(base, luck) {
         sp.maxHp = Math.round((sp.maxHp || 100) * 1.5);
         sp.attack = Math.round((sp.attack || 10) * 1.5);
         sp.staminaMax = Math.round((sp.staminaMax || 100) * 1.25);
+    }
+    // MUTATIONS (skip if shiny — one special trait per fish):
+    // void (portal jumper / shard source), golden (pays double), giant (bulk).
+    if (!sp.shiny && !base.isBoss) {
+        const mr = Math.random();
+        if (mr < 0.06) {
+            sp.mutation = 'void';
+            sp.name = 'Void ' + sp.name;
+            sp.value = Math.round((sp.value || 10) * 1.5);
+            sp.attack = Math.round((sp.attack || 10) * 1.2);
+        } else if (mr < 0.09) {
+            sp.mutation = 'golden';
+            sp.name = 'Golden ' + sp.name;
+            sp.value = Math.round((sp.value || 10) * 2);
+        } else if (mr < 0.14) {
+            sp.mutation = 'giant';
+            sp.name = 'Giant ' + sp.name;
+            sp.size = Math.round((sp.size || 14) * 1.4);
+            sp.maxHp = Math.round((sp.maxHp || 100) * 1.6);
+            sp.value = Math.round((sp.value || 10) * 1.3);
+        }
     }
     // BRUTAL TIDE difficulty: every catch is tankier, angrier, and pays
     // less. Tuned in one place via CONFIG.DIFFICULTY.
@@ -2446,17 +2493,14 @@ const FISH_SKILLS = {
     voidPull(fish, ctx) {
         const p = ctx.state.player;
         const dmg = getSkillDamage(fish, 1.6);
-        // Slow homing orb
-        Projectiles.spawn(ctx.state, fish.x, fish.y, p.x, p.y, 300, dmg, '#c084fc', {
+        // Grapple orb: slow, homing — dodge it or get yanked toward the
+        // fish ON IMPACT. No more instant yank (was unfair).
+        Projectiles.spawn(ctx.state, fish.x, fish.y, p.x, p.y, 340, dmg, '#c084fc', {
             radius: 15, isHoming: true, homingForce: 420,
-            life: 5.0, glow: true, glowColor: '#f472b6', trailCount: 2
+            life: 5.0, glow: true, glowColor: '#f472b6', trailCount: 2,
+            pullOnHit: 180, pullX: fish.x, pullY: fish.y
         });
-        // Yank the player toward the boss
-        const d = Math.hypot(p.x - fish.x, p.y - fish.y) || 1;
-        const pull = 180;
-        p.x -= ((p.x - fish.x) / d) * pull * 0.4;
-        p.y -= ((p.y - fish.y) / d) * pull * 0.4;
-        // Void rift at player's old spot
+        // Void rift where the player stood when cast (telegraphed — move!)
         ctx.state.delayedBlasts.push({
             x: p.x, y: p.y, radius: 70, damage: Math.round(dmg * 0.8),
             timer: 0.7, color: '#a855f7', shake: 12,
@@ -2593,10 +2637,12 @@ const FISH_SKILLS = {
     whirlpool(fish, ctx) {
         const p = ctx.state.player;
         const dmg = getSkillDamage(fish, 1.2);
-        // Pull hard toward boss
-        const d = Math.hypot(p.x - fish.x, p.y - fish.y) || 1;
-        p.x -= ((p.x - fish.x) / d) * 160;
-        p.y -= ((p.y - fish.y) / d) * 160;
+        // Drag orb: dodge it or get reeled 200px toward the fish on impact
+        Projectiles.spawn(ctx.state, fish.x, fish.y, p.x, p.y, 360, Math.round(dmg * 0.6), '#0284c7', {
+            radius: 16, isHoming: true, homingForce: 380,
+            life: 4.0, glow: true, glowColor: '#7dd3fc',
+            pullOnHit: 200, pullX: fish.x, pullY: fish.y
+        });
 
         // Vortex at boss: 12 projectiles rotating outward
         for (let i = 0; i < 12; i++) {
@@ -2781,8 +2827,10 @@ const FISH_SKILLS = {
     flashBang(fish, ctx) {
         const p = ctx.state.player;
         ctx.state.screenShake = 20;
+        // The flash IS the effect: white-screen blindness, no damage, no
+        // stun — vision comes back on its own. Sparks + patch still burn.
+        p.flashTimer = Math.max(p.flashTimer || 0, 0.6);
         UI.triggerDamageFlash();
-        p.stunTimer = 0.7;
         // Ring of sparks
         for (let i = 0; i < 10; i++) {
             const a = (Math.PI * 2 / 10) * i;
@@ -3122,8 +3170,12 @@ const FISH_SKILLS = {
 
     summonStormOrbs(fish, ctx) {
         const state = ctx.state;
-        for (let i = 0; i < 6; i++) {
-            const a = (Math.PI * 2 / 6) * i;
+        // The HYDRA casts with all 9 heads: 9 orbs, harder hits.
+        const isHydra = fish && fish.species && fish.species.id === 'stormlord_hydra';
+        const orbCount = isHydra ? 9 : 6;
+        const orbDmg = isHydra ? 85 : 50;
+        for (let i = 0; i < orbCount; i++) {
+            const a = (Math.PI * 2 / orbCount) * i;
             const d = 80;
             const x = fish.x + Math.cos(a) * d;
             const y = fish.y + Math.sin(a) * d;
@@ -3131,6 +3183,7 @@ const FISH_SKILLS = {
                 x, y, radius: 45, damage: 0, timer: 0.5,
                 color: '#10b981', shake: 5,
                 onDetonate: () => {
+                    try { if (typeof audio !== 'undefined' && audio.playSkillBlast) audio.playSkillBlast(); } catch (e) {}
                     for (let k = 0; k < 4; k++) {
                         const ka = (Math.PI * 2 / 4) * k + Math.PI / 4;
                         state.bullets.push({
@@ -3138,7 +3191,7 @@ const FISH_SKILLS = {
                             vx: Math.cos(ka) * 220,
                             vy: Math.sin(ka) * 220,
                             owner: 'enemy',
-                            radius: 9, damage: 50,
+                            radius: 9, damage: orbDmg,
                             color: '#10b981',
                             life: 3.5,
                             trail: [],
@@ -3150,7 +3203,32 @@ const FISH_SKILLS = {
             });
         }
         try { audio.playThunder(); } catch (e) {}
-        ctx.showFloatingText("⚠ STORM ORBS! ⚠", fish.x, fish.y - 60, '#10b981');
+        ctx.showFloatingText(isHydra ? "⚠ 9 STORM ORBS! ⚠" : "⚠ STORM ORBS! ⚠", fish.x, fish.y - 60, '#10b981');
+    },
+
+    // HYDRA signature: all 9 heads spit at once — a wide fan of heavy bolts.
+    nineHeadVolley(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const baseA = Math.atan2(p.y - fish.y, p.x - fish.x);
+        for (let i = 0; i < 9; i++) {
+            const a = baseA + (i - 4) * 0.14;
+            Projectiles.spawn(state, fish.x, fish.y,
+                fish.x + Math.cos(a) * 800, fish.y + Math.sin(a) * 800,
+                460, 90, '#10b981', {
+                    radius: 11, glow: true, glowColor: '#6ee7b7', life: 3.2
+                });
+        }
+        // One heavy head-butt blast where you stand — the ring is the warning.
+        state.delayedBlasts.push({
+            x: p.x, y: p.y, radius: 95, damage: 110,
+            timer: 0.7, color: '#10b981', shake: 20, stunOnBlast: 0.6
+        });
+        state.screenShake = Math.max(state.screenShake || 0, 20);
+        try { audio.playThunder(); } catch (e) {}
+        try { audio.playSkillZap(); } catch (e) {}
+        try { audio.playRoar(); } catch (e) {}
+        ctx.showFloatingText("🐲 NINE-HEAD VOLLEY!", fish.x, fish.y - 60, '#10b981');
     },
 
     summonVoidlings(fish, ctx) {
@@ -3220,21 +3298,17 @@ const FISH_SKILLS = {
     tidalCrush(fish, ctx) {
         const state = ctx.state;
         const p = state.player;
-        // Massive wave pushing the player away from the boss
-        const dx = p.x - fish.x;
-        const dy = p.y - fish.y;
-        const d = Math.hypot(dx, dy) || 1;
-        // Push 260px outward
-        p.x += (dx / d) * 260;
-        p.y += (dy / d) * 260;
-        // Clamp inside world
-        const B = CONFIG.WORLD;
-        p.x = Utils.clamp(p.x, B.MIN_X + p.radius, state.waterBoundaryX - p.radius);
-        p.y = Utils.clamp(p.y, B.MIN_Y + p.radius, B.MAX_Y - p.radius);
-
-        const _td = hurtFishSkill(state, 120);
-        Particles.showFloatingText(state, `-${_td} TIDAL CRUSH`, p.x, p.y - 30, '#0ea5e9');
-        UI.triggerDamageFlash();
+        // A dodgeable tidal wall: 5 fast projectiles that SHOVE on hit.
+        // Sidestep the wall, feel nothing (was: instant 260 push + 120 dmg).
+        const baseA = Math.atan2(p.y - fish.y, p.x - fish.x);
+        for (let i = -2; i <= 2; i++) {
+            const a = baseA + i * 0.12;
+            Projectiles.spawn(state, fish.x, fish.y,
+                fish.x + Math.cos(a) * 700, fish.y + Math.sin(a) * 700,
+                520, 60, '#0ea5e9', {
+                    radius: 13, glow: true, glowColor: '#7dd3fc', pushOnHit: 260
+                });
+        }
         state.screenShake = 22;
 
         // Rings of projectiles outward
@@ -3259,13 +3333,12 @@ const FISH_SKILLS = {
     bossWhirlpool(fish, ctx) {
         const state = ctx.state;
         const p = state.player;
-        // Slow pull over 1.5s
-        const dx = p.x - fish.x;
-        const dy = p.y - fish.y;
-        const d = Math.hypot(dx, dy) || 1;
-        // Immediate small pull
-        p.x -= (dx / d) * 100;
-        p.y -= (dy / d) * 100;
+        // Drag orb + vortex: dodge the slow orb or get reeled in on impact
+        Projectiles.spawn(state, fish.x, fish.y, p.x, p.y, 320, 50, '#0284c7', {
+            radius: 20, isHoming: true, homingForce: 350,
+            life: 5.0, glow: true, glowColor: '#7dd3fc',
+            pullOnHit: 220, pullX: fish.x, pullY: fish.y
+        });
 
         // Big vortex zone at the player's position
         state.groundHazards.push({
@@ -3315,14 +3388,15 @@ const FISH_SKILLS = {
                 const y = a.y + (b.y - a.y) * t + (Math.random() - 0.5) * 20;
                 Particles.spawnParticles(state, x, y, '#facc15', 2);
             }
-            // Damage if within 60px of a chain segment
-            const distToPlayer = Math.hypot(p.x - b.x, p.y - b.y);
-            if (distToPlayer < 80) {
-                const _cd = hurtFishSkill(state, 60);
-                Particles.showFloatingText(state, `-${_cd}`, p.x, p.y - 25, '#facc15');
-                UI.triggerDamageFlash();
-            }
         }
+        // The strike lands where you STAND in 0.55s — the ring is the
+        // warning. Move out, take nothing (was: instant unavoidable 60).
+        // Hydra's 9 heads charge it harder.
+        const isHydraCL = fish && fish.species && fish.species.id === 'stormlord_hydra';
+        state.delayedBlasts.push({
+            x: p.x, y: p.y, radius: 80, damage: isHydraCL ? 110 : 60,
+            timer: 0.55, color: '#facc15', shake: 16, stunOnBlast: 0.5
+        });
         state.screenShake = 16;
         try { audio.playThunder(); } catch (e) {}
         ctx.showFloatingText("⚡ CHAIN LIGHTNING!", fish.x, fish.y - 50, '#facc15');
@@ -3330,31 +3404,34 @@ const FISH_SKILLS = {
 
     stormField(fish, ctx) {
         const state = ctx.state;
-        // Persistent arena-wide electric field
-        for (let i = 0; i < 10; i++) {
+        // Persistent arena-wide electric field (hydra's is wider + meaner)
+        const isHydraSF = fish && fish.species && fish.species.id === 'stormlord_hydra';
+        const count = isHydraSF ? 14 : 10;
+        for (let i = 0; i < count; i++) {
             const a = Math.random() * Math.PI * 2;
             const r = 100 + Math.random() * 400;
             state.groundHazards.push({
                 x: fish.x + Math.cos(a) * r,
                 y: fish.y + Math.sin(a) * r,
                 radius: 70, duration: 6.0,
-                type: 'flash', damagePerSec: 25, color: '#10b981'
+                type: 'flash', damagePerSec: isHydraSF ? 40 : 25, color: '#10b981'
             });
         }
-        ctx.showFloatingText("⚡ STORM FIELD!", fish.x, fish.y - 50, '#10b981');
+        ctx.showFloatingText(isHydraSF ? "⚡ SUPER STORM FIELD!" : "⚡ STORM FIELD!", fish.x, fish.y - 50, '#10b981');
     },
 
     voidCollapse(fish, ctx) {
         const state = ctx.state;
         const p = state.player;
-        // Pull everything toward a single point
+        // Collapse orb: dodge it or get dragged to the rift on impact.
+        // The detonation itself stays a 1.0s telegraphed ring.
         const cx = (p.x + fish.x) / 2;
         const cy = (p.y + fish.y) / 2;
-        const dx = cx - p.x;
-        const dy = cy - p.y;
-        const d = Math.hypot(dx, dy) || 1;
-        p.x += (dx / d) * 140;
-        p.y += (dy / d) * 140;
+        Projectiles.spawn(state, fish.x, fish.y, p.x, p.y, 360, 60, '#4c1d95', {
+            radius: 16, isHoming: true, homingForce: 400,
+            life: 5.0, glow: true, glowColor: '#a78bfa', trailCount: 2,
+            pullOnHit: 140, pullX: cx, pullY: cy
+        });
 
         // Detonate
         state.delayedBlasts.push({
@@ -3369,13 +3446,13 @@ const FISH_SKILLS = {
     gravitationalPull(fish, ctx) {
         const state = ctx.state;
         const p = state.player;
-        // Strong pull toward boss over a short window
-        const dx = fish.x - p.x;
-        const dy = fish.y - p.y;
-        const d = Math.hypot(dx, dy) || 1;
-        p.x += (dx / d) * 220;
-        p.y += (dy / d) * 220;
-        hurtFishSkill(state, 40);
+        // Gravity orb: dodge it or get dragged 220px to the boss on impact.
+        // All damage now comes from the (dodgeable) orbiting projectiles.
+        Projectiles.spawn(state, fish.x, fish.y, p.x, p.y, 380, 40, '#a855f7', {
+            radius: 15, isHoming: true, homingForce: 420,
+            life: 5.0, glow: true, glowColor: '#d8b4fe', trailCount: 2,
+            pullOnHit: 220, pullX: fish.x, pullY: fish.y
+        });
         state.screenShake = 18;
         // Orbiting projectiles
         for (let i = 0; i < 12; i++) {
@@ -3450,12 +3527,19 @@ const FISH_SKILLS = {
     leviathanRoar(fish, ctx) {
         const state = ctx.state;
         const p = state.player;
-        // Screen-wide stun + heavy damage + telegraph
-        UI.triggerDamageFlash();
+        // The roar HERALDS pain, it doesn't deal it: a slow 12-orb nova
+        // with real gaps + stunning shock rings (dodge the rings, dodge
+        // the stun). Was: instant unavoidable 90 dmg + 1.2s stun.
+        for (let i = 0; i < 12; i++) {
+            const a = (Math.PI * 2 / 12) * i;
+            Projectiles.spawn(state, fish.x, fish.y,
+                fish.x + Math.cos(a) * 600, fish.y + Math.sin(a) * 600,
+                300, getSkillDamage(fish, 1.0), '#0ea5e9', {
+                    radius: 13, glow: true, glowColor: '#bae6fd'
+                });
+        }
         state.screenShake = 32;
-        hurtFishSkill(state, 90);
-        p.stunTimer = 1.2;
-        // Massive warning rings
+        // Massive warning rings — standing in one when it pops STUNS
         for (let i = 0; i < 6; i++) {
             const a = (Math.PI * 2 / 6) * i;
             state.delayedBlasts.push({
@@ -3463,7 +3547,7 @@ const FISH_SKILLS = {
                 y: fish.y + Math.sin(a) * 200,
                 radius: 90, damage: 70,
                 timer: 0.8 + i * 0.1,
-                color: '#0ea5e9', shake: 20
+                color: '#0ea5e9', shake: 20, stunOnBlast: 1.0
             });
         }
         try { audio.playRoar(); } catch (e) {}
@@ -3482,9 +3566,9 @@ const FISH_SKILLS = {
             const a = (Math.PI * 2 / 8) * i;
             Projectiles.spawn(state, fish.x, fish.y,
                 fish.x + Math.cos(a) * 450, fish.y + Math.sin(a) * 450,
-                420, dmg, '#1e293b', { radius: 11, glow: true, glowColor: '#475569' });
+                420, dmg, '#1e293b', { radius: 11, glow: true, glowColor: '#475569', slowOnHit: 1.5 });
         }
-        p.slowTimer = Math.max(p.slowTimer || 0, 2.0);
+        // Ink in the water slows + blurs while you stand in it — walk out
         state.groundHazards.push({
             x: p.x, y: p.y, radius: 70, duration: 3.5,
             type: 'ink', damagePerSec: 8, color: '#1e293b'
@@ -3496,8 +3580,13 @@ const FISH_SKILLS = {
         const state = ctx.state;
         const p = state.player;
         const dmg = getSkillDamage(fish, 0.9);
-        // Traps the player: brief stun, then the bubble pops
-        p.stunTimer = Math.max(p.stunTimer || 0, 0.8);
+        // Bubble missile: slow and homing — sidestep it or get trapped
+        // (stun) on impact, then the bubble pops.
+        Projectiles.spawn(state, fish.x, fish.y, p.x, p.y, 300, Math.round(dmg * 0.5), '#a5f3fc', {
+            radius: 14, isHoming: true, homingForce: 380,
+            life: 4.0, glow: true, glowColor: '#ecfeff', trailCount: 2,
+            stunOnHit: 0.8
+        });
         state.delayedBlasts.push({
             x: p.x, y: p.y, radius: 70, damage: dmg,
             timer: 0.9, color: '#a5f3fc', shake: 10
@@ -3541,7 +3630,8 @@ const FISH_SKILLS = {
         const state = ctx.state;
         const p = state.player;
         const dmg = getSkillDamage(fish, 0.6);
-        // Kicks up blinding sand around the player, then bolts away
+        // Kicks up blinding sand around the player, then bolts away.
+        // Slow + blur come from STANDING in the sand — keep moving.
         for (let i = 0; i < 4; i++) {
             state.groundHazards.push({
                 x: p.x + (Math.random() - 0.5) * 160,
@@ -3550,12 +3640,13 @@ const FISH_SKILLS = {
                 type: 'sand', damagePerSec: 7, color: '#d6b98c'
             });
         }
-        p.slowTimer = Math.max(p.slowTimer || 0, 1.5);
         const a = Math.atan2(fish.y - p.y, fish.x - p.x);
         fish.vx = (fish.vx || 0) + Math.cos(a) * 550;
         fish.vy = (fish.vy || 0) + Math.sin(a) * 550;
         try {
-            const proj = Projectiles.spawn(state, fish.x, fish.y, p.x, p.y, 500, dmg, '#d6b98c', { radius: 9 });
+            const proj = Projectiles.spawn(state, fish.x, fish.y, p.x, p.y, 500, dmg, '#d6b98c', {
+                radius: 9, slowOnHit: 1.0, blurOnHit: 0.8
+            });
             void proj;
         } catch (e) {}
         ctx.showFloatingText("🏜️ SAND VEIL!", fish.x, fish.y - 40, '#d6b98c');
@@ -3572,11 +3663,11 @@ const FISH_SKILLS = {
         const baseA = Math.atan2(p.y - fish.y, p.x - fish.x);
         for (let i = -1; i <= 1; i++) {
             const a = baseA + i * 0.15;
+            // Stun rides the bolts now — sidestep all three, feel nothing
             Projectiles.spawn(state, fish.x, fish.y,
                 fish.x + Math.cos(a) * 500, fish.y + Math.sin(a) * 500,
-                640, dmg, '#fde047', { radius: 9, glow: true, glowColor: '#fef08a' });
+                640, dmg, '#fde047', { radius: 9, glow: true, glowColor: '#fef08a', stunOnHit: 0.5 });
         }
-        p.stunTimer = Math.max(p.stunTimer || 0, 0.5);
         try { audio.playThunder(); } catch (e) {}
         ctx.showFloatingText("⚡ THUNDER DIVE!", fish.x, fish.y - 40, '#fde047');
     },
@@ -3585,13 +3676,16 @@ const FISH_SKILLS = {
         const state = ctx.state;
         const p = state.player;
         const dmg = getSkillDamage(fish, 0.8);
-        // Living reef grows around the player: damage + roots
+        // Living reef grows around the player: standing in it roots + hurts.
+        // The barb itself is the dodgeable part.
         state.groundHazards.push({
             x: p.x, y: p.y, radius: 75, duration: 4.0,
             type: 'coral', damagePerSec: 12, color: '#14b8a6'
         });
-        p.slowTimer = Math.max(p.slowTimer || 0, 2.5);
-        Projectiles.spawn(state, fish.x, fish.y, p.x, p.y, 480, dmg, '#2dd4bf', { radius: 10, glow: true });
+        // The barb roots on impact — dodge it, don't tank it
+        Projectiles.spawn(state, fish.x, fish.y, p.x, p.y, 480, dmg, '#2dd4bf', {
+            radius: 10, glow: true, slowOnHit: 2.0
+        });
         ctx.showFloatingText("🪸 CORAL SNARE!", fish.x, fish.y - 40, '#2dd4bf');
     },
 
@@ -3599,18 +3693,17 @@ const FISH_SKILLS = {
         const state = ctx.state;
         const p = state.player;
         const dmg = getSkillDamage(fish, 1.0);
-        // Pure dread: hurls the player back and briefly stuns
-        const dx = p.x - fish.x, dy = p.y - fish.y;
-        const d = Math.hypot(dx, dy) || 1;
-        const B = (typeof CONFIG !== 'undefined' && CONFIG.WORLD) || { MIN_X: 40, MAX_X: 4500, MIN_Y: 40, MAX_Y: 3500 };
-        const clamp = (typeof Utils !== 'undefined' && Utils.clamp) ? Utils.clamp : (v) => v;
-        p.x = clamp(p.x + (dx / d) * 130, B.MIN_X + 20, (state.waterBoundaryX || B.MAX_X) - 20);
-        p.y = clamp(p.y + (dy / d) * 130, B.MIN_Y + 20, B.MAX_Y - 20);
-        hurtFishSkill(state, dmg);
-        p.stunTimer = Math.max(p.stunTimer || 0, 0.6);
+        // Dread beam: fast but sidesteppable. Hurls back + stuns + flashes
+        // ONLY on a real hit — no more instant punish.
+        const a = Math.atan2(p.y - fish.y, p.x - fish.x);
+        Projectiles.spawn(state, fish.x, fish.y,
+            fish.x + Math.cos(a) * 700, fish.y + Math.sin(a) * 700,
+            750, dmg, '#a855f7', {
+                radius: 12, glow: true, glowColor: '#e9d5ff',
+                pushOnHit: 130, stunOnHit: 0.6, flashOnHit: 0.4
+            });
         state.screenShake = Math.max(state.screenShake || 0, 10);
         try { audio.playRoar(); } catch (e) {}
         ctx.showFloatingText("👁️ ABYSSAL GAZE!", fish.x, fish.y - 40, '#a855f7');
-        if (typeof Player !== 'undefined') Player.refreshHUD(state);
     },
 };

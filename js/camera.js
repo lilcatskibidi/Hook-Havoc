@@ -1,6 +1,26 @@
 const Camera = {
     update(state, delta) {
         const cam = state.camera;
+        // Boss-intro lock: hold the shot on the boss (tracks it live,
+        // releases when the timer ends or the boss dies mid-intro).
+        try {
+            const ic = state._introCam;
+            if (ic && ic.t > 0) {
+                ic.t -= delta;
+                if (ic.boss && typeof ic.boss.x === 'number' && typeof ic.boss.y === 'number') {
+                    ic.x = ic.boss.x;
+                    ic.y = ic.boss.y;
+                    if (typeof ic.boss.hp === 'number' && ic.boss.hp <= 0) ic.t = 0;
+                }
+                if (ic.t > 0) {
+                    const k = Math.min(1, delta * 3);
+                    cam.x += (ic.x - cam.x) * k;
+                    cam.y += (ic.y - cam.y) * k;
+                    cam.zoom = Utils.smooth(cam.zoom, cam.targetZoom, CONFIG.CAMERA_ZOOM_SPEED, delta);
+                    return;
+                }
+            }
+        } catch (e) {}
         cam.x = Utils.smooth(cam.x, state.player.x, CONFIG.CAMERA_FOLLOW_SPEED, delta);
         cam.y = Utils.smooth(cam.y, state.player.y, CONFIG.CAMERA_FOLLOW_SPEED, delta);
         cam.zoom = Utils.smooth(cam.zoom, cam.targetZoom, CONFIG.CAMERA_ZOOM_SPEED, delta);

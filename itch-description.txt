@@ -1,0 +1,61 @@
+Copy everything below the line into your itch.io game page description.
+----------------------------------------------------------------
+
+AQUATIC HAVOC — Deep Sea Hunter (v1.1.0)
+
+Cast your line into haunted waters, hook monsters, drag them ashore,
+and finish them with an arsenal of ridiculous guns. Then dive deeper:
+ancient bosses, a sealed void cave, a casino, and 213 catchable fish.
+
+WHAT YOU DO
+- Stand near the water, hold SPACE to charge, release to cast.
+- When something bites, shoot it to drain stamina, manage line tension,
+  drag it onto the sand and claim your loot.
+- Sell catches, buy guns, rods, armor and bait. Talk to OLD MARLIN (E)
+  for fish-catching quests.
+- Slay 20 seagulls and their mother, the STORMCALLER, will come for you.
+- Crack the NW-corner void portal: feed the runes fish (common, rare,
+  epic), descend into the Hollow Cave, and summon bosses at the ritual
+  circle — including the nine-headed STORMLORD HYDRA.
+
+FEATURES
+- 213 catchable fish across 6 rarities + 4 summonable bosses + miniboss
+- 30+ guns with real rendered previews, rods, armor, craftable bait
+- Boss cinematics: 10-second camera intro, war-horn roar, war-drum theme
+- Deep Sea Casino (roulette, slots, fish betting, high-low)
+- Fish Index, 26 achievements, LAN multiplayer, full custom-skin support
+  (export/import your skins as a zip, right from Settings)
+- File-first audio: drop in your own mp3/ogg/wav to replace any sound
+
+CONTROLS
+WASD move · SPACE cast / reel / pull bobber back · Mouse shoot ·
+1-4 weapons · R reload · E talk / shop / portal · J fish index ·
+Wheel zoom · ESC menu
+
+UPDATE LOG
+v1.1.0 (Oct 2026) — LATEST
+- Update log added in the menu, with the current version up top
+- Teleport loading screen for cave descents and returns
+- Menu remake: hero header, PLAY/EXPLORE columns, live beach background
+  with real index fish swimming by
+- Full SFX assets (roar, skills, throw, splash, reload, boss roar/theme,
+  coin, hit, UI, portal) — mp3/ogg/wav drop-in support, custom files
+  are never overwritten
+- Volume mixer: Master / Music / SFX sliders in Settings
+- Skin-pack sharing: export all custom skins to a zip, import a zip
+- Shop gun cards show the real gun model
+- SPACE pulls the bobber back before a bite (keeps your bait)
+- Boss intros hold the camera on the boss for 10s, then crossfade
+  tide music into the boss theme; Stormcaller uses the boss roar
+
+v1.0.0 (Sep 2026) — RELEASE
+- Sealed cave rework: corner void portal, fog + lantern light,
+  fish-offering rune puzzle
+- Stormlord Hydra: 9 heads, sea-phase hunt, nine-head volley,
+  cinematic boss intros
+- Achievements repaired (unlock, counting, persistence) +
+  full-roster hook table (213 species)
+- Bait luck fixed: rod + bait luck feed rarity weights and shiny rolls
+- Boot + teleport loading screens, boss war-drum theme
+
+Made by LILCAT. Built with pure HTML, CSS and vanilla JavaScript.

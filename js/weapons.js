@@ -3,285 +3,332 @@
 // ============================================================
 const EQUIP_SLOTS = 4;   // 1, 2, 3, 4 keys
 const WEAPONS = [
-    // TIER 1 — STARTER
+    // TIER 1 — STARTER (common workhorses, ~100-175 DPS)
     { id: 'pistol', name: 'Tac-Pistol', icon: 'fa-gun', type: 'pistol',
       damage: 25, fireRate: 0.18, range: 520, spread: 0.04, count: 1,
-      price: 0, desc: 'Reliable sidearm. Infinite ammo.',
+      price: 0, desc: 'Trusty sidearm. Infinite ammo, 10% crits. ~139 DPS.',
       rarity: 'common', pellets: 'Single',
       auto: false, pierce: false, explosive: false, burn: false,
+      critCh: 0.10, critMult: 2.0,
       sound: 'pistol', shake: 3, muzzle: 10, recoil: 3 },
 
     { id: 'smg', name: 'Compact SMG', icon: 'fa-bolt', type: 'smg',
-      damage: 12, fireRate: 0.07, range: 460, spread: 0.10, count: 1,
-      price: 500, desc: 'Fast spray. Weak per-shot.',
+      damage: 11, fireRate: 0.07, range: 460, spread: 0.10, count: 1,
+      price: 500, desc: 'Fast spray, 25% free bullets. Weak per-shot. ~157 DPS.',
       rarity: 'common', pellets: 'Auto',
       auto: true, pierce: false, explosive: false, burn: false,
+      ecoCh: 0.25,
       sound: 'rifle', shake: 2, muzzle: 8, recoil: 2 },
 
     { id: 'scrap_smg', name: 'Scrap SMG', icon: 'fa-bolt', type: 'smg',
-      damage: 9, fireRate: 0.09, range: 420, spread: 0.12, count: 1,
-      price: 1500, desc: 'Held together with wire. Cheap bullet hose.',
+      damage: 11, fireRate: 0.065, range: 420, spread: 0.12, count: 1,
+      price: 1200, desc: 'Held together with wire. Faster hose, 20% free bullets. ~169 DPS.',
       rarity: 'common', pellets: 'Auto',
       auto: true, pierce: false, explosive: false, burn: false,
+      ecoCh: 0.20,
       sound: 'rifle', shake: 2, muzzle: 8, recoil: 2 },
 
     { id: 'shotgun', name: 'Heavy Shotgun', icon: 'fa-shield-halved', type: 'shotgun',
-      damage: 16, fireRate: 0.75, range: 380, spread: 0.22, count: 7,
-      price: 2200, desc: '7-pellet spread. Devastating close range.',
+      damage: 18, fireRate: 0.7, range: 380, spread: 0.16, count: 7,
+      price: 2200, desc: '7-pellet cloud. All pellets connect underwater. Huge knockback. ~180 DPS close.',
       rarity: 'rare', pellets: '7 pellets',
       auto: false, pierce: false, explosive: false, burn: false,
+      knockMult: 2.0,
       sound: 'shotgun', shake: 6, muzzle: 18, recoil: 8 },
 
-    // TIER 2 — MID GAME
+    // TIER 2 — MID GAME (rare power, ~100-270 DPS)
     { id: 'rusted_revolver', name: 'Rusted Revolver', icon: 'fa-gun', type: 'pistol',
-      damage: 18, fireRate: 0.22, range: 480, spread: 0.05, count: 1,
-      price: 900, desc: 'Found in a tackle box. Better than harsh language.',
+      damage: 34, fireRate: 0.22, range: 480, spread: 0.05, count: 1,
+      price: 900, desc: 'Found in a tackle box. Executes weaklings (+50% vs hurt). ~155 DPS.',
       rarity: 'common', pellets: 'Single',
       auto: false, pierce: false, explosive: false, burn: false,
+      executeMult: 1.5,
       sound: 'pistol', shake: 3, muzzle: 10, recoil: 3 },
 
     { id: 'dual_pistols', name: 'Dual Sidearms', icon: 'fa-gun', type: 'pistol',
-      damage: 20, fireRate: 0.11, range: 520, spread: 0.07, count: 2,
-      price: 4800, desc: 'Twin pistols. Double the volume.',
+      damage: 15, fireRate: 0.12, range: 520, spread: 0.07, count: 2,
+      price: 4200, desc: 'Twin pistols, 15% crits. Double the volume. ~250 DPS.',
       rarity: 'rare', pellets: 'Dual',
       auto: false, pierce: false, explosive: false, burn: false,
+      critCh: 0.15, critMult: 2.0,
       sound: 'pistol', shake: 4, muzzle: 12, recoil: 4 },
 
     { id: 'rifle', name: 'Assault Rifle', icon: 'fa-crosshair', type: 'rifle',
-      damage: 22, fireRate: 0.08, range: 620, spread: 0.06, count: 1,
-      price: 6500, desc: 'Fully automatic. Shreds monsters.',
+      damage: 26, fireRate: 0.075, range: 620, spread: 0.06, count: 1,
+      price: 6500, desc: 'Fully automatic, 15% free bullets. Shreds monsters. ~347 DPS.',
       rarity: 'epic', pellets: 'Auto',
       auto: true, pierce: false, explosive: false, burn: false,
+      ecoCh: 0.15,
       sound: 'rifle', shake: 3, muzzle: 12, recoil: 3 },
 
     { id: 'tidecaller', name: 'Tidecaller', icon: 'fa-water', type: 'rifle',
-      damage: 30, fireRate: 0.10, range: 660, spread: 0.05, count: 1,
-      price: 12000, desc: 'Salvaged coast-guard rifle. Steady and true.',
+      damage: 34, fireRate: 0.09, range: 660, spread: 0.05, count: 1,
+      price: 12000, desc: 'Salvaged coast-guard rifle. Tides exhaust hooked fish (2x stamina drain). ~378 DPS.',
       rarity: 'epic', pellets: 'Auto',
       auto: true, pierce: false, explosive: false, burn: false,
+      drainMult: 2.0,
       sound: 'rifle', shake: 3, muzzle: 12, recoil: 3 },
 
     { id: 'burst_rifle', name: 'Burst Carbine', icon: 'fa-crosshair', type: 'rifle',
-      damage: 26, fireRate: 0.22, range: 640, spread: 0.03, count: 3,
-      price: 8500, desc: 'Three-round burst. Tight grouping.',
+      damage: 28, fireRate: 0.22, range: 640, spread: 0.03, count: 3,
+      price: 8500, desc: 'Three-round burst, 15% crits. Tight grouping. ~382 DPS.',
       rarity: 'epic', pellets: '3-round burst',
       auto: true, pierce: false, explosive: false, burn: false,
+      critCh: 0.15, critMult: 1.75,
       sound: 'rifle', shake: 4, muzzle: 12, recoil: 4 },
 
-    // TIER 3 — LATE GAME
+    // TIER 3 — LATE GAME (epic punch, ~280-480 DPS)
     { id: 'marksman', name: 'Marksman Rifle', icon: 'fa-crosshair', type: 'rifle',
-      damage: 95, fireRate: 0.55, range: 900, spread: 0.005, count: 1,
-      price: 14000, desc: 'Precision long-range shots.',
+      damage: 150, fireRate: 0.4, range: 900, spread: 0.005, count: 1,
+      price: 14000, desc: 'Deadeye: 30% crits, +25% vs bosses. Precision long-range. ~375 DPS.',
       rarity: 'epic', pellets: 'Precision',
       auto: false, pierce: true, explosive: false, burn: false,
+      critCh: 0.30, critMult: 2.5, bossMult: 1.25,
       sound: 'harpoon', shake: 6, muzzle: 14, recoil: 6 },
 
     { id: 'harpoon', name: 'Spear Harpoon', icon: 'fa-location-arrow', type: 'harpoon',
-      damage: 140, fireRate: 0.9, range: 700, spread: 0.01, count: 1,
-      price: 17000, desc: 'Heavy piercer. Drains stamina on hook.',
+      damage: 380, fireRate: 0.75, range: 700, spread: 0.01, count: 1,
+      price: 17000, desc: 'Heavy piercer. 3x stamina drain on hooked fish. ~507 DPS.',
       rarity: 'legendary', pellets: 'Pierce',
       auto: false, pierce: true, explosive: false, burn: false,
+      drainMult: 3.0,
       sound: 'harpoon', shake: 8, muzzle: 10, recoil: 6 },
 
     { id: 'storm_harpoon', name: 'Storm Harpoon', icon: 'fa-cloud-bolt', type: 'harpoon',
-      damage: 180, fireRate: 1.0, range: 750, spread: 0.01, count: 1,
-      price: 38000, desc: 'Lightning-charged spear. Arcs between monsters.',
+      damage: 420, fireRate: 0.75, range: 750, spread: 0.01, count: 1,
+      price: 38000, desc: 'Lightning spear. Chains + brief stun, tires hooked fish. ~560 DPS.',
       rarity: 'legendary', pellets: 'Pierce + Arc',
       auto: false, pierce: true, explosive: false, burn: false, chain: true,
-      chainMult: 0.5, sound: 'harpoon', shake: 9, muzzle: 12, recoil: 7 },
+      chainMult: 0.6, stun: true, stunTime: 0.8, drainMult: 1.5,
+      sound: 'harpoon', shake: 9, muzzle: 12, recoil: 7 },
 
     { id: 'auto_shotgun', name: 'Auto Shotgun', icon: 'fa-shield-halved', type: 'shotgun',
-      damage: 18, fireRate: 0.28, range: 420, spread: 0.26, count: 8,
-      price: 19000, desc: 'Fully automatic 8-pellet fire.',
+      damage: 18, fireRate: 0.3, range: 420, spread: 0.24, count: 8,
+      price: 19000, desc: 'Fully automatic 8-pellet fire. Shoves crowds back. ~480 DPS close.',
       rarity: 'epic', pellets: '8 pellets auto',
       auto: true, pierce: false, explosive: false, burn: false,
+      knockMult: 1.5,
       sound: 'shotgun', shake: 5, muzzle: 18, recoil: 6 },
 
     { id: 'flamethrower', name: 'Hydro-Jet', icon: 'fa-fire', type: 'flame',
-      damage: 9, fireRate: 0.04, range: 260, spread: 0.35, count: 2,
-      price: 22000, desc: 'Short-range stream. Melts anything close.',
+      damage: 8, fireRate: 0.04, range: 260, spread: 0.35, count: 2,
+      price: 22000, desc: 'High-pressure stream: burns + slows hooked fish. ~400 DPS.',
       rarity: 'epic', pellets: 'Stream',
       auto: true, pierce: false, explosive: false, burn: true,
+      burnDps: 20, slowHook: 0.35,
       sound: 'rifle', shake: 2, muzzle: 6, recoil: 1 },
 
-    // TIER 4 — LEGENDARY
+    // TIER 4 — LEGENDARY (heavy hitters, ~480-955 DPS)
     { id: 'grenade_launcher', name: 'Harpoon Launcher', icon: 'fa-bomb', type: 'launcher',
-      damage: 180, fireRate: 1.0, range: 640, spread: 0.08, count: 1,
-      price: 40000, desc: 'Explosive harpoon. Splash damage.',
+      damage: 420, fireRate: 0.8, range: 640, spread: 0.08, count: 1,
+      price: 40000, desc: 'Explosive harpoon. Splash + heavy knockback. ~525 DPS.',
       rarity: 'legendary', pellets: 'Explosive',
       auto: false, pierce: false, explosive: true, burn: false,
+      knockMult: 2.0,
       sound: 'shotgun', shake: 10, muzzle: 22, recoil: 10 },
 
     { id: 'kraken_maul', name: 'Kraken Maul', icon: 'fa-bomb', type: 'launcher',
-      damage: 240, fireRate: 1.2, range: 700, spread: 0.08, count: 1,
-      price: 55000, desc: 'Ship-cannon that fits in your hands. Barely.',
+      damage: 520, fireRate: 0.9, range: 700, spread: 0.08, count: 1,
+      price: 55000, desc: 'Ship-cannon that fits in your hands. Executes the weak. ~578 DPS.',
       rarity: 'legendary', pellets: 'Explosive',
       auto: false, pierce: false, explosive: true, burn: false,
+      executeMult: 1.5,
       sound: 'shotgun', shake: 12, muzzle: 24, recoil: 12 },
 
     { id: 'railgun', name: 'Rail Cannon', icon: 'fa-bolt', type: 'rail',
-      damage: 320, fireRate: 1.4, range: 1200, spread: 0.0, count: 1,
-      price: 48000, desc: 'Pierces everything. One-shot monsters.',
+      damage: 750, fireRate: 1.0, range: 1200, spread: 0.0, count: 1,
+      price: 48000, desc: 'Pierces everything. Double damage to the dying. ~750 DPS.',
       rarity: 'legendary', pellets: 'Pierce line',
       auto: false, pierce: true, explosive: false, burn: false,
+      executeMult: 2.0,
       sound: 'harpoon', shake: 12, muzzle: 26, recoil: 12 },
 
     { id: 'abyssal_cannon', name: 'Abyssal Cannon', icon: 'fa-skull', type: 'rail',
-      damage: 450, fireRate: 1.6, range: 1300, spread: 0.0, count: 1,
-      price: 140000, desc: 'Fires compressed trench darkness. Erases horizons.',
+      damage: 1050, fireRate: 1.1, range: 1300, spread: 0.0, count: 1,
+      price: 140000, desc: 'Compressed trench darkness. Bane of bosses, reaper of the weak. ~955 DPS.',
       rarity: 'mythic', pellets: 'Pierce line',
       auto: false, pierce: true, explosive: false, burn: false,
+      executeMult: 1.75, bossMult: 1.25,
       sound: 'harpoon', shake: 14, muzzle: 30, recoil: 14 },
 
     { id: 'minigun', name: 'Reel Minigun', icon: 'fa-bolt', type: 'rifle',
-      damage: 14, fireRate: 0.03, range: 560, spread: 0.14, count: 1,
-      price: 32000, desc: 'Spin up. Endless lead storm. (Tuned down: was melting bosses.)',
+      damage: 15, fireRate: 0.03, range: 560, spread: 0.14, count: 1,
+      price: 32000, desc: 'Spin up. 30% free bullets. Endless lead storm. ~500 DPS.',
       rarity: 'legendary', pellets: 'Full auto',
       auto: true, pierce: false, explosive: false, burn: false,
+      ecoCh: 0.30,
       sound: 'rifle', shake: 4, muzzle: 14, recoil: 2 },
 
     { id: 'sniper_rail', name: 'Ion Sniper', icon: 'fa-crosshair', type: 'rail',
-      damage: 500, fireRate: 1.8, range: 1500, spread: 0.0, count: 1,
-      price: 70000, desc: 'Cross-map deletion. Very slow fire.',
+      damage: 950, fireRate: 1.3, range: 1500, spread: 0.0, count: 1,
+      price: 70000, desc: 'Cross-map deletion. 40% crits, +50% vs bosses. ~731 DPS.',
       rarity: 'legendary', pellets: 'Pierce precision',
       auto: false, pierce: true, explosive: false, burn: false,
+      critCh: 0.40, critMult: 2.5, bossMult: 1.5,
       sound: 'harpoon', shake: 14, muzzle: 30, recoil: 14 },
 
-    // TIER 5 — MYTHIC (rebalanced: every mythic beats Reel Minigun ~666 DPS)
+    // TIER 5 — MYTHIC (apex predators, ~790-1190 DPS + signature tricks)
     { id: 'plasma_caster', name: 'Plasma Caster', icon: 'fa-fire', type: 'plasma',
-      damage: 320, fireRate: 0.28, range: 820, spread: 0.02, count: 1,
-      price: 110000, desc: 'Superheated bolts that burn on hit. ~1140 DPS + burn.',
+      damage: 300, fireRate: 0.28, range: 820, spread: 0.02, count: 1,
+      price: 110000, desc: 'Superheated bolts: blast + burn + boil stamina. ~1071 DPS.',
       rarity: 'mythic', pellets: 'Plasma',
       auto: true, pierce: false, explosive: true, burn: true,
-      burnDps: 60, sound: 'harpoon', shake: 8, muzzle: 20, recoil: 8 },
+      burnDps: 60, drainMult: 1.5,
+      sound: 'harpoon', shake: 8, muzzle: 20, recoil: 8 },
 
     { id: 'trident', name: 'Poseidon Trident', icon: 'fa-location-arrow', type: 'rail',
-      damage: 300, fireRate: 0.7, range: 1100, spread: 0.0, count: 3,
-      price: 150000, desc: 'Three piercing bolts. ~1285 DPS volley. Slows hooked fish. (Tuned down.)',
+      damage: 280, fireRate: 0.75, range: 1100, spread: 0.0, count: 3,
+      price: 150000, desc: 'Triple pierce. Slows hooked fish, drinks HP (15%). ~1120 DPS.',
       rarity: 'mythic', pellets: 'Triple pierce',
       auto: false, pierce: true, explosive: false, burn: false, slowHook: 0.5,
+      lifesteal: 0.15,
       sound: 'harpoon', shake: 12, muzzle: 28, recoil: 12 },
 
-    // TIER 6 — EXOTIC (NEW WEAPONS)
+    // TIER 6 — EXOTIC (each with a signature trick)
     { id: 'crossbow', name: 'Abyssal Crossbow', icon: 'fa-bow-arrow', type: 'crossbow',
-      damage: 420, fireRate: 0.9, range: 900, spread: 0.0, count: 1,
-      price: 80000, desc: 'Silent killer. ~466 DPS + deadly poison (~630 bonus).',
+      damage: 680, fireRate: 0.75, range: 900, spread: 0.0, count: 1,
+      price: 80000, desc: 'Silent killer. Venom + 25% crits. ~907 DPS.',
       rarity: 'mythic', pellets: 'Poison Bolt',
       auto: false, pierce: true, explosive: false, burn: false, poison: true,
-      poisonDpsMult: 0.5, sound: 'harpoon', shake: 6, muzzle: 8, recoil: 5 },
+      poisonDpsMult: 0.6, critCh: 0.25, critMult: 2.0,
+      sound: 'harpoon', shake: 6, muzzle: 8, recoil: 5 },
 
     { id: 'tesla_gun', name: 'Tesla Coil Gun', icon: 'fa-bolt', type: 'tesla',
-      damage: 90, fireRate: 0.12, range: 540, spread: 0.08, count: 1,
-      price: 95000, desc: 'Chains lightning between enemies. ~750 DPS + chain x4.',
+      damage: 95, fireRate: 0.12, range: 540, spread: 0.08, count: 1,
+      price: 95000, desc: 'Overloaded arcs: chains + 10% crit sparks. ~792 DPS.',
       rarity: 'mythic', pellets: 'Chain Lightning',
       auto: true, pierce: false, explosive: false, burn: false, chain: true,
-      chainMult: 0.7, sound: 'rifle', shake: 3, muzzle: 16, recoil: 2 },
+      chainMult: 0.75, critCh: 0.10, critMult: 2.0,
+      sound: 'rifle', shake: 3, muzzle: 16, recoil: 2 },
 
     { id: 'void_rifle', name: 'Void Reaper', icon: 'fa-skull', type: 'void',
-      damage: 650, fireRate: 0.9, range: 950, spread: 0.01, count: 1,
-      price: 220000, desc: 'Erases matter. ~722 DPS, pierces, heals 30% of damage.',
+      damage: 820, fireRate: 0.8, range: 950, spread: 0.01, count: 1,
+      price: 220000, desc: 'Erases matter. Heals 30%, executes the weak. ~1025 DPS.',
       rarity: 'mythic', pellets: 'Void Round',
       auto: false, pierce: true, explosive: false, burn: false, lifesteal: 0.3,
+      executeMult: 1.5,
       sound: 'harpoon', shake: 10, muzzle: 24, recoil: 8 },
 
     { id: 'coral_launcher', name: 'Coral Mortar', icon: 'fa-seedling', type: 'launcher',
-      damage: 380, fireRate: 1.2, range: 750, spread: 0.12, count: 1,
-      price: 130000, desc: 'Explosive coral + reef field (25 dps x 6s). ~316 + 150 DoT.',
+      damage: 560, fireRate: 1.0, range: 750, spread: 0.12, count: 1,
+      price: 130000, desc: 'Explosive coral + grinding reef (35 dps x 6s). ~560 DPS.',
       rarity: 'legendary', pellets: 'Coral Grenade',
       auto: false, pierce: false, explosive: true, burn: false, coral: true,
-      coralDps: 25, sound: 'shotgun', shake: 12, muzzle: 20, recoil: 10 },
+      coralDps: 35, knockMult: 1.5,
+      sound: 'shotgun', shake: 12, muzzle: 20, recoil: 10 },
 
     { id: 'frost_bow', name: 'Glacial Bow', icon: 'fa-icicles', type: 'crossbow',
-      damage: 220, fireRate: 0.9, range: 850, spread: 0.0, count: 3,
-      price: 110000, desc: 'Triple ice shards (~733 DPS) that freeze enemies 2.5s.',
+      damage: 220, fireRate: 0.8, range: 850, spread: 0.0, count: 3,
+      price: 110000, desc: 'Triple ice shards freeze 2.5s. 20% shatter crits. ~825 DPS.',
       rarity: 'mythic', pellets: 'Ice Shards',
       auto: false, pierce: true, explosive: false, burn: false, freeze: true,
-      freezeTime: 2.5, sound: 'harpoon', shake: 5, muzzle: 10, recoil: 4 },
+      freezeTime: 2.5, critCh: 0.20, critMult: 2.0,
+      sound: 'harpoon', shake: 5, muzzle: 10, recoil: 4 },
 
     { id: 'magma_shotgun', name: 'Magma Blunderbuss', icon: 'fa-fire-burner', type: 'shotgun',
-      damage: 30, fireRate: 0.45, range: 380, spread: 0.35, count: 10,
-      price: 75000, desc: 'Molten shrapnel (~666 DPS) + burn (40 dps).',
+      damage: 30, fireRate: 0.5, range: 380, spread: 0.30, count: 10,
+      price: 75000, desc: 'Molten shrapnel + heavy burn. Executes the melting. ~600 DPS close.',
       rarity: 'legendary', pellets: '10 Molten Pellets',
       auto: false, pierce: false, explosive: false, burn: true,
-      burnDps: 40, sound: 'shotgun', shake: 8, muzzle: 22, recoil: 7 },
+      burnDps: 45, executeMult: 1.25,
+      sound: 'shotgun', shake: 8, muzzle: 22, recoil: 7 },
 
     { id: 'sonic_pistol', name: 'Resonance Pistol', icon: 'fa-wave-square', type: 'sonic',
-      damage: 110, fireRate: 0.22, range: 650, spread: 0.02, count: 1,
-      price: 60000, desc: 'Sonic waves pierce + stun 1.5s. ~500 DPS.',
+      damage: 95, fireRate: 0.22, range: 650, spread: 0.02, count: 1,
+      price: 28000, desc: 'Sonic waves pierce + stun, shatter the hurt. ~432 DPS.',
       rarity: 'epic', pellets: 'Sonic Pulse',
       auto: false, pierce: true, explosive: false, burn: false, stun: true,
-      stunTime: 1.5, sound: 'pistol', shake: 4, muzzle: 12, recoil: 3 },
+      stunTime: 1.5, executeMult: 1.5,
+      sound: 'pistol', shake: 4, muzzle: 12, recoil: 3 },
 
     // TIER 7 — NEW BLOOD (rarity-sorted in the shop)
     { id: 'flare_gun', name: 'Flare Gun', icon: 'fa-fire', type: 'pistol',
-      damage: 30, fireRate: 0.5, range: 500, spread: 0.03, count: 1,
-      price: 3000, desc: 'Distress flare. Sets everything on fire.',
+      damage: 45, fireRate: 0.45, range: 500, spread: 0.03, count: 1,
+      price: 2500, desc: 'Distress flare. Heavy burn, executes the burning. ~100 DPS.',
       rarity: 'rare', pellets: 'Flare',
       auto: false, pierce: false, explosive: false, burn: true,
-      burnDps: 20, sound: 'pistol', shake: 4, muzzle: 12, recoil: 4 },
+      burnDps: 30, executeMult: 1.5,
+      sound: 'pistol', shake: 4, muzzle: 12, recoil: 4 },
 
     { id: 'nailgun', name: 'Nailgun', icon: 'fa-hammer', type: 'smg',
-      damage: 8, fireRate: 0.06, range: 480, spread: 0.07, count: 1,
-      price: 5500, desc: 'Construction tool. Nails pierce clean through.',
+      damage: 10, fireRate: 0.06, range: 480, spread: 0.07, count: 1,
+      price: 4000, desc: 'Nails pierce clean through. 10% crits. ~167 DPS.',
       rarity: 'rare', pellets: 'Auto Pierce',
       auto: true, pierce: true, explosive: false, burn: false,
+      critCh: 0.10, critMult: 2.0,
       sound: 'rifle', shake: 2, muzzle: 8, recoil: 2 },
 
     { id: 'foghorn', name: 'Foghorn', icon: 'fa-volume-high', type: 'sonic',
-      damage: 150, fireRate: 0.3, range: 600, spread: 0.03, count: 1,
-      price: 45000, desc: 'Harbor foghorn. Stuns 2s, shatters eardrums.',
+      damage: 160, fireRate: 0.35, range: 600, spread: 0.03, count: 1,
+      price: 32000, desc: 'Harbor foghorn. 2s stun + massive shockwave knockback. ~457 DPS.',
       rarity: 'epic', pellets: 'Blast',
       auto: false, pierce: true, explosive: false, burn: false, stun: true,
-      stunTime: 2.0, sound: 'shotgun', shake: 8, muzzle: 20, recoil: 8 },
+      stunTime: 2.0, knockMult: 2.5,
+      sound: 'shotgun', shake: 8, muzzle: 20, recoil: 8 },
 
     { id: 'scattergun', name: 'Scattergun', icon: 'fa-burst', type: 'shotgun',
-      damage: 12, fireRate: 0.6, range: 400, spread: 0.30, count: 10,
-      price: 26000, desc: '10-pellet wall of lead. Delete close range.',
+      damage: 15, fireRate: 0.55, range: 400, spread: 0.26, count: 10,
+      price: 22000, desc: '10-pellet wall of lead, 10% crits. Delete close range. ~273 DPS.',
       rarity: 'epic', pellets: '10 pellets',
       auto: false, pierce: false, explosive: false, burn: false,
+      critCh: 0.10, critMult: 2.0,
       sound: 'shotgun', shake: 7, muzzle: 20, recoil: 8 },
 
     { id: 'recurve', name: 'Dune Recurve', icon: 'fa-feather', type: 'crossbow',
-      damage: 150, fireRate: 0.7, range: 800, spread: 0.0, count: 1,
-      price: 30000, desc: 'Desert huntsman bow. Brief freeze on hit.',
+      damage: 170, fireRate: 0.6, range: 800, spread: 0.0, count: 1,
+      price: 24000, desc: 'Desert huntsman bow. Freezes +30% vs big game. ~283 DPS.',
       rarity: 'epic', pellets: 'Pierce',
       auto: false, pierce: true, explosive: false, burn: false, freeze: true,
-      freezeTime: 1.0, sound: 'harpoon', shake: 4, muzzle: 8, recoil: 4 },
+      freezeTime: 1.0, bossMult: 1.3,
+      sound: 'harpoon', shake: 4, muzzle: 8, recoil: 4 },
 
     { id: 'arc_caster', name: 'Arc Caster', icon: 'fa-tower-broadcast', type: 'tesla',
-      damage: 130, fireRate: 0.15, range: 560, spread: 0.06, count: 1,
-      price: 70000, desc: 'Broadcast tower in a gun. Chains x4.',
+      damage: 120, fireRate: 0.15, range: 560, spread: 0.06, count: 1,
+      price: 70000, desc: 'Broadcast tower in a gun. Chains x4, sips ammo. ~800 DPS.',
       rarity: 'legendary', pellets: 'Chain Lightning',
       auto: true, pierce: false, explosive: false, burn: false, chain: true,
-      chainMult: 0.6, sound: 'rifle', shake: 4, muzzle: 18, recoil: 3 },
+      chainMult: 0.7, ecoCh: 0.15,
+      sound: 'rifle', shake: 4, muzzle: 18, recoil: 3 },
 
     { id: 'depth_charge', name: 'Depth Charge', icon: 'fa-anchor', type: 'launcher',
-      damage: 300, fireRate: 1.5, range: 720, spread: 0.10, count: 1,
-      price: 80000, desc: 'Naval ordnance. Big boom, slow hands.',
+      damage: 700, fireRate: 1.3, range: 720, spread: 0.10, count: 1,
+      price: 80000, desc: 'Naval ordnance. Huge blast, brutal knockback, concusses. ~538 DPS.',
       rarity: 'legendary', pellets: 'Explosive',
       auto: false, pierce: false, explosive: true, burn: false,
+      knockMult: 3.0, stun: true, stunTime: 1.0,
       sound: 'shotgun', shake: 14, muzzle: 26, recoil: 14 },
 
     { id: 'lance', name: 'Leviathan Lance', icon: 'fa-location-arrow', type: 'harpoon',
-      damage: 260, fireRate: 1.2, range: 850, spread: 0.0, count: 1,
-      price: 100000, desc: 'A ship-harpoon, shoulder-fired. Slows hooked fish.',
+      damage: 620, fireRate: 0.75, range: 850, spread: 0.0, count: 1,
+      price: 100000, desc: 'Ship-harpoon, shoulder-fired. Slows, exhausts +30% vs big game. ~827 DPS.',
       rarity: 'mythic', pellets: 'Pierce',
       auto: false, pierce: true, explosive: false, burn: false, slowHook: 0.6,
+      drainMult: 2.0, bossMult: 1.25,
       sound: 'harpoon', shake: 10, muzzle: 14, recoil: 8 },
 
     { id: 'pulse_rifle', name: 'Pulse Rifle', icon: 'fa-radiation', type: 'plasma',
-      damage: 200, fireRate: 0.16, range: 780, spread: 0.03, count: 1,
-      price: 90000, desc: 'Military plasma. ~1250 DPS + heavy burn.',
+      damage: 190, fireRate: 0.16, range: 780, spread: 0.03, count: 1,
+      price: 90000, desc: 'Military plasma. Heavy burn, 20% free bolts. ~1188 DPS.',
       rarity: 'mythic', pellets: 'Plasma',
       auto: true, pierce: false, explosive: false, burn: true,
-      burnDps: 50, sound: 'harpoon', shake: 6, muzzle: 18, recoil: 6 },
+      burnDps: 50, ecoCh: 0.20,
+      sound: 'harpoon', shake: 6, muzzle: 18, recoil: 6 },
 
     { id: 'sun_spear', name: 'Sun Spear', icon: 'fa-sun', type: 'rail',
-      damage: 600, fireRate: 2.0, range: 1400, spread: 0.0, count: 1,
-      price: 180000, desc: 'A javelin of noon. Cross-map deletion.',
+      damage: 1200, fireRate: 1.1, range: 1400, spread: 0.0, count: 1,
+      price: 180000, desc: 'A javelin of noon. Executes the weak, banishes titans. ~1091 DPS.',
       rarity: 'mythic', pellets: 'Pierce precision',
       auto: false, pierce: true, explosive: false, burn: false,
+      executeMult: 2.0, bossMult: 1.5,
       sound: 'harpoon', shake: 16, muzzle: 32, recoil: 16 }
+];
+
+const BUCKET_UPGRADES = [
+    { id: 'bucket_25',  cap: 25,  price: 500,   name: 'Canvas Creel',  icon: 'fa-basket-shopping', desc: 'Holds 25 fish. Woven kelp canvas.' },
+    { id: 'bucket_40',  cap: 40,  price: 2000,  name: 'Oak Barrel',    icon: 'fa-drum',            desc: 'Holds 40 fish. Smells like victory.' },
+    { id: 'bucket_60',  cap: 60,  price: 6000,  name: 'Ice Hold',      icon: 'fa-snowflake',       desc: 'Holds 60 fish. Keeps them fresh.' },
+    { id: 'bucket_100', cap: 100, price: 15000, name: 'Trawler Hold',  icon: 'fa-ship',            desc: 'Holds 100 fish. A real fishing boat.' },
+    { id: 'bucket_160', cap: 160, price: 35000, name: 'Abyssal Vault', icon: 'fa-box-open',        desc: 'Holds 160 fish. It whispers... hold more.' },
 ];
 
 const RODS = [
@@ -386,6 +433,39 @@ const WeaponSystem = {
         return WEAPONS.find(w => w.id === id) || null;
     },
 
+    // Shared damage roll: crit (rolled per-bullet at fire time) x execute
+    // (target under 35% HP) x boss-bane (boss / legendary / mythic).
+    // targetHp/targetMax are the victim's CURRENT values (pre-hit).
+    rollHit(b, targetHp, targetMax, species) {
+        let dmg = (b.damage || 0) * (b.critMult || 1);
+        const crit = (b.critMult || 1) > 1;
+        if (b.executeMult && targetMax > 0 && targetHp / targetMax < 0.35) dmg *= b.executeMult;
+        if (b.bossMult && species &&
+            (species.isBoss || species.rarity === 'legendary' ||
+             species.rarity === 'mythic' || species.rarity === 'boss')) dmg *= b.bossMult;
+        return { dmg: Math.max(1, Math.round(dmg)), crit };
+    },
+
+    // Swept point-vs-circle: did the segment (px,py)->(x,y) touch the
+    // circle? Stops fast pellets tunneling through small fish at low fps.
+    segHitsCircle(px, py, x, y, cx, cy, r) {
+        const dx = x - px, dy = y - py;
+        const len2 = dx * dx + dy * dy;
+        let t = len2 > 0 ? ((cx - px) * dx + (cy - py) * dy) / len2 : 0;
+        t = Math.max(0, Math.min(1, t));
+        const nx = px + dx * t - cx, ny = py + dy * t - cy;
+        return nx * nx + ny * ny <= r * r;
+    },
+
+    // Damage popup with a random offset so a 7-pellet volley reads as
+    // 7 separate hits instead of one stacked number.
+    popText(state, txt, x, y, color) {
+        try {
+            Particles.showFloatingText(state, txt,
+                x + (Math.random() - 0.5) * 40, y - 18 + (Math.random() - 0.5) * 22, color);
+        } catch (e) {}
+    },
+
     shoot(state) {
         const p = state.player;
         const w = this.getActiveWeapon(state);
@@ -402,7 +482,9 @@ const WeaponSystem = {
         }
 
         p.lastShotTime = now;
-        if (p.weaponAmmo[w.id] !== Infinity && p.weaponAmmo[w.id] !== undefined) {
+        // Eco perk: chance this trigger pull is free (bullet-hose economy)
+        const freeShot = w.ecoCh && Math.random() < w.ecoCh;
+        if (!freeShot && p.weaponAmmo[w.id] !== Infinity && p.weaponAmmo[w.id] !== undefined) {
             p.weaponAmmo[w.id]--;
             Player.refreshWeaponHUD(state);
         }
@@ -421,6 +503,8 @@ const WeaponSystem = {
 
         for (let i = 0; i < w.count; i++) {
             const spreadAngle = angle + (Math.random() - 0.5) * w.spread;
+            // Crits roll per bullet so every pellet of a shotgun can crit
+            const critMult = (w.critCh && Math.random() < w.critCh) ? (w.critMult || 2) : 1;
             const bullet = {
                 id: pid + ':' + (p._bulletSeq = (p._bulletSeq || 0) + 1),
                 pid,
@@ -450,6 +534,13 @@ const WeaponSystem = {
                 stun: !!w.stun,
                 stunTime: w.stunTime || 1.5,
                 slowHook: w.slowHook || 0,
+                // BALANCE PASS: universal damage perks (plain data -> MP-safe)
+                critMult,                       // rolled above, 1 when no crit
+                executeMult: w.executeMult || 0, // x dmg vs targets under 35% HP
+                bossMult: w.bossMult || 0,        // x dmg vs boss/legendary/mythic
+                drainMult: w.drainMult || 0,      // x stamina drain on hooked fish
+                knockMult: w.knockMult || 0,      // x knockback on land hits
+                scatter: w.count > 1,            // pellet cloud: generous hooked-fish hitbox
                 hitSet: new Set(),
                 trail: []
             };
@@ -471,7 +562,10 @@ const WeaponSystem = {
                         lifesteal: bullet.lifesteal, coral: bullet.coral,
                         coralDps: bullet.coralDps, freeze: bullet.freeze,
                         freezeTime: bullet.freezeTime, stun: bullet.stun,
-                        stunTime: bullet.stunTime, slowHook: bullet.slowHook
+                        stunTime: bullet.stunTime, slowHook: bullet.slowHook,
+                        critMult: bullet.critMult, executeMult: bullet.executeMult,
+                        bossMult: bullet.bossMult, drainMult: bullet.drainMult,
+                        knockMult: bullet.knockMult, scatter: bullet.scatter
                     });
                 }
             } else {
@@ -510,6 +604,7 @@ const WeaponSystem = {
         }
         p.reloading = true;
         p.reloadTimer = 1.2;
+        try { audio.playReload(); } catch (e) {}
         Particles.showFloatingText(state, "Reloading...", p.x, p.y - 30, '#38bdf8');
     },
 
@@ -531,6 +626,7 @@ const WeaponSystem = {
                         if (p.coins >= cost) {
                             p.coins -= cost;
                             p.weaponAmmo[w.id] = max;
+                            try { audio.playUIClick(); } catch (e) {}
                             Player.refreshHUD(state);
                             Player.refreshWeaponHUD(state);
                             Particles.showFloatingText(state, `Reloaded! -${cost}c`, p.x, p.y - 30, '#facc15');
@@ -553,7 +649,8 @@ const WeaponSystem = {
 
         // Auto fire
         const w = this.getActiveWeapon(state);
-        if (state.mouse.isDown && w && w.auto && !p.reloading) {
+        const frozen = typeof state._fightFreezeUntil === 'number' && state.time < state._fightFreezeUntil;
+        if (state.mouse.isDown && w && w.auto && !p.reloading && !frozen) {
             this.shoot(state);
         }
 
@@ -596,15 +693,19 @@ const WeaponSystem = {
                 if (!b.pierce) consumed = true;
             } else if (hooked && state.fishing.mode === 'HOOKED' &&
                 !(b.hitSet && b.hitSet.has('fish'))) {
-                const hitR = hooked.species.size + (hooked.isInflated ? 12 : 0) + 8;
-                if (Math.hypot(b.x - hooked.x, b.y - hooked.y) < hitR) {
-                    let dmg = b.damage;
-                    if (hooked.isInflated) dmg *= 0.5;
+                // Pellet clouds get a generous hitbox so a full shotgun
+                // volley can connect underwater instead of 1 stray pellet.
+                const hitR = hooked.species.size + (hooked.isInflated ? 12 : 0) + 8 + (b.scatter ? 10 : 0);
+                const px = b.x - stepX, py = b.y - stepY;
+                if (this.segHitsCircle(px, py, b.x, b.y, hooked.x, hooked.y, hitR)) {
+                    const hr = this.rollHit(b, hooked.hp, hooked.maxHp || hooked.hp, hooked.species);
+                    let dmg = hr.dmg;
+                    if (hooked.isInflated) dmg = Math.max(1, Math.round(dmg * 0.5));
                     hooked.hp -= dmg;
-                    hooked.stamina -= dmg * CONFIG.STAMINA_DRAIN_PER_BULLET;
+                    hooked.stamina -= dmg * CONFIG.STAMINA_DRAIN_PER_BULLET * (b.drainMult || 1);
                     // Special effects now work in WATER too (fixed)
                     if (b.burn) { hooked.burnTimer = Math.max(hooked.burnTimer || 0, 3.0); hooked.burnDps = b.burnDps || 12; }
-                    if (b.poison) { hooked.poisonTimer = Math.max(hooked.poisonTimer || 0, 5.0); hooked.poisonDps = Math.round(b.damage * (b.poisonDpsMult || 0.3)); }
+                    if (b.poison) { hooked.poisonTimer = Math.max(hooked.poisonTimer || 0, 5.0); hooked.poisonDps = Math.round(dmg * (b.poisonDpsMult || 0.3)); }
                     if (b.freeze) { hooked.freezeTimer = Math.max(hooked.freezeTimer || 0, b.freezeTime || 2.5); }
                     if (b.stun) { hooked.stunTimer = Math.max(hooked.stunTimer || 0, b.stunTime || 1.5); }
                     if (b.slowHook) { hooked.slowTimer = Math.max(hooked.slowTimer || 0, 3.0); hooked.slowMult = b.slowHook; }
@@ -622,8 +723,8 @@ const WeaponSystem = {
                     }
                     try { audio.playHit(); } catch (e) {}
                     Particles.spawnWaterSplashes(state, hooked.x, hooked.y, 5);
-                    Particles.showFloatingText(state, `-${Math.round(dmg)}`,
-                        hooked.x, hooked.y - 20, '#38bdf8');
+                    this.popText(state, (hr.crit ? 'CRIT -' : '-') + Math.round(dmg),
+                        hooked.x, hooked.y, hr.crit ? '#fde047' : '#38bdf8');
                     if (b.hitSet) b.hitSet.add('fish');
                     // Record foreign-bullet ids so a late helper claim for
                     // the same bullet is ignored (no double damage).
@@ -646,14 +747,17 @@ const WeaponSystem = {
                 for (let j = state.monstersOnLand.length - 1; j >= 0; j--) {
                     const m = state.monstersOnLand[j];
                     if (b.hitSet && b.hitSet.has(m)) continue;
-                    if (Math.hypot(b.x - m.x, b.y - m.y) < m.species.size + 5) {
-                        m.hp -= b.damage;
+                    const px = b.x - stepX, py = b.y - stepY;
+                    if (this.segHitsCircle(px, py, b.x, b.y, m.x, m.y, m.species.size + 5)) {
+                        const hr = this.rollHit(b, m.hp, m.maxHp || m.species.maxHp || m.hp, m.species);
+                        m.hp -= hr.dmg;
                         try { audio.playHit(); } catch (e) {}
                         Particles.spawnBloodImpact(state, m.x, m.y, m.species.color);
-                        Particles.showFloatingText(state, `-${b.damage}`,
-                            m.x, m.y - 15, '#f87171');
-                        m.x += (b.vx / 900) * 12;
-                        m.y += (b.vy / 900) * 12;
+                        this.popText(state, (hr.crit ? 'CRIT -' : '-') + hr.dmg,
+                            m.x, m.y - 4, hr.crit ? '#fde047' : '#f87171');
+                        const knock = 12 * (b.knockMult || 1);
+                        m.x += (b.vx / 900) * knock;
+                        m.y += (b.vy / 900) * knock;
                         if (b.hitSet) b.hitSet.add(m);
 
                         if (b.burn) { m.burnTimer = 3.0; m.burnDps = b.burnDps || 12; }
@@ -661,7 +765,7 @@ const WeaponSystem = {
                         // NEW: Poison effect (crossbow)
                         if (b.poison) {
                             m.poisonTimer = 5.0;
-                            m.poisonDps = Math.round(b.damage * (b.poisonDpsMult || 0.3));
+                            m.poisonDps = Math.round(hr.dmg * (b.poisonDpsMult || 0.3));
                             Particles.spawnParticles(state, m.x, m.y, '#84cc16', 8);
                             Particles.showFloatingText(state, 'POISONED!', m.x, m.y - 30, '#84cc16');
                         }
@@ -683,7 +787,7 @@ const WeaponSystem = {
 
                         // NEW: Lifesteal (void rifle)
                         if (b.lifesteal) {
-                            const healAmount = Math.round(b.damage * b.lifesteal);
+                            const healAmount = Math.round(hr.dmg * b.lifesteal);
                             const p = state.player;
                             const oldHp = p.hp;
                             p.hp = Math.min(p.maxHp, p.hp + healAmount);
@@ -767,22 +871,25 @@ const WeaponSystem = {
                     const er = e.enemyType === 'seagull' ? 20
                         : e.enemyType === 'beachCrab' ? 22
                         : ((e.species && e.species.size) || 20) + 4;
-                    if (Math.hypot(b.x - e.x, b.y - e.y) < er) {
-                        e.hp -= b.damage;
+                    const epx = b.x - stepX, epy = b.y - stepY;
+                    if (this.segHitsCircle(epx, epy, b.x, b.y, e.x, e.y, er)) {
+                        const ehr = this.rollHit(b, e.hp, e.maxHp || e.hp, e.species || null);
+                        e.hp -= ehr.dmg;
                         e.hitFlash = 0.4;
                         if (b.pid) e._lastPid = b.pid; // kill credit for co-op awards
                         try { audio.playHit(); } catch (e2) {}
                         Particles.spawnParticles(state, e.x, e.y, '#f87171', 6, { size: 3 });
-                        Particles.showFloatingText(state, `-${b.damage}`, e.x, e.y - 20, '#f87171');
-                        e.x += (b.vx / 900) * 8;
-                        e.y += (b.vy / 900) * 8;
+                        this.popText(state, (ehr.crit ? 'CRIT -' : '-') + ehr.dmg, e.x, e.y - 8, ehr.crit ? '#fde047' : '#f87171');
+                        const eknock = 8 * (b.knockMult || 1);
+                        e.x += (b.vx / 900) * eknock;
+                        e.y += (b.vy / 900) * eknock;
                         if (b.hitSet) b.hitSet.add(e);
                         if (b.burn) { e.burnTimer = 3.0; e.burnDps = b.burnDps || 12; }
-                        if (b.poison) { e.poisonTimer = 5.0; e.poisonDps = Math.round(b.damage * (b.poisonDpsMult || 0.3)); }
+                        if (b.poison) { e.poisonTimer = 5.0; e.poisonDps = Math.round(ehr.dmg * (b.poisonDpsMult || 0.3)); }
                         if (b.freeze) e.freezeTimer = b.freezeTime || 2.5;
                         if (b.stun) e.stunTimer = b.stunTime || 1.5;
                         if (b.lifesteal) {
-                            state.player.hp = Math.min(state.player.maxHp, state.player.hp + Math.round(b.damage * b.lifesteal));
+                            state.player.hp = Math.min(state.player.maxHp, state.player.hp + Math.round(ehr.dmg * b.lifesteal));
                             Player.refreshHUD(state);
                         }
                         if (b.explosive) {
@@ -848,7 +955,9 @@ const WeaponSystem = {
                             poison: !!b.poison, poisonDpsMult: b.poisonDpsMult,
                             freeze: !!b.freeze, freezeTime: b.freezeTime,
                             stun: !!b.stun, stunTime: b.stunTime,
-                            slowHook: b.slowHook || 0, explosive: !!b.explosive
+                            slowHook: b.slowHook || 0, explosive: !!b.explosive,
+                            critMult: b.critMult || 1, executeMult: b.executeMult || 0,
+                            bossMult: b.bossMult || 0, drainMult: b.drainMult || 0
                         });
                     } catch (e) {}
                     if (!b.pierce) break;

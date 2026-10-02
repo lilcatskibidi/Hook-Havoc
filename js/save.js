@@ -35,13 +35,27 @@ const SaveSystem = {
             weaponAmmo: { ...p.weaponAmmo },
             unlockedRods: [...p.unlockedRods],
             equippedRodId: p.equippedRod ? p.equippedRod.id : 'rod_starter',
-            bucket: p.bucket.map(f => ({ id: f.id, name: f.name, value: f.value, size: f.size, shiny: !!f.shiny, color: f.color, rarity: f.rarity })),
+            bucket: p.bucket.map(f => ({ id: f.id, name: f.name, value: f.value, size: f.size, shiny: !!f.shiny, color: f.color, rarity: f.rarity, locked: !!f.locked, mutation: f.mutation || null, keyItem: !!f.keyItem, kind: f.kind || null, icon: f.icon || null })),
             bucketCapacity: p.bucketCapacity,
-            // Fish index - track caught fish
+            // Fish index - track caught fish + slain bosses (boss index)
             caughtFish: p.caughtFish ? [...new Set(p.caughtFish.map(f => f.id))] : [],
+            slainBosses: p.slainBosses ? [...new Set(p.slainBosses.filter(id => typeof id === 'string'))] : [],
+            // Ritual system: bait stock + equipped bait (summon items persist
+            // inside the bucket itself — see bucket map above)
+            baitStock: p.baitStock ? { ...p.baitStock } : {},
+            activeBait: (typeof p.activeBait === 'string') ? p.activeBait : null,
+            caveUnlocked: !!p.caveUnlocked,
+            inCave: !!p.inCave,
+            returnPos: (p.returnPos && typeof p.returnPos.x === 'number') ? { x: p.returnPos.x, y: p.returnPos.y } : null,
             casinoTokens: p.casinoTokens || 0,
             casinoLifetimeWinnings: p.casinoLifetimeWinnings || 0,
             seagullKills: p.seagullKills || 0,
+            // Achievements + lifetime counters (progress survives reload)
+            achievements: p.achievements ? JSON.parse(JSON.stringify(p.achievements)) : { unlocked: [], progress: {} },
+            totalFishCaught: p.totalFishCaught || 0,
+            totalKills: p.totalKills || 0,
+            bossKills: p.bossKills || 0,
+            casinoTotalLost: p.casinoTotalLost || 0,
             ownedArmor: p.ownedArmor ? [...p.ownedArmor] : ['vest_light'],
             equippedArmor: p.equippedArmor ? { ...p.equippedArmor } : {},
             beachShopUnlocked: !!p.beachShopUnlocked,
@@ -169,6 +183,7 @@ const SaveSystem = {
         const p = state.player;
         const keepAch = p.achievements;
         const keepCaught = p.caughtFish;
+        const keepSlain = p.slainBosses;
         const keepTotals = { totalFishCaught: p.totalFishCaught, totalKills: p.totalKills, bossKills: p.bossKills, casinoTotalLost: p.casinoTotalLost };
         p.x = 300; p.y = 300;
         p.hp = 100; p.maxHp = 100;
@@ -206,6 +221,17 @@ const SaveSystem = {
         p.umbrellaTimer = 0;
         p.achievements = keepAch;
         p.caughtFish = keepCaught || [];
+        p.slainBosses = keepSlain || [];
+        p.baitStock = {};
+        p.activeBait = null;
+        p.caveUnlocked = false;
+        p.inCave = false;
+        p.returnPos = null;
+        state._caveSeq = 0;
+        state._caveTouchCd = 0;
+        state._caveTouchArmed = true;
+        p.inCave = false;
+        p.returnPos = null;
         Object.assign(p, keepTotals);
         state.fishing = {
             mode: 'IDLE', castPower: 0, castDir: 1,
@@ -303,14 +329,20 @@ const SaveSystem = {
         if (Array.isArray(data.bucket)) {
             p.bucket = data.bucket
                 .map(f => {
+                    // Summon key/trophy items ride in the bucket as-is
+                    if (f && f.keyItem && f.id && f.name) return f;
                     const base = FISH_SPECIES.find(s => s.id === f.id);
                     if (!base) return f.shiny || (f.value && f.name) ? f : null;
-                    if (f.shiny || (typeof f.value === 'number' && f.value !== base.value)) {
+                    // Locked fish must be a private copy — never hand out the
+                    // shared species ref with a lock flag on it.
+                    if (f.shiny || f.locked || f.mutation || (typeof f.value === 'number' && f.value !== base.value)) {
                         const c = Object.assign({}, base);
                         if (f.name) c.name = f.name;
                         if (typeof f.value === 'number') c.value = f.value;
                         if (typeof f.size === 'number') c.size = f.size;
                         if (f.shiny) c.shiny = true;
+                        if (f.locked) c.locked = true;
+                        if (f.mutation) c.mutation = f.mutation;
                         if (f.color) c.color = f.color;
                         return c;
                     }
@@ -330,10 +362,86 @@ const SaveSystem = {
         } else {
             p.caughtFish = [];
         }
+        // Boss index - slain boss ids ('stormcaller' or boss species id)
+        if (Array.isArray(data.slainBosses)) {
+            const validBoss = new Set([...FISH_SPECIES.filter(s => s.isBoss).map(s => s.id), 'stormcaller']);
+            p.slainBosses = [...new Set(data.slainBosses.filter(id => validBoss.has(id)))];
+        } else {
+            p.slainBosses = [];
+        }
+        // Ritual system: summon items live IN THE BUCKET (physical loot).
+        // Migrates every legacy counter into bucket items (old counts are
+        // honored 1:1; the bucket may briefly exceed capacity, which the
+        // sell/size checks tolerate since they only read length).
+        const summonItemIds = new Set(['storm_egg', 'shard', 'chalice', 'fang', 'eye']);
+        const pushSummonItems = (id, n) => {
+            for (let i = 0; i < Math.min(99, Math.floor(n)); i++) {
+                if (typeof Ritual !== 'undefined' && Ritual.bucketItem) {
+                    const entry = Ritual.bucketItem(id);
+                    if (entry) p.bucket.push(entry);
+                }
+            }
+        };
+        if (data.relics && typeof data.relics === 'object') {
+            for (const [k, v] of Object.entries(data.relics)) {
+                if ((k === 'storm_egg' || k === 'shard') && typeof v === 'number' && v > 0) pushSummonItems(k, v);
+                else if ((k === 'idol' || k === 'heart') && typeof v === 'number' && v > 0) {
+                    // Retired keys refund as coins (system reworked)
+                    p.coins = Math.max(0, (p.coins || 0)) + Math.floor(v) * 750;
+                }
+            }
+        }
+        if (data.eggs && typeof data.eggs === 'object') {
+            const eggMap = { egg_priest: 'storm_egg', egg_hydra: 'storm_egg', egg_shepherd: 'shard', egg_emperor: 'shard' };
+            for (const [k, v] of Object.entries(data.eggs)) {
+                const nk = eggMap[k];
+                if (nk && typeof v === 'number' && v > 0) pushSummonItems(nk, v);
+            }
+        }
+        if (data.trophies && typeof data.trophies === 'object') {
+            for (const [k, v] of Object.entries(data.trophies)) {
+                if (summonItemIds.has(k) && typeof v === 'number' && v > 0) pushSummonItems(k, v);
+            }
+        }
+        p.baitStock = {};
+        if (data.baitStock && typeof data.baitStock === 'object') {
+            const validBait = new Set((typeof BAITS !== 'undefined' ? BAITS : []).map(b => b.id));
+            // Retired lures: hydra egg-bait -> new lure id, others -> chum ×5
+            const retiredLure = { egg_priest: 'chum', egg_shepherd: 'chum', egg_emperor: 'chum', egg_hydra: 'lure_hydra' };
+            for (const [k, v] of Object.entries(data.baitStock)) {
+                if (typeof v !== 'number' || v <= 0) continue;
+                const nk = validBait.has(k) ? k : retiredLure[k];
+                if (!nk) continue;
+                const bonus = (!validBait.has(k) && k !== 'egg_hydra') ? v * 5 : v;
+                p.baitStock[nk] = Math.min(99, (p.baitStock[nk] || 0) + Math.floor(bonus));
+            }
+        }
+        // Equipped bait is now just an id string (per-hook stock model)
+        p.activeBait = null;
+        if (typeof BAITS !== 'undefined') {
+            const id = (typeof data.activeBait === 'string') ? data.activeBait
+                : (data.activeBait && data.activeBait.id);
+            if (id && BAITS.some(b => b.id === id) && (p.baitStock[id] > 0)) p.activeBait = id;
+        }
+        // Sealed cave stays solved once opened (+ where you are in it)
+        p.caveUnlocked = !!data.caveUnlocked;
+        p.inCave = !!data.inCave;
+        p.returnPos = (data.returnPos && typeof data.returnPos.x === 'number') ? { x: data.returnPos.x, y: data.returnPos.y } : null;
 
         if (typeof data.casinoTokens === 'number') p.casinoTokens = Math.max(0, Math.floor(data.casinoTokens));
         if (typeof data.casinoLifetimeWinnings === 'number') p.casinoLifetimeWinnings = Math.max(0, Math.floor(data.casinoLifetimeWinnings));
         if (typeof data.seagullKills === 'number') p.seagullKills = Math.max(0, Math.floor(data.seagullKills));
+        // Achievements + lifetime counters
+        if (data.achievements && typeof data.achievements === 'object') {
+            p.achievements = {
+                unlocked: Array.isArray(data.achievements.unlocked) ? [...new Set(data.achievements.unlocked)] : [],
+                progress: (data.achievements.progress && typeof data.achievements.progress === 'object') ? { ...data.achievements.progress } : {},
+            };
+        } else if (!p.achievements) p.achievements = { unlocked: [], progress: {} };
+        if (typeof data.totalFishCaught === 'number') p.totalFishCaught = Math.max(0, Math.floor(data.totalFishCaught));
+        if (typeof data.totalKills === 'number') p.totalKills = Math.max(0, Math.floor(data.totalKills));
+        if (typeof data.bossKills === 'number') p.bossKills = Math.max(0, Math.floor(data.bossKills));
+        if (typeof data.casinoTotalLost === 'number') p.casinoTotalLost = Math.max(0, Math.floor(data.casinoTotalLost));
         if (Array.isArray(data.ownedArmor) && data.ownedArmor.length) {
             const valid = new Set(ARMOR.map(a => a.id));
             p.ownedArmor = data.ownedArmor.filter(id => valid.has(id));

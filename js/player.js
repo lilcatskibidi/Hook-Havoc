@@ -12,6 +12,11 @@ const Player = {
 
         if (p.stunTimer > 0) {
             p.stunTimer = Math.max(0, p.stunTimer - delta);
+        } else if (state.fishing && state.fishing.mode === 'CASTING') {
+            // Rooted while charging a cast: no walking the bobber onto land.
+            // (Releasing SPACE throws from exactly where the press validated.)
+        } else if (typeof state._fightFreezeUntil === 'number' && state.time < state._fightFreezeUntil) {
+            // Boss-fight countdown: hold still until FIGHT!
         } else {
             let dx = 0, dy = 0;
             if (state.keys['w'] || state.keys['arrowup']) dy -= 1;
@@ -48,8 +53,13 @@ const Player = {
             }
         }
 
+        // Beach clamp — bypassed inside the cave (own room collision).
+        if (state.player.inCave && typeof Ritual !== 'undefined' && Ritual.caveCollide) {
+            try { Ritual.caveCollide(state); } catch (e) {}
+        } else {
         p.x = Utils.clamp(p.x, B.MIN_X + p.radius, state.waterBoundaryX - p.radius);
         p.y = Utils.clamp(p.y, B.MIN_Y + p.radius, B.MAX_Y - p.radius);
+        }
 
         // Beach consumable timers
         if (p.baitTimer > 0) p.baitTimer = Math.max(0, p.baitTimer - delta);
@@ -122,7 +132,17 @@ const Player = {
                 ? '∞ Infinite'
                 : `${ammo} / ${CONFIG.MAX_AMMO[w.id]}`;
         }
-        if (iconEl) iconEl.innerHTML = `<i class="fa-solid ${w.icon}"></i>`;
+        if (iconEl) {
+            // Live gun-model thumbnail (procedural or custom skin), FA icon fallback.
+            let art = `<i class="fa-solid ${w.icon}"></i>`;
+            try {
+                if (typeof Render !== 'undefined' && Render.gunPreview) {
+                    const snap = Render.gunPreview(w, p.gunSkins);
+                    if (snap) art = `<img src="${snap}" class="gun-preview max-w-[44px] max-h-[30px] object-contain" alt="${w.name}">`;
+                }
+            } catch (e) {}
+            iconEl.innerHTML = art;
+        }
         if (descEl) descEl.innerText = w.desc;
     },
 
@@ -139,6 +159,11 @@ const Player = {
 
         const bucketDisplay = document.getElementById('bucket-display');
         if (bucketDisplay) bucketDisplay.innerText = `${p.bucket.length} / ${p.bucketCapacity}`;
+
+        // Crafted bait chip (Ritual system)
+        if (typeof Ritual !== 'undefined' && Ritual.refreshBaitHUD) {
+            try { Ritual.refreshBaitHUD(state); } catch (e) {}
+        }
 
         const xpDisplay = document.getElementById('xp-display');
         if (xpDisplay) xpDisplay.innerText = `Lv.${p.level}`;
@@ -164,21 +189,51 @@ const Player = {
 
     die(state) {
         const p = state.player;
-        // Death stamp: die() restores HP instantly, so enemies can never
-        // observe "hp <= 0" afterwards — they watch this counter instead.
+        // Single-shot: corpse ticks (hazards, burn) must not re-kill and
+        // re-charge the -50c penalty while the death menu is open.
+        if (p.isDead) return;
+        p.isDead = true;
+        try { state.mouse.isDown = false; } catch (e) {}
+        const wasBurning = (p.burnTimer || 0) > 0;
+        // Death stamp: HP stays 0 while dead, so enemies watch this
+        // counter to know revenge was served (see EnemySpawner).
         try { state._deathSeq = (state._deathSeq || 0) + 1; } catch (e) {}
-        p.hp = p.maxHp;
-        p.x = 220;
-        p.y = 300;
+        p.hp = 0;
 
         p.stunTimer = 0;
         p.slowTimer = 0;
         p.burnTimer = 0;
         p.burnTick = 0;
+        p.flashTimer = 0;
+        p.blurTimer = 0;
+        try {
+            const cv = document.getElementById('gameCanvas');
+            if (cv) cv.style.filter = '';
+            const fl = document.getElementById('flash-overlay');
+            if (fl) fl.classList.remove('active');
+        } catch (e) {}
 
         try { audio.stopReelLoop(); } catch (e) {}
 
-        if (state.fishing) {
+        // Boss-fight rule: bosses DON'T run and DON'T despawn. Dying costs
+        // one of 10 chances — the field is left exactly as it was so the
+        // boss waits for you. Die 10 times and it leaves, mocking you.
+        let inBossFight = false;
+        try {
+            inBossFight = (typeof Ritual !== 'undefined' && Ritual.bossFightActive)
+                ? Ritual.bossFightActive(state) : false;
+        } catch (e) {}
+        if (inBossFight) {
+            state.bossDeaths = (state.bossDeaths || 0) + 1;
+            if (state.bossDeaths >= 10) {
+                this.fleeBoss(state);
+            }
+        } else {
+            state.bossDeaths = 0;
+        }
+
+        // Normal death drops your current fight — but NEVER a boss fight
+        if (!inBossFight && state.fishing) {
             if (state.fishing.mode === 'REELING' ||
                 state.fishing.mode === 'WAITING' ||
                 state.fishing.mode === 'BITING') {
@@ -196,18 +251,117 @@ const Player = {
             state.fishing.castT = 0;
         }
 
-        state.monstersOnLand = [];
+        // Clear the field so nothing camps the corpse (bosses stay put)
+        if (!inBossFight) state.monstersOnLand = [];
 
+        const lost = Math.min(p.coins, 50);
         p.coins = Math.max(0, p.coins - 50);
         this.refreshHUD(state);
 
         try { audio.playFishDeath(); } catch (e) {}
+        try { audio.playRoar(); } catch (e) {}
 
-        if (typeof UI !== 'undefined' && UI.updateStatusBanner) {
-            UI.updateStatusBanner('You fainted! Returned to safety.', 'Defeat', 'rose');
+        // Close anything else open — death takes over the screen
+        try {
+            ['shop-modal', 'casino-modal', 'index-modal', 'npc-modal'].forEach(id => {
+                const m = document.getElementById(id);
+                if (m) m.classList.add('hidden');
+            });
+        } catch (e) {}
+
+        this.showDeathMenu(state, lost, wasBurning);
+        if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+    },
+
+    showDeathMenu(state, lost, wasBurning) {
+        const p = state.player;
+        const menu = document.getElementById('death-menu');
+        if (!menu) return;
+        const cause = wasBurning ? 'Burned alive!' : 'Slain in the deep!';
+        const set = (id, txt) => { const el = document.getElementById(id); if (el) el.innerText = txt; };
+        set('death-cause', cause);
+        const chances = 10 - (state.bossDeaths || 0);
+        set('death-stats', (state.bossDeaths > 0)
+            ? `Boss fight — ${chances} ${chances === 1 ? 'chance' : 'chances'} left before it leaves · Penalty −${lost}c`
+            : `Lv.${p.level} · Bucket kept (${(p.bucket || []).length} fish) · Penalty −${lost}c`);
+        const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
+        on('btn-respawn-beach', () => this.respawnAt(state, 220, 300, 'Beach'));
+        on('btn-respawn-camp', () => {
+            let s = { x: 220, y: 300 };
+            try {
+                if (typeof NPC !== 'undefined' && NPC.spot) s = NPC.spot(state);
+            } catch (e) {}
+            this.respawnAt(state, s.x, s.y, "Marlin's Camp");
+        });
+        on('btn-death-menu', () => {
+            // Fresh and safe before leaving: respawn silently, then menu
+            this.respawnAt(state, 220, 300, null, true);
+            if (typeof MainMenu !== 'undefined') MainMenu.show();
+        });
+        menu.classList.remove('hidden');
+        menu.classList.add('flex');
+    },
+
+    hideDeathMenu() {
+        try {
+            const menu = document.getElementById('death-menu');
+            if (menu) { menu.classList.add('hidden'); menu.classList.remove('flex'); }
+        } catch (e) {}
+    },
+
+    // 10th death in a boss fight: every boss leaves at once, mocking you.
+    // Counter resets — earn your next 10 the hard way.
+    fleeBoss(state) {
+        try {
+            const p = state.player;
+            let bx = p.x, by = p.y - 60;
+            const land = (state.monstersOnLand || []).filter(m => m && m.species && m.species.isBoss);
+            if (land.length) { bx = land[0].x; by = land[0].y - 90; }
+            const hf = state.fishing && state.fishing.mode === 'HOOKED' ? state.fishing.hookedFish : null;
+            if (hf && hf.species && hf.species.isBoss) { bx = hf.x; by = hf.y - 90; }
+            state.monstersOnLand = (state.monstersOnLand || []).filter(m => !(m && m.species && m.species.isBoss));
+            if (state.activeBoss && state.activeBoss.species && state.activeBoss.species.isBoss) state.activeBoss = null;
+            if (hf && hf.species && hf.species.isBoss) {
+                if (typeof Fishing !== 'undefined' && Fishing.escapeFish) Fishing.escapeFish(state, '');
+                else { state.fishing.mode = 'IDLE'; state.fishing.hookedFish = null; }
+            }
+            state.enemies = (state.enemies || []).filter(e => !(e && e.isBoss));
+            state.bossDeaths = 0;
+            try { audio.playRoar(); } catch (e) {}
+            Particles.showFloatingText(state, '💀 "YOU ARE NOT STRONG ENOUGH TO BEAT ME."', bx, by, '#ef4444');
+            if (typeof UI !== 'undefined' && UI.updateStatusBanner) {
+                UI.updateStatusBanner('The boss spurns you and leaves. Train, gear up, try again.', 'Outmatched', 'rose');
+            }
+            if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+        } catch (e) {}
+    },
+
+    respawnAt(state, x, y, label, silent) {
+        const p = state.player;
+        p.isDead = false;
+        p.hp = p.maxHp;
+        p.x = x;
+        p.y = y;
+        // Death ejects you from the cave (no corpse-camping the circle)
+        p.inCave = false;
+        p.returnPos = null;
+        p.stunTimer = 0;
+        p.slowTimer = 0;
+        p.burnTimer = 0;
+        p.burnTick = 0;
+        p.flashTimer = 0;
+        p.blurTimer = 0;
+        this.hideDeathMenu();
+        this.refreshHUD(state);
+        if (typeof UI !== 'undefined' && UI.renderWeaponToolbar) UI.renderWeaponToolbar(state);
+        if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+        if (!silent) {
+            try { audio.playLevelUp(); } catch (e) {}
+            Particles.showFloatingText(state, `Respawned at ${label || 'safety'}!`, x, y - 50, '#34d399');
+            if (typeof UI !== 'undefined' && UI.updateStatusBanner) {
+                UI.updateStatusBanner(`Back on your feet at ${label || 'safety'}.`, 'Respawn', 'emerald');
+            }
         }
-
-        Particles.showFloatingText(state, "Respawned! Lost 50 coins.", 220, 260, '#f87171');
     },
 
     // Heal effect for multiplayer

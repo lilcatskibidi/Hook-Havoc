@@ -1,21 +1,17 @@
 // ==========================================
-// MENU BACKGROUND ANIMATION - NPC Shooting Fish
+// MENU BACKGROUND — live beach diorama.
+// Sand + surf on the left, open water on the right, and REAL fish from
+// the Fish Index (FISH_SPECIES) cruising past, drawn with the game's own
+// Render.drawFishModel. Pure ambience: no gameplay, no cost.
 // ==========================================
 const MenuBackground = {
     canvas: null,
     ctx: null,
     time: 0,
-    npc: {
-        x: 150, y: 300,
-        angle: 0,
-        shootTimer: 0,
-        shootCooldown: 1.5,
-        recoil: 0,
-        frame: 0
-    },
-    fish: [],
-    particles: [],
-    
+    swimmers: [],
+    bubbles: [],
+    spawnTimer: 0,
+
     init() {
         this.canvas = $('menu-bg-canvas');
         if (!this.canvas) return;
@@ -24,18 +20,59 @@ const MenuBackground = {
         window.addEventListener('resize', () => this.resize());
         this.animate();
     },
-    
+
     resize() {
         if (!this.canvas) return;
         const rect = this.canvas.parentElement.getBoundingClientRect();
-        this.canvas.width = rect.width;
-        this.canvas.height = rect.height;
+        this.canvas.width = Math.max(2, rect.width);
+        this.canvas.height = Math.max(2, rect.height);
     },
-    
+
+    pickSpecies() {
+        try {
+            if (typeof FISH_SPECIES === 'undefined' || !FISH_SPECIES.length) return null;
+            // Weighted to pretty groups: mostly common/rare/epic, rare
+            // legendary+ cameos, never bosses (too big for the menu tank).
+            const pool = FISH_SPECIES.filter(s => s && !s.isBoss && (s.size || 20) <= 64);
+            if (!pool.length) return null;
+            const r = Math.random();
+            const want = r < 0.55 ? ['common']
+                : r < 0.8 ? ['common', 'rare']
+                : r < 0.95 ? ['rare', 'epic']
+                : ['epic', 'legendary', 'mythic'];
+            const group = pool.filter(s => want.includes(s.rarity));
+            const src = group.length ? group : pool;
+            return src[Math.floor(Math.random() * src.length)];
+        } catch (e) { return null; }
+    },
+
+    spawnSwimmer(fromEdge) {
+        const w = this.canvas.width, h = this.canvas.height;
+        const waterX = w * 0.40;
+        const sp = this.pickSpecies();
+        if (!sp) return;
+        const leftToRight = fromEdge !== undefined ? fromEdge : Math.random() < 0.5;
+        const depth = Math.random(); // 0 = surface, 1 = deep
+        const y = h * (0.18 + Math.random() * 0.72);
+        const speed = (60 + Math.random() * 70) * (1 - depth * 0.35);
+        const scale = (0.45 + Math.random() * 0.35) * (1 - depth * 0.25);
+        this.swimmers.push({
+            sp,
+            x: leftToRight ? -80 : w + 80,
+            y,
+            vx: leftToRight ? speed : -speed,
+            dir: leftToRight ? 1 : -1,
+            scale,
+            depth,
+            bobPhase: Math.random() * Math.PI * 2,
+            bobAmp: 6 + Math.random() * 10,
+            labelT: (sp.rarity === 'legendary' || sp.rarity === 'mythic') ? 3.5 : 0,
+        });
+        if (this.swimmers.length > 10) this.swimmers.shift();
+    },
+
     animate() {
         if (!this.ctx || !this.canvas) return;
-
-        // Don't burn CPU/GPU on the menu animation while actually playing
         try {
             const menu = document.getElementById('main-menu');
             if (menu && menu.classList.contains('hidden')) {
@@ -44,324 +81,200 @@ const MenuBackground = {
             }
         } catch (e) {}
 
-        const delta = 1/60;
+        const delta = 1 / 60;
         this.time += delta;
-        
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        
-        // Draw water background
-        this.drawWaterBackground();
-        
-        // Update and draw NPC
-        this.updateNPC(delta);
-        this.drawNPC();
-        
-        // Update and draw fish
-        this.updateFish(delta);
-        this.drawFish();
-        
-        // Update and draw particles
-        this.updateParticles(delta);
-        this.drawParticles();
-        
+        const w = this.canvas.width, h = this.canvas.height;
+        const ctx = this.ctx;
+        ctx.clearRect(0, 0, w, h);
+
+        this.drawBeach(ctx, w, h);
+
+        // Keep the tank stocked
+        this.spawnTimer -= delta;
+        if (this.spawnTimer <= 0 && this.swimmers.length < 8) {
+            this.spawnTimer = 0.8 + Math.random() * 1.6;
+            this.spawnSwimmer();
+        }
+        this.updateSwimmers(delta, w, h);
+        this.drawSwimmers(ctx);
+        this.updateBubbles(delta, w, h);
+        this.drawBubbles(ctx);
+
         requestAnimationFrame(() => this.animate());
     },
-    
-    drawWaterBackground() {
-        const ctx = this.ctx;
-        const w = this.canvas.width;
-        const h = this.canvas.height;
-        const waterX = w * 0.52;
-        
-        // Sky gradient
-        const skyGrad = ctx.createLinearGradient(0, 0, 0, h);
-        skyGrad.addColorStop(0, '#0c1a2a');
-        skyGrad.addColorStop(0.5, '#0f172a');
-        skyGrad.addColorStop(1, '#1e293b');
-        ctx.fillStyle = skyGrad;
+
+    drawBeach(ctx, w, h) {
+        const t = this.time;
+        const waterX = w * 0.40;
+
+        // Dawn sky
+        const sky = ctx.createLinearGradient(0, 0, 0, h);
+        sky.addColorStop(0, '#0b1026');
+        sky.addColorStop(0.45, '#13233d');
+        sky.addColorStop(0.75, '#1e3a5f');
+        sky.addColorStop(1, '#0c4a6e');
+        ctx.fillStyle = sky;
         ctx.fillRect(0, 0, w, h);
-        
-        // Water area
-        const waterGrad = ctx.createLinearGradient(waterX, 0, w, 0);
-        waterGrad.addColorStop(0, '#0c4a6e');
-        waterGrad.addColorStop(0.5, '#075985');
-        waterGrad.addColorStop(1, '#082f49');
-        ctx.fillStyle = waterGrad;
+
+        // Sun + halo
+        const sunX = w * 0.72, sunY = h * 0.24;
+        const halo = ctx.createRadialGradient(sunX, sunY, 4, sunX, sunY, 120);
+        halo.addColorStop(0, 'rgba(253,224,71,0.85)');
+        halo.addColorStop(0.25, 'rgba(251,191,36,0.35)');
+        halo.addColorStop(1, 'rgba(251,191,36,0)');
+        ctx.fillStyle = halo;
+        ctx.beginPath(); ctx.arc(sunX, sunY, 120, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fde68a';
+        ctx.beginPath(); ctx.arc(sunX, sunY, 20 + Math.sin(t * 1.5) * 1.5, 0, Math.PI * 2); ctx.fill();
+
+        // Sand (left) with wet band near the water
+        const sand = ctx.createLinearGradient(0, 0, waterX, 0);
+        sand.addColorStop(0, '#8a6a42');
+        sand.addColorStop(0.7, '#c99b63');
+        sand.addColorStop(0.92, '#a07a4d');
+        sand.addColorStop(1, '#6b5233');
+        ctx.fillStyle = sand;
+        ctx.fillRect(0, 0, waterX, h);
+        // Sand shimmer speckles (static hash — never swims)
+        ctx.fillStyle = 'rgba(255,240,210,0.10)';
+        for (let i = 0; i < 40; i++) {
+            const hx = Math.sin(i * 12.9898) * 43758.5453;
+            const fx = hx - Math.floor(hx);
+            const hy = Math.sin(i * 78.233) * 12543.123;
+            const fy = hy - Math.floor(hy);
+            ctx.fillRect(fx * waterX, fy * h, 2, 2);
+        }
+
+        // Water (right)
+        const sea = ctx.createLinearGradient(waterX, 0, w, 0);
+        sea.addColorStop(0, '#0e7490');
+        sea.addColorStop(0.35, '#075985');
+        sea.addColorStop(1, '#082f49');
+        ctx.fillStyle = sea;
         ctx.fillRect(waterX, 0, w - waterX, h);
-        
-        // Animated water surface lines
-        ctx.strokeStyle = 'rgba(125,211,252,0.08)';
-        ctx.lineWidth = 1;
-        for (let i = 0; i < 15; i++) {
-            const y = (h / 15) * i + (this.time * 30) % (h / 15);
+
+        // Animated surf: 3 foam lines rolling onto the sand
+        for (let k = 0; k < 3; k++) {
+            const phase = ((t * 0.35 + k / 3) % 1);
+            const fx = waterX - 70 + phase * 90;
+            ctx.globalAlpha = (1 - phase) * 0.55;
+            ctx.strokeStyle = '#f8fafc';
+            ctx.lineWidth = 2.5 - k * 0.5;
             ctx.beginPath();
-            ctx.moveTo(waterX, y);
-            for (let x = waterX; x < w; x += 20) {
-                const wave = Math.sin((x + this.time * 100) * 0.02) * 8;
-                ctx.lineTo(x, y + wave);
+            for (let y = 0; y <= h; y += 8) {
+                const x = fx + Math.sin(y * 0.05 + t * 2 + k) * 7;
+                if (y === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
             }
             ctx.stroke();
         }
-        
-        // Caustics
+        ctx.globalAlpha = 1;
+
+        // Light rays through the water
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        for (let i = 0; i < 5; i++) {
-            const x = waterX + 50 + i * 120 + Math.sin(this.time + i) * 30;
-            const rayGrad = ctx.createRadialGradient(x, h/2, 0, x, h/2, 200);
-            rayGrad.addColorStop(0, 'rgba(125,211,252,0.1)');
-            rayGrad.addColorStop(1, 'rgba(125,211,252,0)');
-            ctx.fillStyle = rayGrad;
+        for (let i = 0; i < 4; i++) {
+            const rx = waterX + 40 + i * ((w - waterX) / 4) + Math.sin(t * 0.6 + i * 1.7) * 14;
+            const ray = ctx.createLinearGradient(rx, 0, rx + 50, h);
+            ray.addColorStop(0, 'rgba(125,211,252,0.10)');
+            ray.addColorStop(1, 'rgba(125,211,252,0)');
+            ctx.fillStyle = ray;
             ctx.beginPath();
-            ctx.moveTo(x - 50, 0);
-            ctx.lineTo(x + 50, 0);
-            ctx.lineTo(x + 150, h);
-            ctx.lineTo(x - 150, h);
-            ctx.closePath();
-            ctx.fill();
+            ctx.moveTo(rx, 0); ctx.lineTo(rx + 34, 0);
+            ctx.lineTo(rx + 90, h); ctx.lineTo(rx + 56, h);
+            ctx.closePath(); ctx.fill();
         }
         ctx.restore();
-        
-        // Shore line
-        const shoreGrad = ctx.createLinearGradient(waterX - 30, 0, waterX + 20, 0);
-        shoreGrad.addColorStop(0, 'rgba(180,140,90,0)');
-        shoreGrad.addColorStop(0.5, 'rgba(150,115,75,0.4)');
-        shoreGrad.addColorStop(1, 'rgba(90,70,50,0.8)');
-        ctx.fillStyle = shoreGrad;
-        ctx.fillRect(waterX - 30, 0, 50, h);
-    },
-    
-    updateNPC(delta) {
-        const waterX = this.canvas.width * 0.52;
-        const npc = this.npc;
-        
-        // Gentle bobbing
-        npc.y = 250 + Math.sin(this.time * 1.5) * 15;
-        npc.angle = Math.sin(this.time * 0.8) * 0.15;
-        
-        // Shooting logic
-        npc.shootTimer -= delta;
-        if (npc.shootTimer <= 0) {
-            npc.shootTimer = npc.shootCooldown + Math.random() * 1.0;
-            npc.recoil = 8;
-            this.shootFish();
+
+        // Water surface sparkles
+        ctx.fillStyle = 'rgba(224,242,254,0.5)';
+        for (let i = 0; i < 24; i++) {
+            const sx = waterX + ((Math.sin(i * 91.7) * 43758.5 % 1 + 1) % 1) * (w - waterX);
+            const sy = ((Math.sin(i * 47.3) * 12543.1 % 1 + 1) % 1) * h;
+            const tw = 0.5 + Math.sin(t * 3 + i * 1.9) * 0.5;
+            ctx.globalAlpha = 0.12 + tw * 0.3;
+            ctx.fillRect(sx, sy, 2, 1.5);
         }
-        
-        if (npc.recoil > 0) npc.recoil -= delta * 30;
+        ctx.globalAlpha = 1;
     },
-    
-    shootFish() {
-        const waterX = this.canvas.width * 0.52;
-        const npc = this.npc;
-        
-        // Random fish type
-        const fishTypes = [
-            { id: 'sardine', color: '#cbd5e1', size: 10, speed: 400, value: 'common' },
-            { id: 'bass', color: '#34d399', size: 14, speed: 350, value: 'common' },
-            { id: 'stingray', color: '#a78bfa', size: 18, speed: 300, value: 'rare' },
-            { id: 'lionfish', color: '#fb7185', size: 16, speed: 380, value: 'rare' },
-            { id: 'thunder_ray', color: '#38bdf8', size: 22, speed: 280, value: 'epic' },
-            { id: 'coral_dragon', color: '#f97316', size: 24, speed: 260, value: 'epic' },
-            { id: 'star_ray', color: '#c084fc', size: 26, speed: 240, value: 'legendary' },
-            { id: 'elder_dragon', color: '#7c3aed', size: 32, speed: 200, value: 'mythic' }
-        ];
-        
-        const type = fishTypes[Math.floor(Math.random() * fishTypes.length)];
-        const angle = npc.angle + (Math.random() - 0.5) * 0.3;
-        
-        this.fish.push({
-            x: npc.x + Math.cos(npc.angle) * 40,
-            y: npc.y + Math.sin(npc.angle) * 40,
-            vx: Math.cos(angle) * type.speed,
-            vy: Math.sin(angle) * type.speed,
-            angle: angle,
-            rotationSpeed: (Math.random() - 0.5) * 4,
-            size: type.size,
-            color: type.color,
-            type: type.value,
-            life: 5,
-            trail: []
-        });
-        
-        // Muzzle flash particles
-        for (let i = 0; i < 8; i++) {
-            const a = npc.angle + (Math.random() - 0.5) * 0.5;
-            this.particles.push({
-                x: npc.x + Math.cos(npc.angle) * 40,
-                y: npc.y + Math.sin(npc.angle) * 40,
-                vx: Math.cos(a) * (100 + Math.random() * 200),
-                vy: Math.sin(a) * (100 + Math.random() * 200),
-                color: type.color,
-                life: 0.2,
-                size: 2 + Math.random() * 3
-            });
-        }
-        
-        // Shell ejection
-        for (let i = 0; i < 2; i++) {
-            this.particles.push({
-                x: npc.x + 20,
-                y: npc.y - 5,
-                vx: Math.cos(npc.angle + Math.PI/2) * (50 + Math.random() * 50),
-                vy: Math.sin(npc.angle + Math.PI/2) * (50 + Math.random() * 50),
-                color: '#fbbf24',
-                life: 1.0,
-                size: 3,
-                gravity: true
-            });
-        }
-    },
-    
-    drawNPC() {
-        const ctx = this.ctx;
-        const npc = this.npc;
-        
-        ctx.save();
-        ctx.translate(npc.x, npc.y);
-        ctx.rotate(npc.angle);
-        
-        // Recoil
-        ctx.translate(-npc.recoil * 0.5, 0);
-        
-        // Body
-        const bodyGrad = ctx.createRadialGradient(-5, -5, 2, 0, 0, 20);
-        bodyGrad.addColorStop(0, '#38bdf8');
-        bodyGrad.addColorStop(1, '#0369a1');
-        ctx.fillStyle = bodyGrad;
-        ctx.beginPath();
-        ctx.arc(0, 0, 18, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#0ea5e9';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        
-        // Gun (Harpoon Launcher style)
-        ctx.fillStyle = '#92400e';
-        ctx.fillRect(18, -6, 30, 12);
-        ctx.fillStyle = '#0f172a';
-        ctx.fillRect(18, -6, 30, 3);
-        ctx.fillStyle = '#dc2626';
-        ctx.beginPath();
-        ctx.arc(48, 0, 6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#0f172a';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.fillStyle = '#0f172a';
-        ctx.fillRect(38, 4, 6, 10);
-        
-        ctx.restore();
-        
-        // Name tag
-        ctx.font = 'bold 10px Work Sans';
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#38bdf8';
-        ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-        ctx.lineWidth = 3;
-        ctx.strokeText('NPC HUNTER', npc.x, npc.y - 40);
-        ctx.fillText('NPC HUNTER', npc.x, npc.y - 40);
-    },
-    
-    updateFish(delta) {
-        for (let i = this.fish.length - 1; i >= 0; i--) {
-            const f = this.fish[i];
-            f.x += f.vx * delta;
-            f.y += f.vy * delta;
-            f.angle += f.rotationSpeed * delta;
-            f.life -= delta;
-            
-            // Trail
-            f.trail.push({ x: f.x, y: f.y });
-            if (f.trail.length > 10) f.trail.shift();
-            
-            // Remove if off screen or dead
-            if (f.life <= 0 || f.x > this.canvas.width + 50 || f.x < -50 || f.y > this.canvas.height + 50 || f.y < -50) {
-                this.fish.splice(i, 1);
+
+    updateSwimmers(delta, w, h) {
+        for (let i = this.swimmers.length - 1; i >= 0; i--) {
+            const s = this.swimmers[i];
+            s.x += s.vx * delta;
+            s.bobPhase += delta * 2;
+            if (s.labelT > 0) s.labelT -= delta;
+            if ((s.dir > 0 && s.x > w + 90) || (s.dir < 0 && s.x < -90)) {
+                this.swimmers.splice(i, 1);
             }
         }
     },
-    
-    drawFish() {
-        const ctx = this.ctx;
-        
-        this.fish.forEach(f => {
-            // Trail
-            ctx.strokeStyle = f.color;
-            ctx.lineWidth = 2;
-            ctx.globalAlpha = 0.3;
-            ctx.beginPath();
-            f.trail.forEach((pt, i) => {
-                const alpha = (i / f.trail.length) * 0.5;
-                ctx.globalAlpha = alpha * 0.3;
-                if (i === 0) ctx.moveTo(pt.x, pt.y);
-                else ctx.lineTo(pt.x, pt.y);
-            });
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-            
-            // Fish body
+
+    drawSwimmers(ctx) {
+        const canModel = typeof Render !== 'undefined' && Render.drawFishModel;
+        this.swimmers.forEach(s => {
+            const y = s.y + Math.sin(s.bobPhase) * s.bobAmp;
+            // Deep swimmers dim behind "water"
             ctx.save();
-            ctx.translate(f.x, f.y);
-            ctx.rotate(f.angle);
-            
-            // Rarity glow
-            const rarityGlow = {
-                common: 'rgba(148,163,184,0.5)',
-                rare: 'rgba(56,189,248,0.6)',
-                epic: 'rgba(168,85,247,0.7)',
-                legendary: 'rgba(245,158,11,0.8)',
-                mythic: 'rgba(232,121,249,0.9)'
-            }[f.type];
-            
-            ctx.shadowColor = rarityGlow;
-            ctx.shadowBlur = 15;
-            
-            ctx.fillStyle = f.color;
-            ctx.beginPath();
-            ctx.ellipse(0, 0, f.size, f.size * 0.5, 0, 0, Math.PI * 2);
-            ctx.fill();
-            
-            // Tail
-            ctx.beginPath();
-            ctx.moveTo(-f.size, 0);
-            ctx.lineTo(-f.size * 1.5, -f.size * 0.5);
-            ctx.lineTo(-f.size * 1.5, f.size * 0.5);
-            ctx.closePath();
-            ctx.fill();
-            
-            // Eye
-            ctx.fillStyle = '#0f172a';
-            ctx.beginPath();
-            ctx.arc(f.size * 0.4, -f.size * 0.15, f.size * 0.12, 0, Math.PI * 2);
-            ctx.fill();
-            
+            ctx.globalAlpha = 1 - s.depth * 0.35;
+            if (canModel) {
+                try {
+                    Render.drawFishModel(ctx, s.x, y, (s.sp.size || 16) * s.scale, s.sp, {
+                        angle: s.dir > 0 ? 0 : Math.PI,
+                    });
+                } catch (e) {
+                    ctx.fillStyle = s.sp.color || '#38bdf8';
+                    ctx.beginPath(); ctx.ellipse(s.x, y, 12 * s.scale, 7 * s.scale, 0, 0, Math.PI * 2); ctx.fill();
+                }
+            } else {
+                ctx.fillStyle = (s.sp && s.sp.color) || '#38bdf8';
+                ctx.beginPath(); ctx.ellipse(s.x, y, 12 * s.scale, 7 * s.scale, 0, 0, Math.PI * 2); ctx.fill();
+            }
             ctx.restore();
+            // Rare-fish cameo label (shows these are real index fish)
+            if (s.labelT > 0) {
+                ctx.save();
+                ctx.globalAlpha = Math.min(1, s.labelT);
+                ctx.font = 'bold 10px Work Sans';
+                ctx.textAlign = 'center';
+                ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+                ctx.strokeText(s.sp.name, s.x, y - 22 * s.scale - 8);
+                ctx.fillStyle = s.sp.color || '#fff';
+                ctx.fillText(s.sp.name, s.x, y - 22 * s.scale - 8);
+                ctx.restore();
+            }
         });
     },
-    
-    updateParticles(delta) {
-        for (let i = this.particles.length - 1; i >= 0; i--) {
-            const p = this.particles[i];
-            p.x += p.vx * delta;
-            p.y += p.vy * delta;
-            if (p.gravity) p.vy += 200 * delta;
-            p.vx *= 0.98;
-            p.vy *= 0.98;
-            p.life -= delta;
-            if (p.life <= 0) this.particles.splice(i, 1);
+
+    updateBubbles(delta, w, h) {
+        if (Math.random() < 0.15 && this.bubbles.length < 26) {
+            const waterX = w * 0.40;
+            this.bubbles.push({
+                x: waterX + 10 + Math.random() * (w - waterX - 20),
+                y: h + 6,
+                vy: -(24 + Math.random() * 40),
+                r: 1 + Math.random() * 2.5,
+                wob: Math.random() * Math.PI * 2,
+            });
+        }
+        for (let i = this.bubbles.length - 1; i >= 0; i--) {
+            const b = this.bubbles[i];
+            b.y += b.vy * delta;
+            b.wob += delta * 3;
+            b.x += Math.sin(b.wob) * 12 * delta;
+            if (b.y < -8) this.bubbles.splice(i, 1);
         }
     },
-    
-    drawParticles() {
-        const ctx = this.ctx;
-        this.particles.forEach(p => {
-            ctx.globalAlpha = Math.max(0, p.life);
-            ctx.fillStyle = p.color;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-            ctx.fill();
+
+    drawBubbles(ctx) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(186,230,253,0.5)';
+        ctx.lineWidth = 1;
+        this.bubbles.forEach(b => {
+            ctx.globalAlpha = 0.5;
+            ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.stroke();
         });
-        ctx.globalAlpha = 1;
+        ctx.restore();
     }
 };
 
@@ -477,10 +390,21 @@ const UI = {
             slot.className = `weapon-slot relative w-14 h-14 rounded-xl flex flex-col items-center justify-center border ${
                 active ? 'active' : 'border-slate-700/60 bg-slate-900/60'
             } ${w ? '' : 'opacity-40'}`;
+            // Live gun-model thumbnail (procedural or custom skin), FA icon fallback.
+            let slotArt = `<i class="fa-solid fa-plus text-lg text-slate-600"></i>`;
+            if (w) {
+                slotArt = `<i class="fa-solid ${w.icon} text-lg text-amber-400"></i>`;
+                try {
+                    if (typeof Render !== 'undefined' && Render.gunPreview) {
+                        const snap = Render.gunPreview(w, p.gunSkins);
+                        if (snap) slotArt = `<img src="${snap}" class="gun-preview max-w-[50px] max-h-[26px] object-contain" alt="">`;
+                    }
+                } catch (e) {}
+            }
             slot.innerHTML = w
-                ? `<i class="fa-solid ${w.icon} text-lg text-amber-400"></i>
+                ? `${slotArt}
                    <span class="text-[9px] font-bold mt-0.5 text-slate-300">${i + 1}</span>`
-                : `<i class="fa-solid fa-plus text-lg text-slate-600"></i>
+                : `${slotArt}
                    <span class="text-[9px] font-bold mt-0.5 text-slate-600">${i + 1}</span>`;
             slot.onclick = () => { if (typeof Player !== 'undefined') Player.selectWeapon(state, i); };
             slot.oncontextmenu = (e) => {
@@ -548,7 +472,8 @@ const UI = {
 
         // Priority 1: land boss fish. Priority 2: STORMCALLER (lives in
         // state.enemies, never in monstersOnLand, so the old code hid the
-        // top bar for her entirely).
+        // top bar for her entirely). Priority 3: hooked water boss
+        // (line snapped — fight it with guns, reel it when weakened).
         let boss = null, bossKind = 'fish';
         const ab = state.activeBoss;
         if (ab && ab.hp > 0 && state.monstersOnLand.includes(ab)) {
@@ -556,6 +481,10 @@ const UI = {
         } else {
             const storm = (state.enemies || []).find(e => e && e.isBoss && (e.hp || 0) > 0);
             if (storm) { boss = storm; bossKind = 'storm'; }
+            else {
+                const hf = state.fishing && state.fishing.mode === 'HOOKED' ? state.fishing.hookedFish : null;
+                if (hf && hf.species && hf.species.isBoss && (hf.hp || 0) > 0) { boss = hf; bossKind = 'hooked'; }
+            }
         }
         if (!boss) {
             barWrap.classList.add('hidden');
@@ -574,6 +503,11 @@ const UI = {
             name = '⛈ ' + (boss.bossName || 'STORMCALLER');
             hp = boss.hp; maxHp = boss.maxHp || Math.max(1, hp);
             phase1 = true;
+        } else if (bossKind === 'hooked') {
+            name = boss.species.name.toUpperCase();
+            maxHp = boss.maxHp || boss.species.maxHp || 1;
+            hp = boss.hp;
+            phase1 = (hp / maxHp) > 0.4;
         } else {
             name = boss.species.name.toUpperCase();
             maxHp = boss.maxHp || (boss.species && boss.species.maxHp) || 1;
@@ -592,12 +526,25 @@ const UI = {
         const phase = phase1 ? 'PHASE 1' : 'PHASE 2 — ENRAGED';
         if (phaseEl) {
             const dist = Math.round(Math.hypot(boss.x - state.player.x, boss.y - state.player.y));
-            const extra = bossKind === 'storm' ? 'MINIBOSS' : phase;
+            let extra = bossKind === 'storm' ? 'MINIBOSS' : phase;
+            if (bossKind === 'hooked') {
+                extra = (boss.lineBroken === false && boss.hp / (boss.maxHp || 1) <= 0.30)
+                    ? 'WEAKENED — REEL!'
+                    : 'LINE BROKEN — SHOOT IT!';
+            }
             phaseEl.innerText = `${extra} · 📍 ${dist}m`;
             phaseEl.className = phase1
                 ? 'text-xs text-amber-300 font-bold mt-1 tracking-wider'
                 : 'text-xs text-rose-400 font-black mt-1 tracking-wider animate-pulse';
         }
+        // 10-death boss rule: chances left (see Player.die)
+        try {
+            const livesEl = $('boss-lives');
+            if (livesEl) {
+                const left = Math.max(0, 10 - (state.bossDeaths || 0));
+                livesEl.innerText = `❤ ×${left}`;
+            }
+        } catch (e) {}
     },
 
     // Small per-fish combat cards (many can show at once): hooked fish +
@@ -619,14 +566,16 @@ const UI = {
         if (f && f.mode === 'HOOKED' && f.hookedFish) {
             const hf = f.hookedFish;
             const sp = hf.species || {};
+            const isBoss = !!sp.isBoss;
             rows.push({
                 name: sp.name || 'Hooked Fish',
                 color: sp.color || '#38bdf8',
                 hp: Math.max(0, hf.hp || 0), max: Math.max(1, hf.maxHp || 1),
                 sub: (hf.stamina !== undefined && hf.staminaMax)
                     ? { v: Math.max(0, hf.stamina), m: hf.staminaMax, c: '#facc15', label: 'STAM' } : null,
-                tag: hf.isDead ? 'EXHAUSTED' : 'HOOKED',
-                tagCls: hf.isDead ? 'bg-slate-500/30 text-slate-300' : 'bg-sky-500/30 text-sky-200'
+                tag: hf.isDead ? 'EXHAUSTED' : (isBoss ? (hf.lineBroken === false && hf.hp / (hf.maxHp || 1) <= 0.30 ? 'WEAKENED' : 'BOSS') : 'HOOKED'),
+                tagCls: hf.isDead ? 'bg-slate-500/30 text-slate-300'
+                    : isBoss ? 'bg-red-500/30 text-red-200' : 'bg-sky-500/30 text-sky-200'
             });
         }
         for (const m of (state.monstersOnLand || [])) {
@@ -752,6 +701,16 @@ const state = {
         bucket: [],
         bucketCapacity: 15,
         caughtFish: [], // Fish index - tracks unique species caught
+        slainBosses: [], // Boss index - boss ids killed (incl. 'stormcaller')
+        achievements: { unlocked: [], progress: {} }, // Achievement records
+        totalFishCaught: 0, // Lifetime catches (fishing achievements)
+        totalKills: 0, // Lifetime enemy kills (combat achievements)
+        bossKills: 0, // Lifetime boss kills
+        casinoTotalLost: 0, // Lifetime casino losses (bankrupt achievement)
+        baitStock: {}, // Crafted bait counts (Ritual system)
+        activeBait: null, // Equipped fishing bait id (per-hook stock model)
+        inCave: false, // Inside the sealed cave map (E at the beach hole)
+        returnPos: null, // Beach spot to return to on cave exit
 
         lastShotTime: -999,
         weaponRecoil: 0,
@@ -784,6 +743,7 @@ const state = {
         waitingTime: 0
     },
     activeBoss: null,
+    bossDeaths: 0, // deaths spent in the current boss fight (10 = it leaves)
     monstersOnLand: [],
     groundHazards: [],
     bullets: [],
@@ -836,7 +796,9 @@ const audioBtn = $('btn-audio');
 if (audioBtn) {
     audioBtn.onclick = () => {
         if (typeof audio !== 'undefined') {
-            audio.muted = !audio.muted;
+            const m = !audio.muted;
+            if (typeof audio.setMuted === 'function') audio.setMuted(m);
+            else audio.muted = m;
             const icon = $('audio-icon');
             if (icon) {
                 icon.className = audio.muted ? 'fa-solid fa-volume-xmark' : 'fa-solid fa-volume-high';
@@ -1237,11 +1199,47 @@ const MultiplayerUI = {
 };
 
 // ==========================================
-// FISH INDEX
+// FISH INDEX (now includes BOSSES — kill to discover)
 // ==========================================
+// Stormcaller isn't a hooked fish (she's a seagull miniboss), so she gets
+// a virtual index entry. Slain by either route lands in
+// player.slainBosses; the card paints with the real seagull renderer.
+const STORMCALLER_INFO = {
+    id: 'stormcaller', name: 'Stormcaller', color: '#f87171', accent: '#fecaca',
+    size: 34, maxHp: 9000, staminaMax: 3000, attack: 70, speed: 5.5,
+    value: 4000, rarity: 'boss', shape: 'seagull', finColor: '#991b1b',
+    desc: 'Mother of gulls. Comes when 20 of her children fall. Enrages under 40% HP.',
+    skills: ['strike', 'feathers', 'roar'], skillName: 'Strike / Feather Barrage / Roar'
+};
+
 const FishIndex = {
     currentFilter: 'all',
     ingameFilter: 'all',
+
+    // All displayable entries: every fish + Stormcaller (bosses included —
+    // kill to discover, shown under the Boss filter)
+    allEntries() {
+        return [...FISH_SPECIES, STORMCALLER_INFO];
+    },
+
+    // Discovered ids = caught fish + slain bosses (kill counts even if
+    // the loot was never picked up)
+    discoveredIds() {
+        const caught = (this.state.player.caughtFish || []).filter(f => FISH_SPECIES.some(s => s.id === f.id));
+        const slain = (this.state.player.slainBosses || []).filter(id =>
+            id === STORMCALLER_INFO.id || FISH_SPECIES.some(s => s.id === id));
+        return new Set([...caught.map(f => f.id), ...slain]);
+    },
+
+    indexTotal() {
+        // Unique ids only: the roster contains duplicate id entries, and
+        // only unique ids (+ Stormcaller) are actually discoverable.
+        try {
+            return new Set(this.allEntries().map(f => f.id)).size;
+        } catch (e) {
+            return FISH_SPECIES.length + 1; // + Stormcaller
+        }
+    },
 
     init(state) {
         this.state = state;
@@ -1317,21 +1315,20 @@ const FishIndex = {
     renderInGame() {
         const grid = $('index-grid-ingame');
         if (!grid) return;
-        const caught = (this.state.player.caughtFish || []).filter(f => FISH_SPECIES.some(s => s.id === f.id));
-        const caughtIds = new Set(caught.map(f => f.id));
+        const caughtIds = this.discoveredIds();
         const species = this._filteredSpecies(this.ingameFilter, caughtIds);
         grid.innerHTML = species.map(fish => this._cardHTML(fish, caughtIds.has(fish.id))).join('');
         this._paintModels(grid);
         this._bindCustomButtons(grid);
-        const total = FISH_SPECIES.filter(f => !f.isBoss).length;
+        const total = this.indexTotal();
         const countEl = $('index-count-ingame');
         const progressEl = $('index-progress-ingame');
-        if (countEl) countEl.innerText = `${caught.length} / ${total}`;
-        if (progressEl) progressEl.style.width = `${total > 0 ? (caught.length / total * 100).toFixed(1) : 0}%`;
+        if (countEl) countEl.innerText = `${caughtIds.size} / ${total}`;
+        if (progressEl) progressEl.style.width = `${total > 0 ? (caughtIds.size / total * 100).toFixed(1) : 0}%`;
     },
 
     _filteredSpecies(filter, caughtIds) {
-        let species = FISH_SPECIES.filter(f => !f.isBoss);
+        let species = this.allEntries();
         if (filter && filter !== 'all') species = species.filter(f => f.rarity === filter);
         const rarityOrder = { common: 1, rare: 2, epic: 3, legendary: 4, mythic: 5, boss: 6 };
         species.sort((a, b) => {
@@ -1418,11 +1415,17 @@ const FishIndex = {
         setTimeout(() => {
             grid.querySelectorAll('canvas[data-fish-model]').forEach(canvas => {
                 const fishId = canvas.dataset.fishModel;
-                const fish = FISH_SPECIES.find(f => f.id === fishId);
+                const fish = FISH_SPECIES.find(f => f.id === fishId)
+                    || (fishId === STORMCALLER_INFO.id ? STORMCALLER_INFO : null);
                 if (fish) {
                     const paint = () => {
                         const ctx = canvas.getContext('2d');
                         ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        // Stormcaller is a bird: paint with her real renderer
+                        if (fish.id === STORMCALLER_INFO.id && typeof renderSeagull === 'function') {
+                            renderSeagull(ctx, { x: canvas.width / 2, y: canvas.height / 2, vx: 1, vy: 0.2, isBoss: true });
+                            return;
+                        }
                         const size = Math.min(canvas.width, canvas.height) * 0.4;
                         Render.drawFishModel(ctx, canvas.width / 2, canvas.height / 2, size, fish, { angle: -0.3 });
                     };
@@ -1473,21 +1476,20 @@ const FishIndex = {
     },
     
     updateProgress() {
-        const caught = (this.state.player.caughtFish || []).filter(f => FISH_SPECIES.some(s => s.id === f.id));
-        const total = FISH_SPECIES.filter(f => !f.isBoss).length;
+        const caughtIds = this.discoveredIds();
+        const total = this.indexTotal();
         const countEl = $('fish-index-count');
         const progressEl = $('fish-index-progress');
         
-        if (countEl) countEl.innerText = `${caught.length} / ${total}`;
-        if (progressEl) progressEl.style.width = `${total > 0 ? (caught.length / total * 100).toFixed(1) : 0}%`;
+        if (countEl) countEl.innerText = `${caughtIds.size} / ${total}`;
+        if (progressEl) progressEl.style.width = `${total > 0 ? (caughtIds.size / total * 100).toFixed(1) : 0}%`;
     },
     
     renderGrid() {
         const grid = $('fish-index-grid');
         if (!grid) return;
 
-        const caught = (this.state.player.caughtFish || []).filter(f => FISH_SPECIES.some(s => s.id === f.id));
-        const caughtIds = new Set(caught.map(f => f.id));
+        const caughtIds = this.discoveredIds();
         const species = this._filteredSpecies(this.currentFilter, caughtIds);
 
         grid.innerHTML = species.map(fish => this._cardHTML(fish, caughtIds.has(fish.id))).join('');
@@ -1506,7 +1508,8 @@ const FishIndex = {
             rare: 'bg-sky-900/50 text-sky-300 border border-sky-500/30',
             epic: 'bg-fuchsia-900/50 text-fuchsia-300 border border-fuchsia-500/30',
             legendary: 'bg-amber-900/50 text-amber-300 border border-amber-500/30',
-            mythic: 'bg-yellow-900/50 text-yellow-300 border border-yellow-500/30'
+            mythic: 'bg-yellow-900/50 text-yellow-300 border border-yellow-500/30',
+            boss: 'bg-red-900/60 text-red-300 border border-red-500/50'
         };
         return map[rarity] || map.common;
     }
@@ -1593,7 +1596,7 @@ const Tutorial = {
 // ==========================================
 const Settings = {
     KEY: 'ah_settings',
-    data: { sound: true, fx: 'med', shake: true },
+    data: { sound: true, fx: 'med', shake: true, master: 100, music: 80, sfx: 100 },
 
     load() {
         try {
@@ -1603,6 +1606,9 @@ const Settings = {
                 if (typeof d.sound === 'boolean') this.data.sound = d.sound;
                 if (['low', 'med', 'high'].includes(d.fx)) this.data.fx = d.fx;
                 if (typeof d.shake === 'boolean') this.data.shake = d.shake;
+                ['master', 'music', 'sfx'].forEach(k => {
+                    if (typeof d[k] === 'number') this.data[k] = Math.max(0, Math.min(100, Math.round(d[k])));
+                });
             }
         } catch (e) {}
         return this.data;
@@ -1614,7 +1620,13 @@ const Settings = {
 
     apply() {
         try {
-            if (typeof audio !== 'undefined') audio.muted = !this.data.sound;
+            if (typeof audio !== 'undefined') {
+                if (typeof audio.setMuted === 'function') audio.setMuted(!this.data.sound);
+                else audio.muted = !this.data.sound;
+                if (typeof audio.applyVolumes === 'function') {
+                    audio.applyVolumes(this.data.master / 100, this.data.music / 100, this.data.sfx / 100);
+                }
+            }
             const icon = $('audio-icon');
             if (icon) icon.className = this.data.sound ? 'fa-solid fa-volume-high' : 'fa-solid fa-volume-xmark';
         } catch (e) {}
@@ -1636,6 +1648,12 @@ const Settings = {
         set('set-sound-val', this.data.sound ? 'ON' : 'OFF', this.data.sound);
         set('set-fx-val', this.data.fx.toUpperCase(), true);
         set('set-shake-val', this.data.shake ? 'ON' : 'OFF', this.data.shake);
+        ['master', 'music', 'sfx'].forEach(k => {
+            const r = $(`set-${k}`);
+            const v = $(`set-${k}-val`);
+            if (r) r.value = this.data[k];
+            if (v) v.innerText = `${this.data[k]}%`;
+        });
     },
 
     init() {
@@ -1648,6 +1666,15 @@ const Settings = {
             this.save(); this.apply(); this.render();
         });
         on('set-shake', () => { this.data.shake = !this.data.shake; this.save(); this.render(); });
+        ['master', 'music', 'sfx'].forEach(k => {
+            const r = $(`set-${k}`);
+            if (r) r.oninput = () => {
+                this.data[k] = Math.max(0, Math.min(100, Math.round(Number(r.value) || 0)));
+                this.save(); this.apply();
+                const v = $(`set-${k}-val`);
+                if (v) v.innerText = `${this.data[k]}%`;
+            };
+        });
         on('set-tutorial', () => {
             if (typeof state !== 'undefined') Tutorial.replay(state);
             try { audio.playUIClick(); } catch (e) {}
@@ -1659,6 +1686,121 @@ const Settings = {
 // Make globally available
 window.Tutorial = Tutorial;
 window.Settings = Settings;
+// ==========================================
+// INTRO — story pages on New Game (skippable)
+// ==========================================
+const Intro = {
+    idx: 0,
+    pages: [
+        {
+            kicker: 'CHAPTER I',
+            title: 'THE HOLLOW TIDE',
+            body: 'Blacktide village has fished these waters for a hundred years. ' +
+                'This season the sea turned hungry: lines come back empty, gulls fall screaming, ' +
+                'and Old Marlin swears something vast is circling underneath.',
+        },
+        {
+            kicker: 'CHAPTER II',
+            title: 'THINGS THAT HUNGER',
+            body: 'The Stormcaller rides the gulls. Four deep bosses answer blood rituals: ' +
+                'a chanting Priest, a lightning Hydra, a Shepherd of the void, a Crimson Emperor. ' +
+                'Fish for their eggs and shards — or die trying.',
+        },
+        {
+            kicker: 'CHAPTER III',
+            title: 'THE HUNT',
+            body: 'WASD to move · hold SPACE to cast, ease off before the line snaps · ' +
+                'click to shoot hooked horrors · E talks, shops and rituals · ' +
+                'J opens the fish index. North of the beach, a sealed cave waits for clever feet.',
+        },
+    ],
+
+    isOpen() {
+        const el = $('intro-overlay');
+        return !!(el && !el.classList.contains('hidden'));
+    },
+
+    show() {
+        this.idx = 0;
+        const menu = $('main-menu');
+        if (menu) menu.classList.add('hidden');
+        const el = $('intro-overlay');
+        if (!el) return;
+        el.classList.remove('hidden');
+        el.classList.add('flex');
+        this.paint();
+        const on = (id, fn) => { const b = $(id); if (b) b.onclick = fn; };
+        on('btn-intro-back', () => this.back());
+        on('btn-intro-next', () => this.next());
+        on('btn-intro-skip', () => this.finish());
+    },
+
+    paint() {
+        const pg = this.pages[this.idx];
+        const set = (id, txt) => { const el = $(id); if (el) el.innerText = txt; };
+        set('intro-kicker', pg.kicker);
+        set('intro-title', pg.title);
+        const body = $('intro-body');
+        if (body) body.innerText = pg.body;
+        const dots = $('intro-dots');
+        if (dots) {
+            dots.innerHTML = this.pages.map((_, i) =>
+                `<span class="w-2 h-2 rounded-full ${i === this.idx ? 'bg-sky-400' : 'bg-slate-600'}"></span>`).join('');
+        }
+        const back = $('btn-intro-back');
+        if (back) back.style.visibility = this.idx === 0 ? 'hidden' : 'visible';
+        const next = $('btn-intro-next');
+        if (next) next.innerText = this.idx === this.pages.length - 1 ? 'Begin the Hunt' : 'Next →';
+    },
+
+    back() {
+        if (this.idx > 0) { this.idx--; this.paint(); }
+        try { audio.playUIClick(); } catch (e) {}
+    },
+
+    next() {
+        try { audio.playUIClick(); } catch (e) {}
+        if (this.idx < this.pages.length - 1) { this.idx++; this.paint(); }
+        else this.finish();
+    },
+
+    finish() {
+        const el = $('intro-overlay');
+        if (el) { el.classList.add('hidden'); el.classList.remove('flex'); }
+        if (typeof MainMenu !== 'undefined') MainMenu.hide();
+        UI.updateStatusBanner('New game started. Cast your line!', 'Start', 'emerald');
+    },
+};
+
+// Single source of truth for the displayed game version.
+const GAME_VERSION = '1.1.0';
+
+// Newest first. Shown in Menu > Updates.
+const CHANGELOG = [
+    {
+        ver: 'v1.1.0', date: 'Oct 2026', tag: 'LATEST',
+        items: [
+            'Update log added — this panel, with the current version up top',
+            'Teleport loading screen for cave descents and returns',
+            'Menu remake: hero header, PLAY/EXPLORE columns, live beach background with real index fish',
+            'Full SFX assets (roar, skills, throw, splash, reload, boss roar/theme, coin, hit, UI) — mp3/ogg/wav drop-in support',
+            'Volume mixer: Master / Music / SFX sliders in Settings',
+            'Skin-pack sharing: export all custom skins to a zip, import a zip to wear them',
+            'Shop gun cards show the real gun model (procedural or custom skin)',
+        ],
+    },
+    {
+        ver: 'v1.0.0', date: 'Sep 2026', tag: 'RELEASE',
+        items: [
+            'Sealed cave rework: corner void portal, fog + lantern light, fish-offering rune puzzle',
+            'Stormlord Hydra: 9 heads, sea-phase hunt, nine-head volley, cinematic boss intros',
+            'Achievements repaired (unlock, counting, persistence) + full-roster hook table (213 species)',
+            'Bait luck fixed: rod + bait luck feed rarity weights and shiny rolls',
+            'Boot + teleport loading screens, boss war-drum theme',
+        ],
+    },
+];
+
 const MainMenu = {
     show() {
         const menu = $('main-menu');
@@ -1674,6 +1816,7 @@ const MainMenu = {
         setHidden('mp-panel-join', true);
         setHidden('mp-panel-lobby', true);
         setHidden('menu-about', true);
+        setHidden('mp-panel-changelog', true);
         setHidden('mp-panel-fish-index', true);
         setHidden('mp-panel-help', true);
         setHidden('mp-panel-settings', true);
@@ -1709,6 +1852,35 @@ const MainMenu = {
         if (typeof Tutorial !== 'undefined') Tutorial.applyStart(state);
     },
 
+    // Stamp the single-source version everywhere it shows.
+    stampVersion() {
+        try {
+            const v = (typeof GAME_VERSION === 'string' && GAME_VERSION) ? GAME_VERSION : 'v1.1.0';
+            const disp = v.startsWith('v') ? v : 'v' + v;
+            ['menu-ver-hero', 'menu-ver-foot', 'menu-ver-chip', 'changelog-ver'].forEach(id => {
+                const el = $(id);
+                if (el) el.innerText = disp;
+            });
+        } catch (e) {}
+    },
+
+    renderChangelog() {
+        const list = $('changelog-list');
+        if (!list || typeof CHANGELOG === 'undefined') return;
+        list.innerHTML = CHANGELOG.map((rel, i) => `
+            <div class="glass-panel-light p-3 rounded-xl ${i === 0 ? 'border border-amber-500/40' : ''}">
+                <div class="flex items-center gap-2 mb-1.5 flex-wrap">
+                    <span class="font-black text-white text-sm">${rel.ver}</span>
+                    <span class="text-[9px] font-black px-1.5 py-px rounded ${i === 0 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-slate-800 text-slate-400 border border-slate-700'}">${rel.tag || ''}</span>
+                    <span class="text-[10px] text-slate-500 ml-auto">${rel.date || ''}</span>
+                </div>
+                <ul class="text-xs text-slate-300 leading-relaxed space-y-1">
+                    ${(rel.items || []).map(it => `<li class="flex gap-1.5"><span class="text-amber-400 font-black">•</span><span>${it}</span></li>`).join('')}
+                </ul>
+            </div>
+        `).join('');
+    },
+
     init(state) {
         const self = this;
         const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
@@ -1721,8 +1893,11 @@ const MainMenu = {
                 SaveSystem.freshPlayer(state);
                 SaveSystem.save(state, slot);
             }
-            self.hide();
-            UI.updateStatusBanner('New game started. Cast your line!', 'Start', 'emerald');
+            if (typeof Intro !== 'undefined') Intro.show();
+            else {
+                self.hide();
+                UI.updateStatusBanner('New game started. Cast your line!', 'Start', 'emerald');
+            }
         });
 
         on('btn-load', () => {
@@ -1766,12 +1941,14 @@ const MainMenu = {
             const about = $('menu-about');
             const main = $('mp-panel-main');
             if (about) about.classList.add('hidden');
+            const log = $('mp-panel-changelog');
+            if (log) log.classList.add('hidden');
             if (main) main.classList.remove('hidden');
         });
 
         // Fish Index button
         on('btn-fish-index', () => {
-            const panels = ['mp-panel-main', 'mp-panel-multiplayer', 'mp-panel-join', 'mp-panel-lobby', 'menu-about', 'mp-panel-achievements', 'mp-panel-help', 'mp-panel-settings'];
+            const panels = ['mp-panel-main', 'mp-panel-multiplayer', 'mp-panel-join', 'mp-panel-lobby', 'menu-about', 'mp-panel-changelog', 'mp-panel-achievements', 'mp-panel-help', 'mp-panel-settings'];
             panels.forEach(id => { const el = $(id); if (el) el.classList.add('hidden'); });
             const fishIndex = $('mp-panel-fish-index');
             if (fishIndex) fishIndex.classList.remove('hidden');
@@ -1780,33 +1957,47 @@ const MainMenu = {
 
         // Achievements button
         on('btn-achievements', () => {
-            const panels = ['mp-panel-main', 'mp-panel-multiplayer', 'mp-panel-join', 'mp-panel-lobby', 'menu-about', 'mp-panel-fish-index', 'mp-panel-help', 'mp-panel-settings'];
+            const panels = ['mp-panel-main', 'mp-panel-multiplayer', 'mp-panel-join', 'mp-panel-lobby', 'menu-about', 'mp-panel-changelog', 'mp-panel-fish-index', 'mp-panel-help', 'mp-panel-settings'];
             panels.forEach(id => { const el = $(id); if (el) el.classList.add('hidden'); });
             const achievements = $('mp-panel-achievements');
             if (achievements) achievements.classList.remove('hidden');
             if (typeof Achievements !== 'undefined') Achievements.renderPanel($('achievements-container'));
         });
 
-        // How To Play + Settings buttons
+        // Changelog (update log + current version)
         const showMenuPanel = (id) => {
-            const panels = ['mp-panel-main', 'mp-panel-multiplayer', 'mp-panel-join', 'mp-panel-lobby', 'menu-about', 'mp-panel-fish-index', 'mp-panel-achievements', 'mp-panel-help', 'mp-panel-settings'];
+            const panels = ['mp-panel-main', 'mp-panel-multiplayer', 'mp-panel-join', 'mp-panel-lobby', 'menu-about', 'mp-panel-changelog', 'mp-panel-fish-index', 'mp-panel-achievements', 'mp-panel-help', 'mp-panel-settings'];
             panels.forEach(p => { const el = $(p); if (el) el.classList.add('hidden'); });
             const target = $(id);
             if (target) target.classList.remove('hidden');
             if (id === 'mp-panel-settings' && typeof Settings !== 'undefined') Settings.render();
+            if (id === 'mp-panel-changelog') self.renderChangelog();
         };
+        // Changelog (update log + current version)
+        on('btn-changelog', () => showMenuPanel('mp-panel-changelog'));
+        on('btn-changelog-back', () => showMenuPanel('mp-panel-main'));
         on('btn-how-to-play', () => showMenuPanel('mp-panel-help'));
         on('btn-help-back', () => showMenuPanel('mp-panel-main'));
         on('btn-settings', () => showMenuPanel('mp-panel-settings'));
         on('btn-settings-back', () => showMenuPanel('mp-panel-main'));
 
-        // Menu button in HUD
+        // Menu button in HUD (not for corpses)
         const hudMenuBtn = $('btn-menu');
-        if (hudMenuBtn) hudMenuBtn.onclick = () => self.show();
+        if (hudMenuBtn) hudMenuBtn.onclick = () => {
+            if (state.player && state.player.isDead) return;
+            self.show();
+        };
 
         // ESC opens the menu
         window.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
+                // Intro finishes on ESC (same as Begin/Skip)
+                if (typeof Intro !== 'undefined' && Intro.isOpen && Intro.isOpen()) {
+                    Intro.finish();
+                    return;
+                }
+                // The dead don't get menus — respawn first
+                if (typeof state !== 'undefined' && state.player && state.player.isDead) return;
                 const shop = $('shop-modal');
                 if (shop && !shop.classList.contains('hidden')) {
                     shop.classList.add('hidden');
@@ -1826,6 +2017,10 @@ const MainMenu = {
                     NPC.close();
                     return;
                 }
+                if (typeof Ritual !== 'undefined' && Ritual.isOpen && Ritual.isOpen()) {
+                    Ritual.close();
+                    return;
+                }
                 const menu = $('main-menu');
                 if (menu && !menu.classList.contains('hidden')) {
                     const main = $('mp-panel-main');
@@ -1841,7 +2036,7 @@ const MainMenu = {
                         self.hide();
                     } else {
                         // Close sub-panels, show main
-                        const panels = ['mp-panel-multiplayer', 'mp-panel-join', 'mp-panel-lobby', 'menu-about', 'mp-panel-fish-index', 'mp-panel-achievements', 'mp-panel-help', 'mp-panel-settings'];
+                        const panels = ['mp-panel-multiplayer', 'mp-panel-join', 'mp-panel-lobby', 'menu-about', 'mp-panel-changelog', 'mp-panel-fish-index', 'mp-panel-achievements', 'mp-panel-help', 'mp-panel-settings'];
                         panels.forEach(id => { const el = $(id); if (el) el.classList.add('hidden'); });
                         if (main) main.classList.remove('hidden');
                     }
@@ -1853,6 +2048,7 @@ const MainMenu = {
 
         // Open the menu on boot
         self.show();
+        self.stampVersion();
     }
 };
 
@@ -1955,8 +2151,9 @@ function mainLoop(time) {
     const delta = Math.min(0.05, (time - lastTime) / 1000);
     lastTime = time;
 
-    // If paused (menu open), skip simulation but still render
-    if (state.paused) {
+    // If paused (menu open) or dead (respawn menu open), skip simulation
+    // but still render — the world freezes while you choose.
+    if (state.paused || (state.player && state.player.isDead)) {
         if (typeof Render !== 'undefined' && Render.drawWorld && ctx) {
             Render.drawWorld(state, ctx);
         }
@@ -1987,6 +2184,9 @@ function mainLoop(time) {
     if (typeof Camera !== 'undefined') Camera.update(state, delta);
     if (typeof Input !== 'undefined') Input.updateMouseWorld(state);
     if (typeof Player !== 'undefined') Player.update(state, delta);
+    if (typeof Ritual !== 'undefined' && Ritual.update) {
+        try { Ritual.update(state, delta); } catch (e) {}
+    }
     if (typeof Fishing !== 'undefined') Fishing.update(state, delta);
     if (typeof WeaponSystem !== 'undefined') WeaponSystem.update(state, delta);
     if (typeof Combat !== 'undefined') Combat.update(state, delta);
@@ -2058,6 +2258,16 @@ function mainLoop(time) {
                 prompt = 'TALK TO OLD MARLIN';
             }
         } catch (e) {}
+        if (!prompt && typeof Ritual !== 'undefined' && Ritual.near) {
+            try {
+                if (!state.paused && state.player.inCave) {
+                    if (Ritual.nearExit(state) < 110 + 60) prompt = 'LEAVE THE CAVE';
+                    else if (Ritual.near(state) < (Ritual.RADIUS || 110) + 60) prompt = 'RITUAL';
+                } else if (!state.paused && Ritual.nearHole && Ritual.nearHole(state) < 170) {
+                    prompt = 'ENTER THE CAVE';
+                }
+            } catch (e) {}
+        }
         if (!prompt && typeof Render !== 'undefined' && Render.nearestShopZone) {
             const near = Render.nearestShopZone(state);
             if (near && near.dist < near.zone.radius + 60) {
@@ -2098,6 +2308,35 @@ UI.refreshLuckDisplay(state);
 
 requestAnimationFrame(mainLoop);
 
+// Boot loading screen: tips rotate while assets settle, then fade out
+// once the first frames + menu background are up.
+function bootScreen() {
+    const tips = [
+        'Casting the line…',
+        'Hold SPACE near water to charge your cast…',
+        'Rare fish bite faster on Blood Bait…',
+        'The NW corner hides a sealed void portal…',
+        'Runes hunger for fish: 🐟 → 💎 → 👑…',
+        'Bosses snap lines — bring guns…',
+    ];
+    const el = document.getElementById('boot-overlay');
+    const tip = document.getElementById('boot-tip');
+    let i = 0;
+    const tick = setInterval(() => {
+        if (!el || el.classList.contains('hidden')) { clearInterval(tick); return; }
+        i = (i + 1) % tips.length;
+        if (tip) tip.innerText = tips[i];
+    }, 450);
+    setTimeout(() => {
+        clearInterval(tick);
+        if (el) {
+            el.classList.add('hidden');
+            setTimeout(() => { try { el.remove(); } catch (e) {} }, 600);
+        }
+    }, 1400);
+}
+bootScreen();
+
 // ==========================================
 // AUTOSAVE + HOTKEYS
 // ==========================================
@@ -2106,6 +2345,7 @@ if (typeof SaveSystem !== 'undefined') {
     // single player -> selected local slot, clients save nothing.
     const autoSave = () => {
         if (state.paused) return;
+        if (state.player && state.player.isDead) return; // never save a corpse
         if (typeof Multiplayer !== 'undefined' && Multiplayer.isHost && Multiplayer.roomCode) {
             SaveSystem.saveMP(state);
         } else if (!(typeof Multiplayer !== 'undefined' && Multiplayer.roomCode)) {

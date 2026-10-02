@@ -19,6 +19,9 @@ const EnemySpawner = {
         // Don't spawn during menu
         if (this.state.paused) return;
 
+        // No wild spawns inside the sealed cave (its fights come via ritual)
+        if (this.state.player && this.state.player.inCave) return;
+
         // Only spawn if player is alive
         if (this.state.player.hp <= 0) return;
 
@@ -131,30 +134,31 @@ const EnemySpawner = {
         // Rides in on the storm front, over the water
         const x = Utils.clamp(waterX + 350 + Math.random() * 200, waterX + 100, B.MAX_X - 60);
         const y = Utils.clamp(p.y + (Math.random() - 0.5) * 300, B.MIN_Y + 60, B.MAX_Y - 60);
-        this.state.enemies.push({
+        const gullBoss = {
             id: 'boss' + Date.now(),
             enemyType: 'seagull',
             isBoss: true,
             bossName: 'STORMCALLER',
             x, y, vx: 0, vy: 0,
-            hp: 2200, maxHp: 2200,
-            damage: 45,
-            speed: (cfg.speed || 120) + 50,
-            diveSpeed: (cfg.diveSpeed || 300) + 120,
+            hp: 9000, maxHp: 9000,
+            damage: 70,
+            speed: (cfg.speed || 120) + 60,
+            diveSpeed: (cfg.diveSpeed || 300) + 150,
             diveCooldown: 0, diveTimer: 2,
             state: 'circling',
             targetX: p.x, targetY: p.y,
             circleAngle: Math.random() * Math.PI * 2,
             circleRadius: 220,
             circleDirection: Math.random() < 0.5 ? 1 : -1,
-            skillCooldown: 2.5,
+            skillCooldown: 2.0,
             skillIdx: 0, // rotates: strike -> feathers -> roar
             hitCd: 0,
             enraged: false,
-            score: 1500,
-            xp: 800,
+            score: 4000,
+            xp: 2000,
             hitFlash: 0,
-        });
+        };
+        this.state.enemies.push(gullBoss);
         // The storm scatters every fish — no rod fishing during the fight
         try {
             if (typeof Fishing !== 'undefined' && this.state.fishing &&
@@ -165,18 +169,36 @@ const EnemySpawner = {
         Particles.showFloatingText(this.state, '⛈ STORMCALLER HAS ARRIVED ⛈', p.x, p.y - 90, '#f87171');
         Particles.showFloatingText(this.state, '20 GULLS SLAIN — THEIR MOTHER COMES', x, y - 60, '#fbbf24');
         this.state.screenShake = Math.max(this.state.screenShake || 0, 16);
-        try { audio.playRoar(); } catch (e) {}
+        // Cinematic arrival (war-horn boss roar inside — no plain roar here,
+        // or it stacks into mud)
+        try {
+            if (typeof Ritual !== 'undefined' && Ritual.bossIntro) {
+                const info = (typeof STORMCALLER_INFO !== 'undefined') ? STORMCALLER_INFO : { id: 'stormcaller', name: 'Stormcaller' };
+                Ritual.bossIntro(this.state, info, x, y, gullBoss);
+            } else {
+                try { audio.playBossRoar(); } catch (e) {}
+            }
+        } catch (e) {}
     },
 
     updateGullBoss(e, delta, p, dist) {
         const B = CONFIG.WORLD;
+        // Intro dormancy: Stormcaller hangs in the sky, silent and still,
+        // until her cinematic releases her.
+        if (e.dormantUntil && this.state.time < e.dormantUntil) {
+            e.vx *= 0.9;
+            e.vy *= 0.9;
+            e.x += e.vx * delta;
+            e.y += e.vy * delta;
+            return;
+        }
         // Enrage under 40%: faster, angrier, louder
         if (!e.enraged && e.hp < e.maxHp * 0.4) {
             e.enraged = true;
-            e.speed *= 1.35;
-            e.diveSpeed *= 1.3;
+            e.speed *= 1.5;
+            e.diveSpeed *= 1.5;
             Particles.showFloatingText(this.state, '⛈ STORMCALLER ENRAGED ⛈', e.x, e.y - 70, '#ef4444');
-            try { audio.playRoar(); } catch (err) {}
+            try { audio.playBossRoar(); } catch (err) {}
         }
         // Tight storm circle around the player
         e.circleAngle += e.circleDirection * delta * (e.enraged ? 1.1 : 0.7);
@@ -202,7 +224,7 @@ const EnemySpawner = {
             e.skillIdx++;
             if (skill === 'strike') {
                 const alive = this.countEnemies('gullMissile');
-                const n = Math.min(e.enraged ? 5 : 3, Math.max(0, 6 - alive));
+                const n = Math.min(e.enraged ? 6 : 4, Math.max(0, 6 - alive));
                 for (let i = 0; i < n; i++) {
                     const a = Math.atan2(p.y - e.y, p.x - e.x) + (i - (n - 1) / 2) * 0.28;
                     this.state.enemies.push({
@@ -211,7 +233,7 @@ const EnemySpawner = {
                         x: e.x, y: e.y,
                         vx: Math.cos(a) * 520, vy: Math.sin(a) * 520,
                         hp: 30, maxHp: 30,
-                        damage: 35,
+                        damage: 45,
                         life: 4,
                         score: 0, xp: 10,
                         hitFlash: 0,
@@ -238,7 +260,7 @@ const EnemySpawner = {
                 this.state.screenShake = Math.max(this.state.screenShake || 0, 16);
                 Particles.spawnParticles(this.state, e.x, e.y, '#fbbf24', 30, { size: 5 });
                 Particles.showFloatingText(this.state, '⛈ ROAR — STUNNED 2s ⛈', p.x, p.y - 50, '#f87171');
-                try { audio.playRoar(); } catch (err) {}
+                try { audio.playBossRoar(); } catch (err) {}
                 e.skillCooldown = e.enraged ? 3.5 : 4.5;
             }
         }
@@ -354,6 +376,7 @@ const EnemySpawner = {
             id: Date.now() + Math.random(),
             enemyType: 'jumpingFish',
             species: species,
+            bornDeathSeq: this.state._deathSeq || 0, // revenge eligibility stamp (see updateJumpingFish)
             x: sx, y: sy,
             vx: (tx - sx), vy: (ty - sy),
             hp: Math.max(60, (species.maxHp || cfg.baseHp) * 0.4),
@@ -376,6 +399,16 @@ const EnemySpawner = {
             xp: cfg.xp,
             hitFlash: 0,
         });
+        // VOID MUTATION: tears a portal open at the launch point, then
+        // jumps through it. Only void-tainted jumpers carry Void Shards.
+        if (species.mutation === 'void') {
+            for (let i = 0; i < 3; i++) {
+                Particles.spawnParticles(this.state, sx, sy, '#a855f7', 12, { size: 5 });
+            }
+            Particles.showFloatingText(this.state, '🌀 VOID PORTAL!', sx, sy - 50, '#c084fc');
+            this.state.screenShake = Math.max(this.state.screenShake || 0, 8);
+            try { audio.playRoar(); } catch (err) {}
+        }
         const rc = (typeof CONFIG !== 'undefined' && CONFIG.RARITY_COLORS && CONFIG.RARITY_COLORS[species.rarity]) || species.color || '#38bdf8';
         Particles.showFloatingText(this.state, `🐟 ${species.rarity ? species.rarity.toUpperCase() + ' ' : ''}${species.name} leaps ashore!`, tx, ty - 50, rc);
         Particles.spawnWaterSplashes(this.state, sx, sy, 12);
@@ -517,18 +550,29 @@ const EnemySpawner = {
             const e = this.state.enemies[idx];
             if (e.enemyType !== 'jumpingFish') continue;
 
-            // Revenge complete: the player actually died (death stamp — die()
-            // restores HP instantly, so hp<=0 can never be observed after).
-            // Every jumper, mid-leap or on land, heads back to the sea.
+            // Revenge: ONLY jumpers that were alive for the death count.
+            // die() restores HP instantly, so hp<=0 can never be observed
+            // after — jumpers watch the death counter instead. But a stale
+            // counter (died earlier with no jumpers around) must never wipe
+            // FRESH spawns with a bogus "revenge" message: each jumper is
+            // stamped at birth, and only pre-death jumpers are avenged.
+            // Guilt needs proof, too: only jumpers that actually landed a
+            // hit (didHurtPlayer) get "Revenge done" — the rest just flee.
             const deaths = this.state._deathSeq || 0;
             if (deaths > (this.state._jfAvengedSeq || 0)) {
                 this.state._jfAvengedSeq = deaths;
-                const gone = (this.state.enemies || []).filter(en => en && en.enemyType === 'jumpingFish');
-                for (const g of gone) {
-                    Particles.showFloatingText(this.state, 'Revenge done — back to the sea...', g.x, g.y - 30, '#38bdf8');
+                const guilty = (this.state.enemies || []).filter(en =>
+                    en && en.enemyType === 'jumpingFish' && (en.bornDeathSeq || 0) < deaths);
+                if (guilty.length) {
+                    const guiltySet = new Set(guilty);
+                    for (const g of guilty) {
+                        Particles.showFloatingText(this.state,
+                            g.didHurtPlayer ? 'Revenge done — back to the sea...' : 'Fish escaped back to sea...',
+                            g.x, g.y - 30, '#38bdf8');
+                    }
+                    this.state.enemies = (this.state.enemies || []).filter(en => !guiltySet.has(en));
+                    if (guiltySet.has(e)) continue;
                 }
-                this.state.enemies = (this.state.enemies || []).filter(en => !en || en.enemyType !== 'jumpingFish');
-                continue;
             }
 
             // Player died -> floppers escape back to the sea
@@ -719,6 +763,10 @@ const EnemySpawner = {
         const p = this.state.player;
         if (p.hp <= 0 || p.isDead) return;
 
+        // Guilt stamp: this jumper actually drew blood, so a later death
+        // is (partly) its fault — eligible for "Revenge done".
+        if (enemy && enemy.enemyType === 'jumpingFish') enemy.didHurtPlayer = true;
+
         // Armor / umbrella aware (same mitigation as land monsters)
         let dealt = enemy.damage;
         if (typeof Combat !== 'undefined' && Combat.damagePlayer) {
@@ -742,6 +790,20 @@ const EnemySpawner = {
             this.state.enemies = this.state.enemies.filter(e => e !== enemy);
             return;
         }
+        // Boss index: record the kill for BOTH sides (display only — the
+        // host still owns awards/loot below, so nothing pays out twice).
+        if (enemy.isBoss && this.state.player) {
+            this.state.bossDeaths = 0; // won — chances reset
+            try {
+                if (!Array.isArray(this.state.player.slainBosses)) this.state.player.slainBosses = [];
+                const bid = enemy.bossName ? enemy.bossName.toLowerCase() : enemy.enemyType;
+                if (!this.state.player.slainBosses.includes(bid)) this.state.player.slainBosses.push(bid);
+                // Stormcaller tribute: her Storm Egg drops where she falls
+                if (enemy.enemyType === 'seagull' && typeof Ritual !== 'undefined' && Ritual.awardItem) {
+                    Ritual.awardItem(this.state, 'storm_egg', enemy.x, enemy.y, 'Stormcaller tribute');
+                }
+            } catch (e) {}
+        }
         // MP clients: host owns awards + shared loot — just despawn locally
         if (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient()) {
             this.state.enemies = this.state.enemies.filter(e => e !== enemy);
@@ -761,6 +823,16 @@ const EnemySpawner = {
             if (this.state.player.seagullKills % 20 === 0 && !this.gullBossActive()) {
                 this.spawnGullBoss();
             }
+            // Rarely shakes loose a Storm Egg (Hydra key) where it dies
+            if (Math.random() < 0.06 && typeof Ritual !== 'undefined' && Ritual.awardItem) {
+                Ritual.awardItem(this.state, 'storm_egg', enemy.x, enemy.y, 'gull dropped it');
+            }
+        }
+        // Void Shards come ONLY from void-tainted jumpers (mutation).
+        // Plain jumpers never carry one — hunt the purple glow.
+        if (enemy.enemyType === 'jumpingFish' && enemy.species && enemy.species.mutation === 'void' &&
+            typeof Ritual !== 'undefined' && Ritual.awardItem) {
+            Ritual.awardItem(this.state, 'shard', enemy.x, enemy.y, 'void jumper core');
         }
         // Award score and XP
         if (this.state.player) {
@@ -774,9 +846,9 @@ const EnemySpawner = {
                 Player.addXP(this.state, enemy.xp || 0);
             }
 
-            // Check achievements
+            // Check achievements (bosses count toward boss achievements)
             if (typeof Achievements !== 'undefined') {
-                Achievements.checkEnemyKill(this.state, enemy.enemyType);
+                Achievements.checkEnemyKill(this.state, enemy.isBoss ? 'boss' : enemy.enemyType);
             }
 
             Particles.showFloatingText(this.state, `+${enemy.score} coins!`, enemy.x, enemy.y - 30, '#facc15');
@@ -956,6 +1028,21 @@ function renderJumpingFish(ctx, e) {
             angle: ang,
             glow: e.hitFlash
         });
+        // Mutation auras: void-tainted jumpers pulse purple (shard carriers)
+        const mut = e.species.mutation;
+        if (mut === 'void' || mut === 'golden' || mut === 'giant') {
+            const col = mut === 'void' ? '#a855f7' : mut === 'golden' ? '#fde047' : '#fb923c';
+            ctx.save();
+            ctx.globalAlpha = 0.55 + Math.sin(performance.now() / 180) * 0.25;
+            ctx.strokeStyle = col;
+            ctx.lineWidth = 2.5;
+            ctx.shadowColor = col;
+            ctx.shadowBlur = 14;
+            ctx.beginPath();
+            ctx.arc(e.x, e.y - h * 70, (e.species.size || 16) * 1.1, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
     }
 }
 

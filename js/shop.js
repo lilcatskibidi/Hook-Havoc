@@ -42,11 +42,13 @@ const Shop = {
         const mpHud = document.getElementById('mp-hud');
 
         // When a gun PNG finishes probing, refresh the open Guns tab so
-        // the SKIN button flips from NO PNG to PNG without reopening.
+        // the SKIN button flips from NO PNG to PNG without reopening
+        // (and the model previews pick up the custom art).
         try {
             if (typeof GunSkinLoader !== 'undefined') {
                 GunSkinLoader.onReady = () => {
                     try {
+                        if (typeof Render !== 'undefined') Render._gunPreviewRev++;
                         if (!modal.classList.contains('hidden') && this._tab === 'weapons') {
                             this.renderTab(state, 'weapons');
                         }
@@ -92,14 +94,24 @@ const Shop = {
         });
 
         document.getElementById('btn-sell-all').onclick = () => {
-            const total = state.player.bucket.reduce((acc, f) => acc + (f.value || 0), 0);
+            // Locked fish AND key items are keepers — SELL ALL only sells unlocked fish
+            const sellable = (state.player.bucket || []).filter(f => !f.locked && !f.keyItem);
+            const lockedKept = (state.player.bucket || []).length - sellable.length;
+            const total = sellable.reduce((acc, f) => acc + (f.value || 0), 0);
             if (total === 0) {
                 try { audio.playError(); } catch (e) {}
                 return;
             }
             state.player.coins += total;
-            state.player.bucket = [];
+            // Keepers stay: locked fish AND key items (summon keys/trophies
+            // are unsellable — SELL ALL must never delete them).
+            state.player.bucket = (state.player.bucket || []).filter(f => f.locked || f.keyItem);
             try { audio.playCoin(); } catch (e) {}
+            if (lockedKept > 0) {
+                const keysKept = (state.player.bucket || []).filter(f => f.keyItem).length;
+                const tag = keysKept > 0 ? `🔒+🔑` : `🔒`;
+                Particles.showFloatingText(state, `SOLD +${total}c · KEPT ${lockedKept} ${tag}`, state.player.x, state.player.y - 50, '#facc15');
+            }
             Player.addXP(state, Math.round(total / 5));
             Player.refreshHUD(state);
             // Sold quest fish no longer count — resync Marlin's job progress
@@ -127,29 +139,56 @@ const Shop = {
         else if (tab === 'rods')    this.renderRods(state, content);
         else if (tab === 'armor')   this.renderArmorTab(state, content);
         else if (tab === 'ammo')    this.renderAmmo(state, content);
+        else if (tab === 'bucket')  this.renderBucketTab(state, content);
+        else if (tab === 'bait')    this.renderBaitTab(state, content);
         else if (tab === 'casino')  this.renderCasinoTab(state, content);
         else if (tab === 'beach')   this.renderBeachTab(state, content);
     },
 
-    renderSell(state, content) {
-        let totalVal = 0;
-        const bucket = state.player.bucket;
+    // Lock a bucket fish so SELL ALL skips it (quest fish keeper).
+    // Clones into the bucket slot instead of mutating, so a shared
+    // species ref (post-load pristine fish) can never be polluted.
+    setFishLock(state, fish, lock) {
+        const bucket = state.player.bucket || [];
+        const i = bucket.indexOf(fish);
+        if (i < 0) return;
+        const copy = Object.assign({}, fish);
+        if (lock) copy.locked = true;
+        else delete copy.locked;
+        bucket[i] = copy;
+    },
 
-        if (!bucket || bucket.length === 0) {
+    renderSell(state, content) {
+        const bucket = state.player.bucket || [];
+        const sellable = bucket.filter(f => !f.locked && !f.keyItem);
+        const totalVal = sellable.reduce((acc, f) => acc + (f.value || 0), 0);
+        const lockedCount = bucket.filter(f => f.locked && !f.keyItem).length;
+        const keyItems = bucket.filter(f => f.keyItem);
+
+        if (bucket.length === 0) {
             content.innerHTML = `<div class="text-center py-16">
                 <i class="fa-solid fa-fish text-5xl text-slate-700 mb-3"></i>
                 <p class="text-slate-500 text-sm">Your fishing bucket is empty!</p>
             </div>`;
         } else {
+            if (lockedCount > 0) {
+                const note = document.createElement('div');
+                note.className = 'glass-panel-light p-2.5 rounded-xl text-center text-xs font-bold text-amber-300 border border-amber-500/30 mb-1';
+                note.innerHTML = `🔒 ${lockedCount} locked fish kept safe from SELL ALL`;
+                content.appendChild(note);
+            }
             const grouped = {};
             bucket.forEach(fish => {
-                if (!grouped[fish.id]) grouped[fish.id] = { species: fish, count: 0 };
+                if (fish.keyItem) return; // key items get their own section below
+                if (!grouped[fish.id]) grouped[fish.id] = { species: fish, count: 0, locked: 0 };
                 grouped[fish.id].count++;
-                totalVal += (fish.value || 0);
+                if (fish.locked) grouped[fish.id].locked++;
             });
 
-            Object.values(grouped).forEach(({ species, count }) => {
+            Object.values(grouped).forEach(({ species, count, locked }) => {
                 const r = RARITY_LABELS[species.rarity] || RARITY_LABELS.common;
+                const unlocked = count - locked;
+                const allLocked = locked === count;
                 const div = document.createElement('div');
                 div.className = `shop-item glass-panel-light p-3 rounded-xl flex items-center justify-between rarity-${species.rarity}`;
                 div.innerHTML = `
@@ -164,15 +203,66 @@ const Shop = {
                                 <span class="text-[10px] font-black px-1.5 py-0.5 rounded"
                                       style="background:${r.color}20;color:${r.color}">${r.label}</span>
                             </div>
-                            <span class="text-xs text-slate-400">×${count} · ${species.value}c each</span>
+                            <span class="text-xs text-slate-400">×${count} · ${species.value}c each${locked > 0 ? ` · <span class="text-amber-300 font-bold">🔒${locked} locked</span>` : ''}</span>
                         </div>
                     </div>
-                    <span class="text-amber-400 font-bold">
-                        <i class="fa-solid fa-coins mr-1"></i>${species.value * count}
-                    </span>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button data-lock-group="${species.id}" title="${allLocked ? 'Unlock all (allow selling)' : 'Lock all (protect from SELL ALL)'}"
+                                class="w-8 h-8 rounded-lg text-sm font-black border transition-all ${allLocked ? 'bg-amber-500/25 text-amber-300 border-amber-500/50' : 'bg-slate-800 text-slate-400 border-slate-600 hover:bg-slate-700'}">
+                            ${allLocked ? '🔒' : '🔓'}
+                        </button>
+                        <span class="text-amber-400 font-bold">
+                            <i class="fa-solid fa-coins mr-1"></i>${species.value * unlocked}
+                        </span>
+                    </div>
                 `;
                 content.appendChild(div);
             });
+
+            content.querySelectorAll('[data-lock-group]').forEach(btn => {
+                btn.onclick = () => {
+                    try { audio.playUIClick(); } catch (e) {}
+                    const items = (state.player.bucket || []).filter(f => f && f.id === btn.dataset.lockGroup);
+                    if (!items.length) return;
+                    const lock = !items.every(f => f.locked);
+                    items.forEach(f => this.setFishLock(state, f, lock));
+                    if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+                    this.renderTab(state, 'sell');
+                };
+            });
+
+            // Summon keys / trophies: physical, unsellable, used at rituals
+            if (keyItems.length) {
+                const kNote = document.createElement('div');
+                kNote.className = 'text-[10px] font-black tracking-widest text-slate-500 mt-2 mb-1 px-1';
+                kNote.innerText = '🔑 SUMMON ITEMS (UNSELLABLE — SPEND AT RITUALS)';
+                content.appendChild(kNote);
+                const kGrouped = {};
+                keyItems.forEach(it => {
+                    if (!kGrouped[it.id]) kGrouped[it.id] = { item: it, count: 0 };
+                    kGrouped[it.id].count++;
+                });
+                Object.values(kGrouped).forEach(({ item, count }) => {
+                    const div = document.createElement('div');
+                    div.className = 'shop-item glass-panel-light p-3 rounded-xl flex items-center justify-between';
+                    div.style.borderLeft = `3px solid ${item.color || '#fbbf24'}`;
+                    div.innerHTML = `
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-lg flex items-center justify-center text-2xl"
+                                 style="background:${item.color}22;border:1px solid ${item.color}66">
+                                ${item.icon || '❔'}
+                            </div>
+                            <div>
+                                <span class="font-bold text-white text-sm">${item.name}</span>
+                                <span class="text-xs text-slate-400"> ×${count}</span>
+                                <div class="text-[10px] text-slate-500">${item.id === 'storm_egg' ? 'Bake into a Hydra Lure (Bait tab)' : item.id === 'shard' ? '3 open the Void Shepherd (Ritual)' : 'Emperor gate piece (Ritual)'}</div>
+                            </div>
+                        </div>
+                        <span class="text-[10px] font-black px-2 py-1 rounded bg-slate-800 text-slate-400 border border-slate-600 shrink-0">KEY</span>
+                    `;
+                    content.appendChild(div);
+                });
+            }
         }
 
         const totalEl = document.getElementById('shop-total-val');
@@ -180,6 +270,34 @@ const Shop = {
 
         const sellBtn = document.getElementById('btn-sell-all');
         if (sellBtn) sellBtn.disabled = (totalVal === 0);
+    },
+
+    // DPS + special-skill chips shown on every gun card so the power
+    // ladder reads at a glance (rarity should always mean stronger).
+    weaponDPS(w) {
+        return Math.round(((w.damage || 0) * (w.count || 1)) / (w.fireRate || 1));
+    },
+
+    weaponTags(w) {
+        const tags = [];
+        const T = (t, c) => tags.push({ t, c });
+        if (w.pierce) T('PIERCE', '#93c5fd');
+        if (w.explosive) T('BLAST', '#fb923c');
+        if (w.burn) T(`BURN ${w.burnDps || 12}/s`, '#f87171');
+        if (w.poison) T('VENOM', '#a3e635');
+        if (w.freeze) T('FREEZE', '#67e8f9');
+        if (w.stun) T('STUN', '#fde047');
+        if (w.chain) T('CHAIN', '#38bdf8');
+        if (w.lifesteal) T(`DRAIN ${Math.round(w.lifesteal * 100)}%`, '#34d399');
+        if (w.coral) T('REEF', '#2dd4bf');
+        if (w.slowHook) T('SLOW HOOK', '#7dd3fc');
+        if (w.drainMult) T(`STAM X${w.drainMult}`, '#f0abfc');
+        if (w.critCh) T(`CRIT ${Math.round(w.critCh * 100)}%`, '#fbbf24');
+        if (w.executeMult) T(`EXEC X${w.executeMult}`, '#ef4444');
+        if (w.bossMult) T(`BOSS X${w.bossMult}`, '#c084fc');
+        if (w.ecoCh) T(`ECO ${Math.round(w.ecoCh * 100)}%`, '#86efac');
+        if (w.knockMult) T(`KNOCK X${w.knockMult}`, '#fdba74');
+        return tags;
     },
 
     renderWeapons(state, content) {
@@ -220,10 +338,19 @@ const Shop = {
             const div = document.createElement('div');
             div.className = `shop-item glass-panel-light p-4 rounded-xl flex items-center justify-between rarity-${w.rarity}`;
 
+            // Live gun-model preview (procedural model or custom PNG skin),
+            // so buyers see the actual gun. Falls back to the FA icon.
+            let gunArt = `<i class="fa-solid ${w.icon} text-amber-400 text-lg"></i>`;
+            try {
+                if (typeof Render !== 'undefined' && Render.gunPreview) {
+                    const snap = Render.gunPreview(w, p.gunSkins);
+                    if (snap) gunArt = `<img src="${snap}" class="gun-preview max-w-[72px] max-h-[36px] object-contain" alt="${w.name}">`;
+                }
+            } catch (e) {}
             const leftHTML = `
                 <div class="flex items-center gap-3">
-                    <div class="w-12 h-12 rounded-xl flex items-center justify-center bg-slate-900/60 border border-slate-700">
-                        <i class="fa-solid ${w.icon} text-amber-400 text-lg"></i>
+                    <div class="w-[84px] h-12 rounded-xl flex items-center justify-center bg-slate-900/60 border border-slate-700 shrink-0 overflow-hidden px-1">
+                        ${gunArt}
                     </div>
                     <div>
                         <div class="flex items-center gap-2 flex-wrap">
@@ -239,6 +366,10 @@ const Shop = {
                             <span class="text-rose-400">DMG ${w.damage}</span>
                             <span class="text-amber-400">${w.pellets}</span>
                             <span class="text-sky-400">RNG ${w.range}</span>
+                            <span class="text-emerald-400">⚡ ~${Shop.weaponDPS(w)} DPS</span>
+                        </div>
+                        <div class="flex gap-1 mt-1 flex-wrap">
+                            ${Shop.weaponTags(w).map(t => `<span class="text-[9px] font-black px-1.5 py-px rounded border" style="color:${t.c};border-color:${t.c}55;background:${t.c}14">${t.t}</span>`).join('')}
                         </div>
                     </div>
                 </div>
@@ -624,6 +755,164 @@ const Shop = {
         });
     },
 
+    renderBucketTab(state, content) {
+        const p = state.player;
+        const cap = p.bucketCapacity || 15;
+        const list = (typeof BUCKET_UPGRADES !== 'undefined') ? BUCKET_UPGRADES : [];
+
+        const head = document.createElement('div');
+        head.className = 'glass-panel-light p-4 rounded-xl text-center mb-2';
+        head.innerHTML = `
+            <div class="w-14 h-14 mx-auto mb-2 rounded-2xl flex items-center justify-center" style="background: linear-gradient(135deg, #38bdf8, #0ea5e9);">
+                <i class="fa-solid fa-bucket text-2xl text-white"></i>
+            </div>
+            <h3 class="font-bold text-sky-300 text-lg">Fish Bucket</h3>
+            <p class="text-slate-400 text-sm">Currently holds <span class="text-white font-bold">${cap} fish</span> (${(p.bucket || []).length} inside)</p>
+        `;
+        content.appendChild(head);
+
+        list.forEach(u => {
+            const owned = cap >= u.cap;
+            const isCurrent = cap === u.cap;
+            const div = document.createElement('div');
+            div.className = 'shop-item glass-panel-light p-4 rounded-xl flex items-center justify-between mb-2';
+            div.innerHTML = `
+                <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 rounded-xl flex items-center justify-center bg-slate-900/60 border border-slate-700">
+                        <i class="fa-solid ${u.icon || 'fa-bucket'} text-sky-400 text-lg"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-white text-base">${u.name}</h3>
+                        <p class="text-xs text-slate-400 mt-0.5">${u.desc}</p>
+                        <div class="text-[10px] font-bold text-sky-400 mt-0.5">CAPACITY ${u.cap}</div>
+                    </div>
+                </div>`;
+            const right = document.createElement('div');
+            right.className = 'shrink-0';
+            if (isCurrent) {
+                right.innerHTML = `<span class="text-xs text-emerald-400 font-bold px-3 py-1.5 bg-emerald-500/20 rounded-lg border border-emerald-500/30">CURRENT</span>`;
+            } else if (owned) {
+                right.innerHTML = `<span class="text-xs text-slate-500 font-bold px-3 py-1.5 bg-slate-800/60 rounded-lg border border-slate-700">OWNED</span>`;
+            } else {
+                const btn = document.createElement('button');
+                btn.className = 'btn-buy px-4 py-2 text-slate-950 text-xs font-black rounded-xl';
+                btn.innerText = `${u.price.toLocaleString()} C`;
+                btn.disabled = p.coins < u.price;
+                btn.onclick = () => {
+                    if (p.coins < u.price || (p.bucketCapacity || 15) >= u.cap) {
+                        try { audio.playError(); } catch (e) {}
+                        return;
+                    }
+                    p.coins -= u.price;
+                    p.bucketCapacity = u.cap;
+                    try { audio.playCoin(); } catch (e) {}
+                    Player.refreshHUD(state);
+                    if (typeof AntiCheat !== 'undefined') AntiCheat.markLegit();
+                    if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+                    Particles.showFloatingText(state, `BUCKET UPGRADED: ${u.cap} SLOTS!`, p.x, p.y - 40, '#38bdf8');
+                    this.renderTab(state, 'bucket');
+                };
+                right.appendChild(btn);
+            }
+            div.appendChild(right);
+            content.appendChild(div);
+        });
+    },
+
+    renderBaitTab(state, content) {
+        const p = state.player;
+        if (typeof Ritual !== 'undefined' && Ritual.ensure) Ritual.ensure(state);
+        const stock = p.baitStock || {};
+        const activeId = (typeof p.activeBait === 'string') ? p.activeBait : null;
+        const activeDef = activeId ? BAITS.find(b => b.id === activeId) : null;
+
+        const head = document.createElement('div');
+        head.className = 'glass-panel-light p-4 rounded-xl text-center mb-2';
+        head.innerHTML = `
+            <div class="w-14 h-14 mx-auto mb-2 rounded-2xl flex items-center justify-center" style="background: linear-gradient(135deg, #f59e0b, #ef4444);">
+                <i class="fa-solid fa-worm text-2xl text-white"></i>
+            </div>
+            <h3 class="font-bold text-amber-300 text-lg">Bait Box</h3>
+            <p class="text-slate-400 text-sm">1 craft = 10 baits · 1 hook eats 1 bait. Locked 🔒 keepers are never used.</p>
+            ${activeDef ? `<p class="text-xs font-bold mt-1" style="color:${activeDef.color}">◉ ${activeDef.name} on the hook — ×${stock[activeDef.id] || 0} left</p>`
+                  : `<p class="text-xs text-slate-500 mt-1">No bait on the hook.</p>`}
+        `;
+        content.appendChild(head);
+
+        // Summon keys & trophies live here too (discovery hub, live bucket counts)
+        const keysBox = document.createElement('div');
+        keysBox.className = 'glass-panel-light p-3 rounded-xl mb-2 text-center';
+        keysBox.innerHTML = `
+            <div class="text-[10px] font-black tracking-widest text-slate-400 mb-1.5">SUMMON STASH (in your bucket)</div>
+            ${(typeof Ritual !== 'undefined' && Ritual.stashLine) ? Ritual.stashLine(state) : ''}
+            <div class="text-[10px] text-slate-500 mt-1.5">🥚 Stormcaller + gulls + legendary catches · 🔮 void-tainted jumpers/catches only · 🏆 boss kills · 🌊 Marlin's rite calls the Priest · 🌀 fish with a Hydra Lure equipped</div>
+        `;
+        content.appendChild(keysBox);
+
+        BAITS.forEach(def => {
+            const have = stock[def.id] || 0;
+            const isActive = activeId === def.id;
+            const chk = (typeof Ritual !== 'undefined' && Ritual.canCraft)
+                ? Ritual.canCraft(state, def.id) : { ok: false, why: '' };
+            const buyPrice = (typeof BAIT_PRICES !== 'undefined' && BAIT_PRICES[def.id]) || 0;
+            const recipeTxt = (def.recipe.key ? `${BOSS_KEYS[def.recipe.key].icon} ${BOSS_KEYS[def.recipe.key].name} ×1 + ` : '') +
+                `${def.recipe.count}× ${def.recipe.tier} fish → +${def.yield || 10}`;
+            const div = document.createElement('div');
+            div.className = 'shop-item glass-panel-light p-4 rounded-xl flex items-center justify-between mb-2';
+            div.innerHTML = `
+                <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-12 h-12 rounded-xl flex items-center justify-center bg-slate-900/60 border border-slate-700 shrink-0">
+                        <i class="fa-solid ${def.icon} text-lg" style="color:${def.color}"></i>
+                    </div>
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <h3 class="font-bold text-white text-base truncate">${def.name}</h3>
+                            ${def.hookBait ? '<span class="text-[10px] font-black px-1.5 py-0.5 rounded bg-red-900/60 text-red-300 border border-red-500/50">HOOKS HYDRA</span>' : ''}
+                            ${isActive ? '<span class="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">ON HOOK</span>' : ''}
+                        </div>
+                        <p class="text-xs text-slate-400 mt-0.5">${def.desc}</p>
+                        <p class="text-[10px] text-slate-500 mt-0.5">Craft: ${recipeTxt} · Stock: <span class="text-white font-bold">${have}</span></p>
+                        ${!chk.ok && have === 0 ? `<p class="text-[10px] text-amber-300/80">${chk.why}</p>` : ''}
+                    </div>
+                </div>`;
+            const right = document.createElement('div');
+            right.className = 'flex flex-col gap-1 shrink-0 ml-2';
+            const craftBtn = document.createElement('button');
+            craftBtn.className = 'px-3 py-1.5 text-slate-950 text-xs font-black rounded-lg ' +
+                (chk.ok ? 'bg-amber-500 hover:bg-amber-400' : 'bg-slate-700 text-slate-500 cursor-not-allowed');
+            craftBtn.innerText = `CRAFT +${def.yield || 10}`;
+            craftBtn.disabled = !chk.ok;
+            craftBtn.onclick = () => {
+                if (typeof Ritual !== 'undefined' && Ritual.craftBait) Ritual.craftBait(state, def.id);
+                this.renderTab(state, 'bait');
+            };
+            right.appendChild(craftBtn);
+            if (buyPrice > 0) {
+                const buyBtn = document.createElement('button');
+                const afford = p.coins >= buyPrice;
+                buyBtn.className = 'px-3 py-1.5 text-xs font-black rounded-lg ' +
+                    (afford ? 'bg-yellow-500 hover:bg-yellow-400 text-slate-950' : 'bg-slate-800 text-slate-500 cursor-not-allowed');
+                buyBtn.innerText = `BUY +10 · ${buyPrice}c`;
+                buyBtn.disabled = !afford;
+                buyBtn.onclick = () => {
+                    if (typeof Ritual !== 'undefined' && Ritual.buyBait(state, def.id)) this.renderTab(state, 'bait');
+                };
+                right.appendChild(buyBtn);
+            }
+            const useBtn = document.createElement('button');
+            useBtn.className = 'px-3 py-1.5 text-xs font-black rounded-lg ' +
+                (have > 0 && !isActive ? 'bg-sky-500 hover:bg-sky-400 text-slate-950' : 'bg-slate-800 text-slate-500 cursor-not-allowed');
+            useBtn.innerText = isActive ? 'EQUIPPED' : 'USE';
+            useBtn.disabled = !(have > 0) || isActive;
+            useBtn.onclick = () => {
+                if (typeof Ritual !== 'undefined' && Ritual.useBait(state, def.id)) this.renderTab(state, 'bait');
+            };
+            right.appendChild(useBtn);
+            div.appendChild(right);
+            content.appendChild(div);
+        });
+    },
+
     renderCasinoTab(state, content) {
         content.innerHTML = `
             <div class="glass-panel-light p-4 rounded-xl text-center">
@@ -809,6 +1098,12 @@ const Shop = {
         p.ownedArmor.push(id);
         // Auto-equip (sets occupy all slots)
         this.equipArmor(state, id, true);
+        // Fresh purchase patches you up: buying (not swapping) heals the
+        // piece's HP bonus once — swapping owned sets can't farm heals.
+        if (item.hpBonus) {
+            p.hp = Math.min(p.maxHp, p.hp + item.hpBonus);
+            Particles.showFloatingText(state, `+${item.hpBonus} HP ${item.name}!`, p.x, p.y - 50, '#34d399');
+        }
         try { audio.playCoin(); } catch (e) {}
         Player.refreshHUD(state);
         if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
@@ -820,6 +1115,7 @@ const Shop = {
         if (!p.equippedArmor) p.equippedArmor = {};
         const item = ARMOR.find(a => a.id === id);
         if (!item || !(p.ownedArmor || []).includes(id)) return;
+        const oldMax = p.maxHp;
         if (item.type === 'set') {
             ['head', 'chest', 'hands', 'feet'].forEach(s => { p.equippedArmor[s] = id; });
         } else {
@@ -827,6 +1123,14 @@ const Shop = {
             p.equippedArmor[item.type] = id;
         }
         this.applyArmorStats(state);
+        // Make the gain visible: max HP up already means real HP up (ratio
+        // preserve) — flash exactly what changed so wearing feels rewarding
+        const gained = (p.maxHp || 0) - (oldMax || 0);
+        if (gained !== 0 && !silent) {
+            Particles.showFloatingText(state,
+                gained > 0 ? `MAX HP +${gained} (${p.maxHp})` : `MAX HP ${gained} (${p.maxHp})`,
+                p.x, p.y - 50, gained > 0 ? '#34d399' : '#94a3b8');
+        }
         if (!silent) try { audio.playUIClick(); } catch (e) {}
         if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
         this.renderTab(state, 'armor');

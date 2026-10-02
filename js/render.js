@@ -272,6 +272,15 @@ const Render = {
         } catch (e) { return 1; }
     },
 
+    // World-snapped loop start: decor lattices must be anchored to the
+    // WORLD grid, never to the view edge — otherwise the whole lattice
+    // slides with the camera (decor "follows" the player, then snaps back).
+    // NOTE: no min-clamp here on purpose — clamping re-breaks congruence
+    // at the world edge. Cull out-of-world points per-iteration instead.
+    _snapStart(viewStart, margin, step) {
+        return Math.floor((viewStart - margin) / step) * step;
+    },
+
     // Adaptive quality: sustained slow frames -> halve decor work
     _adapt(state, delta) {
         state._ft = (state._ft || 0) * 0.95 + delta * 1000 * 0.05;
@@ -302,21 +311,33 @@ const Render = {
             ctx.fillRect(v0.x0, v0.y0, v0.x1 - v0.x0, v0.y1 - v0.y0);
         } catch (e) {}
 
-        this.drawLand(state, ctx);
-        this.drawWater(state, ctx);
-        this.drawWorldBorder(state, ctx);
-        this.drawShoreFoam(state, ctx);
+        // The cave is a whole new place: its own backdrop replaces the
+        // beach/sea/border/foam while inside. Entities draw on top as usual.
+        // NOTE: the flag lives on the PLAYER (p.inCave), not on state.
+        const inCave = !!(state.player && state.player.inCave);
+        if (inCave && typeof Ritual !== 'undefined' && Ritual.drawCaveInterior) {
+            Ritual.drawCaveInterior(state, ctx);
+        } else {
+            this.drawLand(state, ctx);
+            this.drawWater(state, ctx);
+            this.drawWorldBorder(state, ctx);
+            this.drawShoreFoam(state, ctx);
+        }
         this.drawDelayedBlasts(state, ctx);
         this.drawGroundLoot(state, ctx);
         this.drawBobber(state, ctx);
         this.drawHookedFish(state, ctx);
         this.drawLandMonsters(state, ctx);
         this.drawEnemies(state, ctx);
-        this.drawShopZones(state, ctx);
-        if (typeof NPC !== 'undefined' && NPC.drawWorld) NPC.drawWorld(state, ctx);
+        if (!inCave) this.drawShopZones(state, ctx);
+        if (!inCave && typeof NPC !== 'undefined' && NPC.drawWorld) NPC.drawWorld(state, ctx);
+        if (typeof Ritual !== 'undefined' && Ritual.drawWorld) Ritual.drawWorld(state, ctx);
         this.drawBullets(state, ctx);
         this.drawPlayer(state, ctx);
         this.drawParticles(state, ctx);
+        // Cave darkness + player lantern: after the world + player so the
+        // fog settles over rock AND entities, but under floating texts.
+        if (inCave && typeof Ritual !== 'undefined' && Ritual.drawCaveFog) Ritual.drawCaveFog(state, ctx);
         this.drawFloatingTexts(state, ctx);
 
         ctx.restore();
@@ -364,8 +385,10 @@ const Render = {
         ctx.fillStyle = '#7cb0c9';
         const vw0 = this._view(state, ctx);
         const pudStep = this._ds(state);
-        for (let px = Math.max(B.MIN_X, vw0.x0 - 420); px < Math.min(w, vw0.x1); px += 420 * pudStep) {
-            for (let py = Math.max(B.MIN_Y, vw0.y0 - 380); py < Math.min(B.MAX_Y, vw0.y1); py += 380 * pudStep) {
+        const pudSX = 420 * pudStep, pudSY = 380 * pudStep;
+        for (let px = this._snapStart(vw0.x0, 420, pudSX); px < Math.min(w, vw0.x1); px += pudSX) {
+            for (let py = this._snapStart(vw0.y0, 380, pudSY); py < Math.min(B.MAX_Y, vw0.y1); py += pudSY) {
+                if (px < B.MIN_X - pudSX || py < B.MIN_Y - pudSY) continue;
                 const seedX = px * 0.913 + py * 0.417;
                 const seedY = py * 0.731 + px * 0.223;
                 const rx = 30 + (Math.sin(seedX) * 0.5 + 0.5) * 45;
@@ -387,8 +410,9 @@ const Render = {
         ctx.globalAlpha = 0.18 * grainFade;
         const vwGrain = this._view(state, ctx);
         const grainStep = (state._lowFx ? 30 : 14) * this._ds(state);
-        for (let gx = Math.max(beachStart, vwGrain.x0); gx < Math.min(beachEnd, vwGrain.x1); gx += grainStep) {
-            for (let gy = Math.max(beachTop, vwGrain.y0); gy < Math.min(beachBot, vwGrain.y1); gy += grainStep) {
+        for (let gx = this._snapStart(vwGrain.x0, grainStep, grainStep); gx < Math.min(beachEnd, vwGrain.x1); gx += grainStep) {
+            for (let gy = this._snapStart(vwGrain.y0, grainStep, grainStep); gy < Math.min(beachBot, vwGrain.y1); gy += grainStep) {
+                if (gx < beachStart - grainStep || gy < beachTop - grainStep) continue;
                 const h1 = Math.sin(gx * 12.9898 + gy * 78.233) * 43758.5453;
                 const h2 = Math.sin(gx * 39.346 + gy * 11.135) * 24634.6345;
                 const ox = (h1 - Math.floor(h1)) * grainStep;
@@ -401,42 +425,8 @@ const Render = {
         ctx.restore();
         }
 
-        ctx.save();
-        const vw1 = this._view(state, ctx);
-        const decStep = this._ds(state);
-        for (let px = Math.max(B.MIN_X, vw1.x0 - 260); px < Math.min(w, vw1.x1); px += 260 * decStep) {
-            for (let py = Math.max(B.MIN_Y, vw1.y0 - 240); py < Math.min(B.MAX_Y, vw1.y1); py += 240 * decStep) {
-                const h = Math.sin(px * 0.317 + py * 0.921) * 61728.35;
-                const r = h - Math.floor(h);
-                if (r < 0.25) {
-                    const cx = px + r * 200;
-                    const cy = py + (Math.sin(px * 5.3 + py * 3.1) * 0.5 + 0.5) * 180;
-                    const kind = Math.floor(r * 100) % 3;
-                    if (kind === 0) {
-                        ctx.fillStyle = '#f5e6d0';
-                        ctx.beginPath();
-                        ctx.arc(cx, cy, 2.4, 0, Math.PI * 2);
-                        ctx.fill();
-                        ctx.strokeStyle = 'rgba(200,170,130,0.7)';
-                        ctx.lineWidth = 0.6;
-                        ctx.stroke();
-                    } else if (kind === 1) {
-                        ctx.fillStyle = '#7e6a58';
-                        ctx.beginPath();
-                        ctx.ellipse(cx, cy, 3, 2.2, r * 6, 0, Math.PI * 2);
-                        ctx.fill();
-                    } else {
-                        ctx.strokeStyle = '#6b4f34';
-                        ctx.lineWidth = 1.4;
-                        ctx.beginPath();
-                        ctx.moveTo(cx - 4, cy);
-                        ctx.lineTo(cx + 4, cy + 1);
-                        ctx.stroke();
-                    }
-                }
-            }
-        }
-        ctx.restore();
+        // (Beach speckles — shells/pebbles/driftwood — were removed here:
+        // their lattice was view-anchored and visibly swam with the camera.)
 
         ctx.save();
         ctx.globalAlpha = 0.35;
@@ -453,8 +443,10 @@ const Render = {
         ctx.lineWidth = 1;
         const vwRip = this._view(state, ctx);
         const ripStep = this._ds(state);
+        const ripRowH = 22 * ripStep;
         let ripRow = 0;
-        for (let y = Math.max(B.MIN_Y + 40, vwRip.y0); y < Math.min(B.MAX_Y, vwRip.y1); y += 22 * ripStep) {
+        for (let y = this._snapStart(vwRip.y0, ripRowH, ripRowH); y < Math.min(B.MAX_Y, vwRip.y1); y += ripRowH) {
+            if (y < B.MIN_Y + 40 - ripRowH) continue;
             if (state._lowFx && (ripRow++ % 2)) continue;
             ctx.beginPath();
             for (let x = Math.max(B.MIN_X, vwRip.x0); x < Math.min(w - 40, vwRip.x1); x += 24 * ripStep) {
@@ -506,8 +498,9 @@ const Render = {
         if (arcFade > 0) {
         ctx.save();
         ctx.globalAlpha = arcFade;
-        for (let x = Math.max(w + 30, vwWater.x0); x < Math.min(B.MAX_X + 200, vwWater.x1); x += arcStep) {
-            for (let y = Math.max(B.MIN_Y - 100, vwWater.y0); y < Math.min(B.MAX_Y + 200, vwWater.y1); y += arcStep) {
+        for (let x = this._snapStart(vwWater.x0, arcStep, arcStep); x < Math.min(B.MAX_X + 200, vwWater.x1); x += arcStep) {
+            for (let y = this._snapStart(vwWater.y0, arcStep, arcStep); y < Math.min(B.MAX_Y + 200, vwWater.y1); y += arcStep) {
+                if (x < w + 30 - arcStep || y < B.MIN_Y - 100 - arcStep) continue;
                 // Gentle breathing sway only — the old ±12px crawl made the
                 // whole sea look like it was shimmering.
                 ctx.beginPath();
@@ -552,11 +545,13 @@ const Render = {
             ctx.lineWidth = 1;
             const vwGrid = this._view(state, ctx);
             ctx.beginPath();
-            for (let x = Math.max(B.MIN_X, vwGrid.x0 - B.GRID_SIZE); x <= Math.min(B.MAX_X, vwGrid.x1); x += B.GRID_SIZE) {
+            for (let x = this._snapStart(vwGrid.x0, B.GRID_SIZE, B.GRID_SIZE); x <= Math.min(B.MAX_X, vwGrid.x1); x += B.GRID_SIZE) {
+                if (x < B.MIN_X - B.GRID_SIZE) continue;
                 ctx.moveTo(x, Math.max(B.MIN_Y, vwGrid.y0));
                 ctx.lineTo(x, Math.min(B.MAX_Y, vwGrid.y1));
             }
-            for (let y = Math.max(B.MIN_Y, vwGrid.y0 - B.GRID_SIZE); y <= Math.min(B.MAX_Y, vwGrid.y1); y += B.GRID_SIZE) {
+            for (let y = this._snapStart(vwGrid.y0, B.GRID_SIZE, B.GRID_SIZE); y <= Math.min(B.MAX_Y, vwGrid.y1); y += B.GRID_SIZE) {
+                if (y < B.MIN_Y - B.GRID_SIZE) continue;
                 ctx.moveTo(Math.max(B.MIN_X, vwGrid.x0), y);
                 ctx.lineTo(Math.min(B.MAX_X, vwGrid.x1), y);
             }
@@ -765,9 +760,27 @@ const Render = {
 
             ctx.save();
             ctx.globalAlpha = alpha;
+            // Summon-item loot (boss keys/trophies): emoji model + glow ring
+            if (item.item && item.item.keyItem) {
+                const bobY = item.y + bob + sinkY;
+                ctx.shadowColor = item.item.color || '#fff';
+                ctx.shadowBlur = 18;
+                ctx.font = '30px serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(item.item.icon || '❔', item.x, bobY);
+                ctx.shadowBlur = 0;
+                ctx.globalAlpha = alpha * (0.55 + Math.sin(state.time * 5 + item.x) * 0.25);
+                ctx.strokeStyle = item.item.color || '#fff';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(item.x, bobY - 10, 20 * sinkScale, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.globalAlpha = alpha;
+            } else {
             ctx.shadowColor = item.species.color;
             ctx.shadowBlur = 15;
             this.drawFishModel(ctx, item.x, item.y + bob + sinkY, item.species.size * 0.6 * sinkScale, item.species, {});
+            }
             ctx.restore();
 
             ctx.save();
@@ -776,9 +789,11 @@ const Render = {
             ctx.textAlign = 'center';
             ctx.strokeStyle = '#000';
             ctx.lineWidth = 3;
-            ctx.strokeText(item.species.name, item.x, item.y - 22 + bob + sinkY);
-            ctx.fillStyle = '#fff';
-            ctx.fillText(item.species.name, item.x, item.y - 22 + bob + sinkY);
+            const labelName = (item.item && item.item.keyItem) ? `${item.item.icon || ''} ${item.item.name}` : item.species.name;
+            const labelY = item.y - 22 + bob + sinkY;
+            ctx.strokeText(labelName, item.x, labelY);
+            ctx.fillStyle = (item.item && item.item.keyItem) ? (item.item.color || '#fff') : '#fff';
+            ctx.fillText(labelName, item.x, labelY);
             ctx.restore();
         });
     },
@@ -954,9 +969,12 @@ const Render = {
         if (f.mode !== 'HOOKED' || !f.hookedFish) return;
 
         const fish = f.hookedFish;
-        const isHighTension = f.lineTension / p.equippedRod.tensionMax > 0.8;
+        const broken = !!fish.lineBroken;
+        const isHighTension = !broken && f.lineTension / p.equippedRod.tensionMax > 0.8;
         const rodCol = (p.equippedRod && p.equippedRod.lineColor) || '#38bdf8';
 
+        // Snapped line (boss fight): no line rendered at all
+        if (!broken) {
         ctx.strokeStyle = isHighTension ? '#f43f5e' : (fish.isDead ? '#94a3b8' : rodCol);
         ctx.lineWidth = isHighTension ? 3 : 2;
         ctx.shadowColor = ctx.strokeStyle;
@@ -968,6 +986,7 @@ const Render = {
         ctx.quadraticCurveTo(midX, midY, fish.x, fish.y);
         ctx.stroke();
         ctx.shadowBlur = 0;
+        }
 
         ctx.save();
         if (fish.isDead) ctx.globalAlpha = 0.6;
@@ -975,7 +994,7 @@ const Render = {
             angle: fish.rotation,
             isRaging: fish.isRaging && !fish.isDead,
             isInflated: fish.isInflated,
-            glow: fish.species.rarity === 'legendary' && !fish.isDead ? 1 : 0
+            glow: (fish.species.rarity === 'legendary' || fish.species.mutation === 'void') && !fish.isDead ? 1 : 0
         });
         ctx.restore();
 
@@ -1895,6 +1914,66 @@ const Render = {
             }
             ctx.restore();
         }
+    },
+
+    // Shop snapshot: render the ACTUAL gun model (procedural or custom PNG
+    // skin) to an offscreen canvas and return a dataURL <img> source, so
+    // buyers see what they're buying. Cached per weapon+skin-revision.
+    // The render is auto-trimmed to its opaque pixels, then scaled to FILL
+    // the box and centered — small pistols and long harpoons alike land
+    // dead-center at maximum size instead of rattling in a corner.
+    _gunPreviewRev: 0,
+    _gunPreviewCache: {},
+    gunPreview(w, gunSkins) {
+        if (!w) return null;
+        const skinId = w.skin || w.id;
+        const custom = !!(typeof GunSkinLoader !== 'undefined' &&
+            gunSkins && gunSkins[w.id] !== 'classic' && w.skin !== false &&
+            GunSkinLoader.get(skinId));
+        const key = w.id + (custom ? ':c' : ':p') + ':r' + this._gunPreviewRev;
+        if (this._gunPreviewCache[key]) return this._gunPreviewCache[key];
+        try {
+            const W = 132, H = 64, PAD = 5;
+            // 1. Rough render onto scratch (generous margins).
+            const tmp = document.createElement('canvas');
+            tmp.width = 176; tmp.height = 96;
+            const t = tmp.getContext('2d');
+            t.save();
+            t.translate(40, 48);
+            this.drawGun(t, { weaponRecoil: 0, gunSkins: gunSkins || {}, muzzleFlash: 0 }, w);
+            t.restore();
+            // 2. Trim to opaque bbox.
+            const px = t.getImageData(0, 0, tmp.width, tmp.height).data;
+            let x0 = tmp.width, y0 = tmp.height, x1 = -1, y1 = -1;
+            for (let y = 0; y < tmp.height; y++) {
+                for (let x = 0; x < tmp.width; x++) {
+                    if (px[(y * tmp.width + x) * 4 + 3] > 8) {
+                        if (x < x0) x0 = x;
+                        if (x > x1) x1 = x;
+                        if (y < y0) y0 = y;
+                        if (y > y1) y1 = y;
+                    }
+                }
+            }
+            if (x1 < x0 || y1 < y0) return null; // nothing drawn
+            const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+            // 3. Refit: scale to fill (with padding), centered.
+            const sc = Math.min((W - PAD * 2) / bw, (H - PAD * 2) / bh);
+            const dw = Math.max(1, Math.round(bw * sc));
+            const dh = Math.max(1, Math.round(bh * sc));
+            const cv = document.createElement('canvas');
+            cv.width = W; cv.height = H;
+            const c = cv.getContext('2d');
+            c.imageSmoothingEnabled = true;
+            c.drawImage(tmp, x0, y0, bw, bh,
+                Math.round((W - dw) / 2), Math.round((H - dh) / 2), dw, dh);
+            const url = cv.toDataURL('image/png');
+            // Bound the cache (weapons x2 variants is small, but be safe).
+            const keys = Object.keys(this._gunPreviewCache);
+            if (keys.length > 120) this._gunPreviewCache = {};
+            this._gunPreviewCache[key] = url;
+            return url;
+        } catch (e) { return null; }
     },
 
     drawParticles(state, ctx) {
@@ -3366,6 +3445,12 @@ const Render = {
     // --- SERPENT (long snake-like, many coils) ---
     _drawSerpent(ctx, s, col, acc) {
         const t = performance.now() / 400;
+        // STORMLORD HYDRA: 9 heads fanning from one trunk (myth accurate).
+        const sp = this._cur;
+        if (sp && sp.id === 'stormlord_hydra') {
+            this._drawHydra(ctx, s, col, acc);
+            return;
+        }
 
         ctx.strokeStyle = col;
         ctx.lineWidth = Math.max(5, s * 0.5);
@@ -3430,6 +3515,93 @@ const Render = {
         ctx.quadraticCurveTo(s * 1.7, -s * 0.3, s * 1.5, -s * 0.25);
         ctx.closePath();
         ctx.fill();
+    },
+
+    // --- STORMLORD HYDRA: one trunk, 9 serpent heads on arched necks.
+    // Heads sway out of phase, eyes glow, center head biggest. Deterministic
+    // (time-driven sway, no per-frame alloc beyond the loop).
+    _drawHydra(ctx, s, col, acc) {
+        const t = performance.now() / 450;
+        // Shared trunk: thick coiled body trailing behind the necks
+        ctx.strokeStyle = col;
+        ctx.lineWidth = Math.max(7, s * 0.62);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(s * 0.6, 0);
+        for (let i = 0; i <= 8; i++) {
+            const px = s * 0.6 - i * s * 0.38;
+            const py = Math.sin(t * 1.6 + i * 0.8) * s * 0.45;
+            ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+        ctx.strokeStyle = acc;
+        ctx.lineWidth = Math.max(2.5, s * 0.24);
+        ctx.beginPath();
+        ctx.moveTo(s * 0.55, -s * 0.14);
+        for (let i = 0; i <= 7; i++) {
+            const px = s * 0.55 - i * s * 0.38;
+            const py = Math.sin(t * 1.6 + i * 0.8) * s * 0.45 - s * 0.14;
+            ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+        // 9 necks fanning forward (+x), arched upward in a crown
+        for (let k = 0; k < 9; k++) {
+            const f = (k - 4) / 4; // -1 .. 1 across the fan
+            const sway = Math.sin(t * 2.2 + k * 1.4) * s * 0.14;
+            const baseX = s * 0.55, baseY = 0;
+            const neckEX = s * 1.15 + Math.abs(f) * s * 0.12;
+            const neckEY = f * s * 1.05 + sway;
+            const headX = s * 1.55 + Math.abs(f) * s * 0.18;
+            const headY = f * s * 1.3 + sway * 1.4;
+            const center = 1 - Math.abs(f) * 0.35; // center heads bigger
+            // Neck
+            ctx.strokeStyle = col;
+            ctx.lineWidth = Math.max(3.5, s * 0.3 * center);
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(baseX, baseY);
+            ctx.quadraticCurveTo(neckEX, neckEY, headX, headY);
+            ctx.stroke();
+            // Dorsal fin on the neck
+            ctx.fillStyle = acc;
+            ctx.beginPath();
+            ctx.moveTo(neckEX - s * 0.1, neckEY - s * 0.16 * center);
+            ctx.quadraticCurveTo(neckEX + s * 0.12, neckEY - s * 0.55 * center, neckEX + s * 0.24, neckEY - s * 0.14 * center);
+            ctx.quadraticCurveTo(neckEX + s * 0.1, neckEY - s * 0.1, neckEX - s * 0.1, neckEY - s * 0.16 * center);
+            ctx.closePath();
+            ctx.fill();
+            // Head: elongated snout
+            const hs = s * 0.34 * center;
+            ctx.fillStyle = col;
+            ctx.beginPath();
+            ctx.ellipse(headX, headY, hs * 1.35, hs * 0.8, f * 0.35, 0, Math.PI * 2);
+            ctx.fill();
+            // Open jaw with fangs
+            const jawOpen = 0.35 + Math.sin(t * 3 + k * 2.1) * 0.12;
+            ctx.fillStyle = '#0f172a';
+            ctx.beginPath();
+            ctx.moveTo(headX + hs * 0.2, headY);
+            ctx.lineTo(headX + hs * 1.5, headY - hs * jawOpen);
+            ctx.lineTo(headX + hs * 1.5, headY + hs * jawOpen);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = '#f8fafc';
+            ctx.beginPath();
+            ctx.moveTo(headX + hs * 0.9, headY - hs * jawOpen * 0.7);
+            ctx.lineTo(headX + hs * 1.05, headY - hs * jawOpen * 0.25);
+            ctx.lineTo(headX + hs * 1.12, headY - hs * jawOpen * 0.7);
+            ctx.closePath(); ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(headX + hs * 0.9, headY + hs * jawOpen * 0.7);
+            ctx.lineTo(headX + hs * 1.05, headY + hs * jawOpen * 0.25);
+            ctx.lineTo(headX + hs * 1.12, headY + hs * jawOpen * 0.7);
+            ctx.closePath(); ctx.fill();
+            // Glowing eye
+            ctx.fillStyle = '#fbbf24';
+            ctx.beginPath(); ctx.arc(headX + hs * 0.25, headY - hs * 0.35, hs * 0.24, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#000';
+            ctx.beginPath(); ctx.arc(headX + hs * 0.3, headY - hs * 0.35, hs * 0.11, 0, Math.PI * 2); ctx.fill();
+        }
     },
 
     // --- TITAN (world-ending, cosmic, huge) ---

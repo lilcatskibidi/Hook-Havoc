@@ -209,10 +209,16 @@ const Multiplayer = {
             const st = this.state;
             const hooked = st && st.fishing && st.fishing.mode === 'HOOKED' ? st.fishing.hookedFish : null;
             if (!hooked || hooked.isDead) return;
-            let dmg = Math.max(1, Math.round(fh.dmg || 0));
+            // Same roll as a local hit: crit x execute x boss-bane
+            let dmg = Math.max(1, Math.round((fh.dmg || 0) * (fh.critMult || 1)));
+            const crit = (fh.critMult || 1) > 1;
+            if (fh.executeMult && hooked.maxHp > 0 && hooked.hp / hooked.maxHp < 0.35) dmg = Math.max(1, Math.round(dmg * fh.executeMult));
+            if (fh.bossMult && hooked.species &&
+                (hooked.species.isBoss || hooked.species.rarity === 'legendary' ||
+                 hooked.species.rarity === 'mythic' || hooked.species.rarity === 'boss')) dmg = Math.max(1, Math.round(dmg * fh.bossMult));
             if (hooked.isInflated) dmg = Math.max(1, Math.round(dmg * 0.5));
             hooked.hp -= dmg;
-            hooked.stamina -= dmg * ((typeof CONFIG !== 'undefined' && CONFIG.STAMINA_DRAIN_PER_BULLET) || 0.5);
+            hooked.stamina -= dmg * ((typeof CONFIG !== 'undefined' && CONFIG.STAMINA_DRAIN_PER_BULLET) || 0.5) * (fh.drainMult || 1);
             if (fh.burn) { hooked.burnTimer = Math.max(hooked.burnTimer || 0, 3.0); hooked.burnDps = fh.burnDps || 12; }
             if (fh.poison) { hooked.poisonTimer = Math.max(hooked.poisonTimer || 0, 5.0); hooked.poisonDps = Math.round(dmg * (fh.poisonDpsMult || 0.3)); }
             if (fh.freeze) { hooked.freezeTimer = Math.max(hooked.freezeTimer || 0, fh.freezeTime || 2.5); }
@@ -225,7 +231,11 @@ const Multiplayer = {
             }
             try { audio.playHit(); } catch (e) {}
             Particles.spawnWaterSplashes(st, hooked.x, hooked.y, 5);
-            Particles.showFloatingText(st, `-${Math.round(dmg)}`, hooked.x, hooked.y - 20, '#38bdf8');
+            try {
+                Particles.showFloatingText(st, (crit ? 'CRIT -' : '-') + Math.round(dmg),
+                    hooked.x + (Math.random() - 0.5) * 40, hooked.y - 20 + (Math.random() - 0.5) * 20,
+                    crit ? '#fde047' : '#38bdf8');
+            } catch (e) {}
             if (hooked.hp <= 0) {
                 hooked.hp = 0;
                 if (typeof Fishing !== 'undefined') Fishing.killHookedFish(st);
@@ -1189,12 +1199,15 @@ const Multiplayer = {
         }
     },
     
-    // Sync loot (ids preserved for first-come delete messages)
+    // Sync loot (ids preserved for first-come delete messages).
+    // Summon-item loot has no species — pass it through untouched.
     syncLoot(remoteLoot) {
-        this.state.groundLoot = remoteLoot.map(l => ({
-            ...l,
-            species: this.findSpecies(l.species.id) || l.species
-        }));
+        this.state.groundLoot = (remoteLoot || []).map(l => {
+            if (!l) return l;
+            if (l.item) return { ...l };
+            const sp = (l.species && this.findSpecies) ? this.findSpecies(l.species.id) : null;
+            return { ...l, species: sp || l.species };
+        });
     },
 
     // Sync enemies from host
@@ -1422,7 +1435,11 @@ const Multiplayer = {
                     chain: !!nb.chain, chainMult: nb.chainMult, lifesteal: nb.lifesteal || 0,
                     coral: !!nb.coral, coralDps: nb.coralDps, freeze: !!nb.freeze,
                     freezeTime: nb.freezeTime, stun: !!nb.stun, stunTime: nb.stunTime,
-                    slowHook: nb.slowHook, hitSet: new Set(), trail: []
+                    slowHook: nb.slowHook,
+                    critMult: nb.critMult || 1, executeMult: nb.executeMult || 0,
+                    bossMult: nb.bossMult || 0, drainMult: nb.drainMult || 0,
+                    knockMult: nb.knockMult || 0, scatter: !!nb.scatter,
+                    hitSet: new Set(), trail: []
                 });
             }
         }

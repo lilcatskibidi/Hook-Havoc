@@ -340,7 +340,7 @@ const NPC = {
             html += `<div class="glass-panel-light p-3 rounded-xl mb-2 border ${done ? 'border-amber-400' : 'border-slate-700'}">
                 <div class="font-bold text-white text-sm">🎯 ${sp.name} <span class="text-xs text-slate-400">${sp.rarity.toUpperCase()}</span></div>
                 <div class="text-xs text-slate-300">Bucket ${a.have}/${a.need} · Reward ${a.rewardCoins}c + ${a.rewardXp} XP</div>
-                ${!done ? `<div class="text-[10px] text-slate-500 mt-0.5">Keep the fish in your bucket — sold fish don't count. Turn-in removes them.</div>` : `<div class="text-[10px] text-amber-300 font-bold mt-0.5">Turn-in removes ${a.need}× ${sp.name} from your bucket.</div>`}
+                ${!done ? `<div class="text-[10px] text-slate-500 mt-0.5">Keep the fish in your bucket — sold fish don't count. Turn-in removes them. Tip: 🔒 lock them in Shop > Sell so SELL ALL skips them.</div>` : `<div class="text-[10px] text-amber-300 font-bold mt-0.5">Turn-in removes ${a.need}× ${sp.name} from your bucket.</div>`}
                 <div class="flex gap-2 mt-2">
                     ${done ? `<button id="npc-claim" class="flex-1 px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black rounded-xl">CLAIM REWARD</button>` : ''}
                     <button id="npc-abandon" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-bold rounded-xl">ABANDON</button>
@@ -350,6 +350,23 @@ const NPC = {
             html += `<div class="text-xs text-slate-400 mb-2">No active job. Pick one below (one at a time):</div>`;
         }
         html += `<div class="text-[10px] font-black tracking-widest text-slate-500 mt-1 mb-1">AVAILABLE JOBS</div>`;
+        // RITE OF THE DEEP: Marlin himself calls the Leviathan Priest when
+        // handed 5 epic+ catches. Repeatable, spawns on the spot.
+        try {
+            const riteHave = (typeof Ritual !== 'undefined' && Ritual.countTier)
+                ? Ritual.countTier(st, 'legendaryPlus') : 0;
+            const riteSlain = (st.player.slainBosses || []).includes('leviathan_priest');
+            const riteBusy = typeof Ritual !== 'undefined' && Ritual.bossAlive && Ritual.bossAlive(st);
+            html += `<div class="glass-panel p-2.5 rounded-xl mb-1.5 border ${riteSlain ? 'border-emerald-500/50' : 'border-fuchsia-500/40'}">
+                <div class="flex items-center justify-between gap-2">
+                    <div class="min-w-0">
+                        <div class="font-bold text-white text-xs">🌊 RITE OF THE DEEP ${riteSlain ? '<span class="text-[9px] text-emerald-300 font-black">PRIEST SLAIN ✓</span>' : ''}</div>
+                        <div class="text-[10px] text-slate-400">Deliver 5 legendary+ catches — Marlin calls the <b>Leviathan Priest</b> himself. Offering in bucket: ${riteHave}/5.</div>
+                    </div>
+                    <button id="npc-rite" class="px-3 py-1.5 bg-fuchsia-500 hover:bg-fuchsia-400 text-slate-950 text-[11px] font-black rounded-lg shrink-0" ${(riteHave >= 5 && !riteBusy) ? '' : 'disabled style="opacity:.4"'}>PERFORM</button>
+                </div>
+            </div>`;
+        } catch (e) {}
         st.player.quests.offered.forEach(o => {
             const sp = this.species(o);
             html += `<div class="glass-panel p-2.5 rounded-xl mb-1.5 flex items-center justify-between gap-2">
@@ -372,6 +389,34 @@ const NPC = {
         scope.querySelectorAll('[data-accept]').forEach(b => {
             b.onclick = () => this.accept(st, b.dataset.accept);
         });
+        const rite = $('npc-rite');
+        if (rite) rite.onclick = () => this.performRite(st);
+    },
+
+    // RITE OF THE DEEP: 5 legendary+ catches for Marlin -> Priest spawns
+    // beside the player immediately. Host-only (shared world monster).
+    performRite(st) {
+        const p = st.player;
+        if (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient()) {
+            Particles.showFloatingText(st, 'Only the host can call the rite.', p.x, p.y - 50, '#f87171');
+            return;
+        }
+        if (typeof Ritual === 'undefined' || !Ritual.countTier || !Ritual.spawnBoss) return;
+        if (Ritual.bossAlive && Ritual.bossAlive(st)) {
+            Particles.showFloatingText(st, 'A boss already walks!', p.x, p.y - 50, '#f87171');
+            return;
+        }
+        if (Ritual.countTier(st, 'legendaryPlus') < 5) {
+            try { audio.playError(); } catch (e) {}
+            return;
+        }
+        Ritual.consumeFish(st, 'legendaryPlus', 5);
+        try { audio.playRoar(); } catch (e) {}
+        Particles.showFloatingText(st, 'Marlin chants... THE DEEP ANSWERS!', p.x, p.y - 70, '#f0abfc');
+        Ritual.spawnBoss(st, 'leviathan_priest');
+        Player.refreshHUD(st);
+        if (typeof SaveSystem !== 'undefined') SaveSystem.save(st);
+        this.close();
     },
 
     showBosses() {

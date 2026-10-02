@@ -1,6 +1,6 @@
 {
   "name": "aquatic-havoc",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Aquatic Havoc — Deep Sea Hunter with LAN Multiplayer",
   "main": "server.js",
   "scripts": {

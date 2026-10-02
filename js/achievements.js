@@ -2,6 +2,13 @@ const Achievements = {
     state: null,
     unlocked: new Set(),
     progress: {},
+
+    // CONFIG keys are UPPERCASE (FIRST_CATCH) but callers pass lowercase
+    // ids ('first_catch') — this mismatch used to make every unlock fail.
+    cfg(id) {
+        if (typeof CONFIG === 'undefined' || !CONFIG.ACHIEVEMENTS) return null;
+        return CONFIG.ACHIEVEMENTS[id] || CONFIG.ACHIEVEMENTS[String(id).toUpperCase()] || null;
+    },
     
     init(state) {
         this.state = state;
@@ -27,8 +34,8 @@ const Achievements = {
     
     unlock(id) {
         if (this.unlocked.has(id)) return false;
-        
-        const ach = CONFIG.ACHIEVEMENTS[id];
+
+        const ach = this.cfg(id);
         if (!ach) return false;
         
         this.unlocked.add(id);
@@ -55,8 +62,8 @@ const Achievements = {
     
     addProgress(id, amount = 1) {
         if (this.unlocked.has(id)) return;
-        
-        const ach = CONFIG.ACHIEVEMENTS[id];
+
+        const ach = this.cfg(id);
         if (!ach) return;
         
         this.progress[id] = (this.progress[id] || 0) + amount;
@@ -72,12 +79,18 @@ const Achievements = {
     
     getTarget(id) {
         // Extract target from achievement id
+        const uniqueFish = () => {
+            try {
+                return new Set(FISH_SPECIES.filter(f => !f.isBoss).map(f => f.id)).size;
+            } catch (e) { return 100; }
+        };
         const targets = {
             'catch_10': 10,
             'catch_100': 100,
             'catch_1000': 1000,
             'kill_10': 10,
             'kill_100': 100,
+            'kill_boss': 1,
             'kill_5_bosses': 5,
             'level_10': 10,
             'level_25': 25,
@@ -86,19 +99,51 @@ const Achievements = {
             'fish_index_25': 25,
             'fish_index_50': 50,
             'fish_index_100': 100,
-            'fish_index_all': FISH_SPECIES.filter(f => !f.isBoss).length,
+            'fish_index_all': uniqueFish(),
         };
         return targets[id] || 1;
     },
     
     checkAll(state) {
         const p = state.player;
-        
+
+        // Backfill for saves from before catch counting worked: lifetime
+        // catches can't be below your discovery count.
+        try {
+            const discovered = (p.caughtFish || []).length;
+            if ((p.totalFishCaught || 0) < discovered) p.totalFishCaught = discovered;
+        } catch (e) {}
+
         // Fishing
         const totalCaught = p.totalFishCaught || 0;
         this.setProgress('catch_10', totalCaught);
         this.setProgress('catch_100', totalCaught);
         this.setProgress('catch_1000', totalCaught);
+        if (totalCaught > 0 && !this.unlocked.has('first_catch')) this.unlock('first_catch');
+
+        // Rarity backfill from the fish index (old catches still count)
+        try {
+            const rars = new Set((p.caughtFish || []).map(f => f && f.rarity));
+            if (rars.has('rare')) this.unlock('catch_rare');
+            if (rars.has('epic')) this.unlock('catch_epic');
+            if (rars.has('legendary')) this.unlock('catch_legendary');
+            if (rars.has('mythic')) this.unlock('catch_mythic');
+        } catch (e) {}
+
+        // Kills (incl. the single-boss achievement, previously unwired)
+        const totalKills = p.totalKills || 0;
+        this.setProgress('kill_10', totalKills);
+        this.setProgress('kill_100', totalKills);
+        const bossKills = p.bossKills || 0;
+        if (bossKills > 0 && !this.unlocked.has('kill_boss')) this.unlock('kill_boss');
+        this.setProgress('kill_5_bosses', bossKills);
+
+        // Casino bankroll backfill
+        try {
+            if ((p.casinoTotalLost || 0) >= 10000 && !this.unlocked.has('casino_bankrupt')) {
+                this.unlock('casino_bankrupt');
+            }
+        } catch (e) {}
         
         // Level
         this.setProgress('level_10', p.level);
@@ -143,6 +188,7 @@ const Achievements = {
         if (enemyType === 'boss') {
             const bossKills = (state.player.bossKills || 0) + 1;
             state.player.bossKills = bossKills;
+            if (!this.unlocked.has('kill_boss')) this.unlock('kill_boss');
             this.setProgress('kill_5_bosses', bossKills);
         }
         
@@ -150,9 +196,12 @@ const Achievements = {
     },
     
     checkFishCatch(state, fish) {
-        // Total fish
+        // Total fish (+ graduated catch achievements, previously never fed)
         const totalCaught = (state.player.totalFishCaught || 0) + 1;
         state.player.totalFishCaught = totalCaught;
+        this.setProgress('catch_10', totalCaught);
+        this.setProgress('catch_100', totalCaught);
+        this.setProgress('catch_1000', totalCaught);
         
         // Rarity specific
         if (fish.rarity === 'rare' && !this.unlocked.has('catch_rare')) this.unlock('catch_rare');
@@ -255,8 +304,7 @@ const Achievements = {
             `;
             
             for (const id of ids) {
-                const configKey = id.toUpperCase();
-                const ach = CONFIG.ACHIEVEMENTS[configKey];
+                const ach = this.cfg(id);
                 if (!ach) continue; // Skip missing achievements
                 const unlocked = this.unlocked.has(id);
                 const prog = this.progress[id] || 0;

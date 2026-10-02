@@ -34,6 +34,32 @@ const Combat = {
         if (!state.groundLoot) state.groundLoot = [];
         if (!state.delayedBlasts) state.delayedBlasts = [];
 
+        // Boss theme follows boss life: silence it when nothing bossy
+        // remains (death, escape, load). Cheap, fully guarded.
+        try {
+            if (typeof audio !== 'undefined' && audio._bossTheme &&
+                typeof Ritual !== 'undefined' && Ritual.bossAlive && !Ritual.bossAlive(state)) {
+                audio.stopBossTheme();
+            }
+        } catch (e) {}
+        // Pending intro crossfade: when the camera lock expires, fade the
+        // tide music out and the boss theme in — but only if the boss is
+        // still alive and the player is still standing.
+        try {
+            if (typeof state._bossThemeAt === 'number' && state.time >= state._bossThemeAt) {
+                state._bossThemeAt = null;
+                const pAlive = state.player && !state.player.isDead && (state.player.hp || 0) > 0;
+                if (pAlive && typeof Ritual !== 'undefined' && Ritual.bossAlive && Ritual.bossAlive(state) &&
+                    typeof audio !== 'undefined' && !audio._bossTheme) {
+                    try { audio.stopMusic(); } catch (e) {}
+                    try { if (typeof audio.startBossTheme === 'function') audio.startBossTheme(); } catch (e) {}
+                }
+            } else if (typeof state._bossThemeAt === 'number' &&
+                typeof Ritual !== 'undefined' && Ritual.bossAlive && !Ritual.bossAlive(state)) {
+                state._bossThemeAt = null; // boss died mid-intro: no theme
+            }
+        } catch (e) {}
+
         // MP clients render the host's world: monster death + loot are
         // host-owned (prevents double kills / double loot).
         const isMPClient = (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient());
@@ -61,11 +87,18 @@ const Combat = {
             if (m.species.isBoss && !m._announced) {
                 m._announced = true;
                 state.activeBoss = m;
-                try { audio.playRoar(); } catch (e) {}
-                Particles.showFloatingText(state,
-                    `⚠ ${m.species.name.toUpperCase()} HAS ARRIVED ⚠`,
-                    m.x, m.y - 90, '#f59e0b');
-                state.screenShake = 20;
+                // Full cinematic (pad summons already played it in spawnBoss,
+                // beached/hooked bosses arrive here).
+                try {
+                    if (typeof Ritual !== 'undefined' && Ritual.bossIntro) Ritual.bossIntro(state, m.species, m.x, m.y, m);
+                    else {
+                        try { audio.playRoar(); } catch (e) {}
+                        Particles.showFloatingText(state,
+                            `⚠ ${m.species.name.toUpperCase()} HAS ARRIVED ⚠`,
+                            m.x, m.y - 90, '#f59e0b');
+                        state.screenShake = 20;
+                    }
+                } catch (e) {}
             }
 
             // --- Death ---
@@ -95,6 +128,20 @@ const Combat = {
 
                 if (m.species.isBoss) {
                     state.activeBoss = null;
+                    state.bossDeaths = 0; // won — chances reset
+                    // Boss index: kill counts even if the loot is never picked up
+                    try {
+                        if (!Array.isArray(state.player.slainBosses)) state.player.slainBosses = [];
+                        if (!state.player.slainBosses.includes(m.species.id)) state.player.slainBosses.push(m.species.id);
+                        if (typeof Achievements !== 'undefined') Achievements.checkEnemyKill(state, 'boss');
+                        // Boss tribute: 100% trophy drop (Emperor gate).
+                        // Priest -> Chalice, Hydra -> Fang, Shepherd -> Eye.
+                        // Drops where the boss fell — walk over it.
+                        if (typeof Ritual !== 'undefined' && Ritual.awardItem && typeof TROPHY_OF !== 'undefined' && TROPHY_OF[m.species.id]) {
+                            Ritual.awardItem(state, TROPHY_OF[m.species.id], m.x, m.y, 'boss tribute');
+                        }
+                        if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+                    } catch (e) {}
                     UI.updateStatusBanner(`${m.species.name} has fallen!`, 'Victory', 'emerald');
                 }
 
@@ -112,6 +159,13 @@ const Combat = {
             if (m.ageOnLand === undefined) m.ageOnLand = 0;
             if (m.comboCount === undefined) m.comboCount = 0;
             if (m.phase === undefined) m.phase = 1;
+
+            // --- Intro dormancy: a freshly arrived boss stands down (no
+            // movement, no skills, no contact) until its cinematic releases.
+            if (m.dormantUntil && state.time < m.dormantUntil) {
+                if (m.invulnerableTimer > 0) m.invulnerableTimer -= delta;
+                continue;
+            }
 
             m.ageOnLand += delta;
             m.skillCooldown -= delta;
@@ -212,13 +266,17 @@ const Combat = {
             if (b.timer <= 0) {
                 const dist = Math.hypot(p.x - b.x, p.y - b.y);
                 if (b.damage > 0 && dist < b.radius + (p.radius || 15)) {
-                    p.hp -= b.damage;
-                    Particles.showFloatingText(state, `-${b.damage}`,
+                    // Armor counts here too (was raw hp-=, unfair).
+                    // damagePlayer handles HUD + flash + death — never die() twice.
+                    const dealt = this.damagePlayer(state, b.damage, { knockback: 0 });
+                    Particles.showFloatingText(state, `-${dealt}`,
                         p.x, p.y - 25, b.color);
                     Player.refreshHUD(state);
-                    UI.triggerDamageFlash();
                     try { audio.playHurt(); } catch (e) {}
-                    if (p.hp <= 0) Player.die(state);
+                    // Telegraph-ring stuns (roar / chain): only if you stood in it
+                    if (b.stunOnBlast && (p.hp || 0) > 0) {
+                        p.stunTimer = Math.max(p.stunTimer || 0, b.stunOnBlast);
+                    }
                 }
                 state.screenShake = Math.max(state.screenShake, b.shake || 8);
                 Particles.spawnParticles(state, b.x, b.y, b.color, 18, { size: 6 });
@@ -718,9 +776,9 @@ const Combat = {
             case 'supernova': {
                 const dmg = Math.round(atk * 1.1);
                 if (dist < 260) {
-                    p.hp -= dmg;
+                    const dealt = this.damagePlayer(state, dmg, { attacker: m, knockback: 0 });
                     p.burnTimer = 3.0;
-                    Particles.showFloatingText(state, `🔥 -${dmg}`,
+                    Particles.showFloatingText(state, `🔥 -${dealt}`,
                         p.x, p.y - 30, '#ea580c');
                     UI.triggerDamageFlash();
                     state.screenShake = 12;
@@ -750,9 +808,11 @@ const Combat = {
             case 'stormSpiral': {
                 const dmg = Math.round(atk * (skill === 'zapOrb' ? 1.2 : 1.0));
                 if (dist < 220) {
-                    p.hp -= dmg;
-                    p.stunTimer = 0.7;
-                    Particles.showFloatingText(state, `⚡ -${dmg}`,
+                    const dealt = this.damagePlayer(state, dmg, { attacker: m, knockback: 0 });
+                    // Stun only at touching range — the telegraphed blast
+                    // at 220 is dodgeable damage, not a free stun
+                    if (dist < 120) p.stunTimer = Math.max(p.stunTimer || 0, 0.7);
+                    Particles.showFloatingText(state, `⚡ -${dealt}`,
                         p.x, p.y - 30, '#facc15');
                     UI.triggerDamageFlash();
                     state.screenShake = 10;
@@ -794,8 +854,8 @@ const Combat = {
                 p.y -= localDirY * pullForce;
 
                 const dmg = Math.round(atk * 0.85);
-                p.hp -= dmg;
-                Particles.showFloatingText(state, `🌀 PULL -${dmg}`,
+                const dealt = this.damagePlayer(state, dmg, { attacker: m, knockback: 0 });
+                Particles.showFloatingText(state, `🌀 PULL -${dealt}`,
                     p.x, p.y - 25, '#8b5cf6');
                 state.screenShake = 10;
 
@@ -827,12 +887,14 @@ const Combat = {
             case 'frostbite':
             case 'iceSpikeRing':
             case 'blizzardNova': {
-                p.slowTimer = 2.5;
+                // Chilling nova has a range — no more map-wide frostbite
+                if (dist > 260) break;
+                p.slowTimer = Math.max(p.slowTimer || 0, 2.5);
                 const dmg = Math.round(atk * 0.8);
-                p.hp -= dmg;
+                const dealt = this.damagePlayer(state, dmg, { attacker: m, knockback: 0 });
                 p.x += localDirX * 60;
                 p.y += localDirY * 60;
-                Particles.showFloatingText(state, `❄️ -${dmg}`,
+                Particles.showFloatingText(state, `❄️ -${dealt}`,
                     p.x, p.y - 30, '#38bdf8');
                 state.screenShake = 8;
 
@@ -863,8 +925,8 @@ const Combat = {
                 Particles.spawnParticles(state, m.x, m.y, '#fde047', 20);
 
                 const dmg = Math.round(atk * 1.3);
-                p.hp -= dmg;
-                Particles.showFloatingText(state, `🗡️ BACKSTAB -${dmg}`,
+                const dealt = this.damagePlayer(state, dmg, { attacker: m, knockback: 0 });
+                Particles.showFloatingText(state, `🗡️ BACKSTAB -${dealt}`,
                     p.x, p.y - 30, '#ef4444');
                 UI.triggerDamageFlash();
                 state.screenShake = 10;
@@ -949,7 +1011,9 @@ const Combat = {
             case 'flashBang': {
                 state.screenShake = 18;
                 UI.triggerDamageFlash();
-                p.stunTimer = 0.7;
+                // Same rule as the hooked-fish version: the flash IS the
+                // effect (white blindness), never a free stun
+                p.flashTimer = Math.max(p.flashTimer || 0, 0.6);
                 Particles.spawnParticles(state, m.x, m.y, '#fef08a', 30);
                 Particles.showFloatingText(state, "💥 FLASH!", m.x, m.y - 45, '#fef08a');
                 for (let i = 0; i < 10; i++) {
@@ -964,9 +1028,9 @@ const Combat = {
 
             case 'drain': {
                 const dmg = Math.round(atk * 1.0);
-                p.hp -= dmg;
-                m.hp = Math.min(m.species.maxHp, m.hp + Math.round(dmg * 0.3));
-                Particles.showFloatingText(state, `💜 DRAIN -${dmg}`,
+                const dealt = this.damagePlayer(state, dmg, { attacker: m, knockback: 0 });
+                m.hp = Math.min(m.species.maxHp, m.hp + Math.round(dealt * 0.3));
+                Particles.showFloatingText(state, `💜 DRAIN -${dealt}`,
                     p.x, p.y - 30, '#a855f7');
                 UI.triggerDamageFlash();
                 state.screenShake = 12;
@@ -1158,8 +1222,8 @@ const Combat = {
             default: {
                 fire(p.x, p.y, 480, Math.round(atk * 0.8), color, { radius: 10 });
                 if (dist < 140) {
-                    p.hp -= Math.round(atk * 0.6);
-                    Particles.showFloatingText(state, `-${Math.round(atk * 0.6)}`,
+                    const dealt = this.damagePlayer(state, Math.round(atk * 0.6), { attacker: m, knockback: 0 });
+                    Particles.showFloatingText(state, `-${dealt}`,
                         p.x, p.y - 25, '#ef4444');
                     UI.triggerDamageFlash();
                 }
@@ -1226,6 +1290,9 @@ const Combat = {
         const p = state.player;
         if (p.stunTimer > 0) p.stunTimer -= delta;
         if (p.slowTimer > 0) p.slowTimer -= delta;
+        if (p.flashTimer > 0) p.flashTimer -= delta;
+        if (p.blurTimer > 0) p.blurTimer -= delta;
+        this.updateScreenFx(state);
         if (p.burnTimer > 0) {
             p.burnTimer -= delta;
             p.burnTick = (p.burnTick || 0) + delta;
@@ -1240,6 +1307,31 @@ const Combat = {
                 if (p.hp <= 0) Player.die(state);
             }
         }
+    },
+
+    // Screen FX: white flash overlay + canvas blur, driven by
+    // p.flashTimer / p.blurTimer (fish skills set them, never instantly
+    // except flash visuals). Blur clears the moment the timer ends.
+    _flashOn: false,
+    updateScreenFx(state) {
+        try {
+            const p = state.player;
+            const wantFlash = (p.flashTimer || 0) > 0;
+            const fl = document.getElementById('flash-overlay');
+            if (fl) {
+                if (wantFlash && !this._flashOn) {
+                    this._flashOn = true;
+                    fl.classList.remove('active');
+                    void fl.offsetWidth;
+                    fl.classList.add('active');
+                } else if (!wantFlash && this._flashOn) {
+                    this._flashOn = false;
+                    fl.classList.remove('active');
+                }
+            }
+            const cv = document.getElementById('gameCanvas');
+            if (cv) cv.style.filter = ((p.blurTimer || 0) > 0) ? 'blur(3px) saturate(1.2)' : '';
+        } catch (e) {}
     },
 
     updateGroundHazards(state, delta) {
@@ -1262,6 +1354,16 @@ const Combat = {
                 }
                 if (p.umbrellaTimer > 0) dr = Math.min(0.8, dr + 0.35);
                 p.hp -= tickDmg * (1 - dr);
+                // Sticky ground slows you while you stand in it — walk out
+                // to end it (no more instant slows from skills).
+                if (h.type === 'ice' || h.type === 'mud' || h.type === 'ink' ||
+                    h.type === 'sand' || h.type === 'coral' || h.type === 'poison') {
+                    p.slowTimer = Math.max(p.slowTimer || 0, 0.3);
+                }
+                // Ink / sand in your eyes blurs the screen while inside
+                if (h.type === 'ink' || h.type === 'sand') {
+                    p.blurTimer = Math.max(p.blurTimer || 0, 0.4);
+                }
                 if (Math.random() < 0.2) {
                     Particles.showFloatingText(state, `-${Math.ceil(tickDmg)}`,
                         p.x, p.y - 20, h.color);
@@ -1328,12 +1430,43 @@ const Combat = {
             }
 
             if (dist < PICKUP_RADIUS) {
+                // Summon-item loot: straight into the bucket (capacity
+                // respected). Never indexed, never quest-counted.
+                if (item.item && item.item.keyItem) {
+                    if (p.bucket.length < p.bucketCapacity) {
+                        try { audio.playCoin(); } catch (e) {}
+                        p.bucket.push(Object.assign({}, item.item));
+                        Particles.showFloatingText(state, `${item.item.icon || ''} ${item.item.name} kept!`, p.x, p.y - 50, item.item.color || '#fff');
+                        Player.addXP(state, 15);
+                        Player.refreshHUD(state);
+                        state.groundLoot.splice(i, 1);
+                        if (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient()) {
+                            if (item.id && Multiplayer.sendLootDelete) Multiplayer.sendLootDelete(item.id);
+                        }
+                        if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+                    } else {
+                        Particles.showFloatingText(state, "BUCKET FULL!",
+                            item.x, item.y - 20, '#f87171');
+                    }
+                    continue;
+                }
                 // Personal loot: whoever grabs it keeps it. In MP the host
                 // is told to delete the shared drop so it can't double-spawn.
                 if (p.bucket.length < p.bucketCapacity) {
                     try { audio.playCoin(); } catch (e) {}
                     p.bucket.push(item.species);
                     UI.showCatchPopup(item.species);
+                    // Legendary catches sometimes shake loose a Storm Egg
+                    // (physical loot, magnet-grabbed on the spot)
+                    if (item.species.rarity === 'legendary' && !item.species.isBoss &&
+                        Math.random() < 0.12 && typeof Ritual !== 'undefined' && Ritual.awardItem) {
+                        try { Ritual.awardItem(state, 'storm_egg', item.x, item.y, 'legendary catch'); } catch (err) {}
+                    }
+                    // Void-tainted loot carries a shard (only source besides
+                    // void jumper kills — plain fish never drop them)
+                    if (item.species.mutation === 'void' && typeof Ritual !== 'undefined' && Ritual.awardItem) {
+                        try { Ritual.awardItem(state, 'shard', item.x, item.y, 'void catch'); } catch (err) {}
+                    }
                     if (typeof NPC !== 'undefined' && NPC.onCatch) {
                         try { NPC.onCatch(state, item.species); } catch (err) {}
                     }
@@ -1354,6 +1487,13 @@ const Combat = {
                     if (!alreadyCaught && isRealFish) {
                         p.caughtFish.push(item.species);
                         Particles.showFloatingText(state, `NEW ENTRY: ${item.species.name}!`, p.x, p.y - 50, '#facc15');
+                    }
+                    // Lifetime catch + rarity achievements (the one funnel
+                    // every catch flows through — meat excluded above)
+                    if (isRealFish && item.species) {
+                        try {
+                            if (typeof Achievements !== 'undefined') Achievements.checkFishCatch(state, item.species);
+                        } catch (e) {}
                     }
                     
                     Player.addXP(state, Math.round((item.species.value || 10) / 10) + 5);
