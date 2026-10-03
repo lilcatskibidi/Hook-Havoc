@@ -2358,11 +2358,13 @@ const MainMenu = {
             topBtn.disabled = !hasSlot;
             if (topSpan) topSpan.innerText = hasSlot ? `Continue (Slot ${slot})` : `Slot ${slot} Empty — Pick a Save`;
             if (topIcon) topIcon.className = 'fa-solid fa-folder-open';
+            try { topBtn.title = hasSlot ? 'Load this slot and jump straight back in' : 'This slot is empty — pick a slot with progress, or start new below'; } catch (e) {}
             newBtn.classList.remove('hidden');
             newBtn.dataset.mode = 'new';
             newBtn.disabled = false;
             if (newSpan) newSpan.innerText = hasSlot ? `Start New Game (Slot ${slot})` : `Start New Game (Slot ${slot})`;
             if (newIcon) newIcon.className = 'fa-solid fa-play';
+            try { newBtn.title = 'Fresh expedition in this slot (asks before wiping; records kept)'; } catch (e) {}
         }
         const saveBtn = $('btn-save-menu');
         if (saveBtn) {

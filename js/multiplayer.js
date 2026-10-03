@@ -46,8 +46,8 @@ const Multiplayer = {
     },
 
     // code: 'join-reject' | 'version-mismatch' | 'room-full' |
-    //   'name-taken' | 'peer-unavailable' | 'cloud-error' | 'host-left' |
-    //   'member-left' | 'no-snapshot' | 'bad-pid' | 'send-fail' |
+    //   'name-taken' | 'peer-unavailable' | 'p2p-blocked' | 'cloud-error' |
+    //   'host-left' | 'member-left' | 'no-snapshot' | 'bad-pid' | 'send-fail' |
     //   'skin-fail' | 'sync-ok' | 'sync-restored' | 'info'
     mpLog(code, msg) {
         try {
@@ -595,6 +595,7 @@ const Multiplayer = {
             const code = /Name taken/i.test(m) ? 'name-taken'
                 : /full/i.test(m) ? 'room-full'
                 : /Version mismatch/i.test(m) ? 'version-mismatch'
+                : /P2P channel blocked/i.test(m) ? 'p2p-blocked'
                 : /not found/i.test(m) ? 'peer-unavailable' : 'join-reject';
             this.mpLog(code, m.slice(0, 160));
             this.onError(e.message);

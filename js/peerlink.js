@@ -103,6 +103,40 @@ const PeerLink = {
         });
     },
 
+    // ---- PeerJS constructor options (NAT traversal) ----
+    // Default cloud (0.peerjs.com) ships Google STUN only and NO TURN
+    // (free TURN was discontinued) — two players behind strict NATs can
+    // reach the cloud yet never open the P2P channel. Extra public STUNs
+    // help many of those cases; symmetric NAT still needs a TURN server.
+    // Override without code edits:
+    //   window.PEER_CONFIG = { config: { iceServers: [...] } }
+    // or localStorage `ah_peer_ice` = JSON array of {urls,username?,credential?}.
+    DEFAULT_STUN: [
+        'stun:stun.l.google.com:19302',
+        'stun:stun1.l.google.com:19302',
+        'stun:stun.cloudflare.com:3478',
+    ],
+
+    peerOptions(idOrUndefined) {
+        const iceServers = this.DEFAULT_STUN.map(u => ({ urls: u }));
+        try {
+            const raw = localStorage.getItem('ah_peer_ice');
+            if (raw) {
+                const arr = JSON.parse(raw);
+                if (Array.isArray(arr) && arr.length) {
+                    return { debug: 0, config: { iceServers: arr.slice(0, 8) } };
+                }
+            }
+        } catch (e) {}
+        let opt = { debug: 0, config: { iceServers } };
+        try {
+            if (typeof window !== 'undefined' && window.PEER_CONFIG && typeof window.PEER_CONFIG === 'object') {
+                opt = Object.assign({}, opt, window.PEER_CONFIG);
+            }
+        } catch (e) {}
+        return opt;
+    },
+
     // ---- Host: claim `prefix+code` as our peer id -------------------------
     async hostRoom(maxTries) {
         this.ensureLib();
@@ -136,7 +170,7 @@ const PeerLink = {
             };
             try {
                 this._setCloud('connecting');
-                peer = new Peer(peerRoomPrefix() + code);
+                peer = new Peer(peerRoomPrefix() + code, this.peerOptions());
             } catch (e) {
                 this._setCloud('error', String((e && e.message) || e));
                 fail(e);
@@ -215,7 +249,7 @@ const PeerLink = {
             };
             try {
                 this._setCloud('connecting');
-                peer = new Peer();
+                peer = new Peer(undefined, this.peerOptions());
             } catch (e) {
                 this._setCloud('error', String((e && e.message) || e));
                 fail(e);
@@ -224,7 +258,7 @@ const PeerLink = {
             const overallTimeout = setTimeout(() => {
                 fail(new Error('Room not found — check the code and make sure the host is on v' + peerGameVersion() + '.'));
             }, 20000);
-            const clearOverall = () => clearTimeout(overallTimeout);
+            const clearOverall = () => { try { clearTimeout(overallTimeout); } catch (e) {} clearOpen(); };
             peer.once('open', (id) => {
                 this.peer = peer;
                 this.myId = id;
@@ -247,6 +281,17 @@ const PeerLink = {
                     return;
                 }
                 this.hostConn = conn;
+                // P2P-blocked watchdog: cloud OK + room EXISTS (no
+                // peer-unavailable) but the DataChannel never opens in
+                // 10s = NAT/firewall in the way, NOT a wrong code. Without
+                // this the 20s overall timeout misreports "Room not found".
+                const openTimer = setTimeout(() => {
+                    if (!settled) {
+                        clearOverall();
+                        fail(new Error('P2P channel blocked — the room exists, but your networks cannot connect directly (NAT/firewall). Same WiFi usually works; otherwise the host needs a TURN server (see Feedback panel).'));
+                    }
+                }, 10000);
+                const clearOpen = () => { try { clearTimeout(openTimer); } catch (e) {} };
                 conn.once('open', () => {
                     // Identity rides the hello: this TAB's transport id +
                     // this TAB's pilot name (session-scoped, never another
@@ -578,7 +623,7 @@ const PeerLink = {
             };
             try {
                 this._setCloud('connecting');
-                probe = new Peer();
+                probe = new Peer(this.peerOptions());
             } catch (e) {
                 finish(false, String((e && e.message) || e));
                 return;
@@ -623,10 +668,10 @@ window.PeerLink = PeerLink;
  * Each PC keeps its own uploads in localStorage (ah_fishimg_*,
  * ah_gunskin_*, ah_bobber_*). At session start every peer publishes a
  * manifest; peers pull the items they lack, in ~30KB chunks, relayed
- * through the host. RULE: your own local art always wins on your
- * screen — remote art only fills slots where you have nothing. Remote
- * art lives in the loader caches for this session only and is never
- * written to your localStorage.
+ * through the host. RULE: your own local art always wins on YOUR
+ * screen (body/shop/hotbar); a FOREIGN body wears ONLY its owner's art
+ * (PeerSkins.remote per-owner registry, resolved in drawGun). Remote
+ * art is session-only, never written to your localStorage.
  * ================================================================== */
 const PeerSkins = {
     CHUNK: 30000,
