@@ -648,12 +648,13 @@ const UI = {
     updateMultiplayerHUD(info) {
         const statusEl = $('mp-status');
         if (statusEl) {
+            const skins = (info && info.skins) ? ` · ${info.skins}` : '';
             if (info.isConnected) {
                 const n = info.playerCount || 1;
-                statusEl.innerHTML = `<i class="fa-solid fa-circle text-emerald-400 animate-pulse mr-1"></i>${info.isHost ? 'Host' : 'Client'} · ${info.roomCode} · ${n}/4`;
+                statusEl.innerHTML = `<i class="fa-solid fa-circle text-emerald-400 animate-pulse mr-1"></i>${info.isHost ? 'Host' : 'Client'} · ${info.roomCode} · ${n}/4${skins}`;
                 statusEl.className = 'text-xs font-bold text-emerald-400';
             } else if (info.roomCode) {
-                statusEl.innerHTML = `<i class="fa-solid fa-circle text-amber-400 mr-1"></i>Lobby: ${info.roomCode}`;
+                statusEl.innerHTML = `<i class="fa-solid fa-circle text-amber-400 mr-1"></i>Lobby: ${info.roomCode}${skins}`;
                 statusEl.className = 'text-xs font-bold text-amber-400';
             } else {
                 statusEl.innerHTML = `<i class="fa-solid fa-circle text-rose-400 mr-1"></i>Disconnected`;
@@ -671,11 +672,19 @@ const ctx = canvas ? canvas.getContext('2d') : null;
 
 function resizeCanvas() {
     if (!canvas || !state) return;
-    canvas.width = canvas.parentElement ? canvas.parentElement.clientWidth : window.innerWidth;
-    canvas.height = canvas.parentElement ? canvas.parentElement.clientHeight : window.innerHeight;
+    const cssW = canvas.parentElement ? canvas.parentElement.clientWidth : window.innerWidth;
+    const cssH = canvas.parentElement ? canvas.parentElement.clientHeight : window.innerHeight;
+    // Low-tier mobile renders fewer backing pixels (CSS stretches the
+    // result). Gameplay coordinates (water boundary) always use CSS size
+    // so the world never shrinks with the resolution.
+    let scale = 1;
+    try { if (typeof TouchControls !== 'undefined') scale = TouchControls.renderScale() || 1; } catch (e) {}
+    canvas.width = Math.max(2, Math.round(cssW * scale));
+    canvas.height = Math.max(2, Math.round(cssH * scale));
     state.canvasWidth = canvas.width;
     state.canvasHeight = canvas.height;
-    state.waterBoundaryX = canvas.width * ((typeof CONFIG !== 'undefined' && CONFIG.WATER_BOUNDARY_RATIO) || 0.65);
+    state.renderScale = scale;
+    state.waterBoundaryX = cssW * ((typeof CONFIG !== 'undefined' && CONFIG.WATER_BOUNDARY_RATIO) || 0.65);
 }
 
 // ==========================================
@@ -766,10 +775,16 @@ const state = {
 
 // Size the canvas now that `state` exists
 window.addEventListener('resize', resizeCanvas);
+// Some mobile browsers don't fire resize reliably on rotation.
+window.addEventListener('orientationchange', () => {
+    setTimeout(() => { try { resizeCanvas(); } catch (e) {} }, 120);
+    setTimeout(() => { try { resizeCanvas(); } catch (e) {} }, 500);
+});
 resizeCanvas();
 
 // Init subsystems
 if (typeof Input !== 'undefined' && canvas) Input.init(state, canvas);
+if (typeof TouchControls !== 'undefined') TouchControls.init(state);
 if (typeof Shop !== 'undefined') Shop.init(state);
 
 // Procedural art is the default everywhere. PNGs are opt-in:
@@ -825,7 +840,6 @@ const MultiplayerUI = {
         on('btn-multiplayer', () => this.showPanel('multiplayer'));
         on('btn-host',        () => this.hostGame());
         on('btn-join',        () => this.showPanel('join'));
-        on('btn-mp-server-save', () => this.saveServerUrl());
         on('btn-mp-back',     () => this.showPanel('main'));
         on('btn-join-back',   () => this.showPanel('multiplayer'));
         on('btn-copy-room',   () => this.copyRoomCode());
@@ -834,6 +848,23 @@ const MultiplayerUI = {
         on('mp-exit-btn',     () => this.forceExitMultiplayer());
         on('btn-mp-new',      () => this.selectExpedition('new'));
         on('btn-mp-continue', () => this.selectExpedition('continue'));
+
+        // Pilot name: asked once, remembered, shown to the whole room.
+        ['mp-player-name', 'mp-player-name-join'].forEach(id => {
+            const inp = $(id);
+            if (inp) {
+                inp.addEventListener('input', () => this.syncNameInputs(id));
+                inp.addEventListener('keydown', (e) => { e.stopPropagation(); });
+            }
+        });
+
+        document.querySelectorAll('.mp-slot-btn').forEach(btn => {
+            btn.onclick = () => {
+                const slot = parseInt(btn.dataset.slot, 10) || 1;
+                try { audio.playUIClick(); } catch (e) {}
+                this.selectMPSlot(slot);
+            };
+        });
 
         document.querySelectorAll('.save-slot-btn').forEach(btn => {
             btn.onclick = () => {
@@ -881,6 +912,117 @@ const MultiplayerUI = {
         }
     },
 
+    // ---- Multiplayer identity: pilot name (asked, remembered, shown) ----
+    esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    },
+
+    paintNameInputs() {
+        try {
+            if (typeof Multiplayer === 'undefined' || !Multiplayer.playerName) return;
+            const cur = Multiplayer.playerName() || '';
+            ['mp-player-name', 'mp-player-name-join'].forEach(id => {
+                const el = $(id);
+                if (el && document.activeElement !== el && !el.value) el.value = cur;
+            });
+        } catch (e) {}
+    },
+
+    syncNameInputs(fromId) {
+        try {
+            const src = $(fromId);
+            if (!src || typeof Multiplayer === 'undefined' || !Multiplayer.setPlayerName) return;
+            const saved = Multiplayer.setPlayerName(src.value);
+            ['mp-player-name', 'mp-player-name-join'].forEach(id => {
+                if (id === fromId) return;
+                const el = $(id);
+                if (el && document.activeElement !== el) el.value = saved;
+            });
+            if (typeof Multiplayer.getRoster === 'function') this.refreshRoster();
+        } catch (e) {}
+    },
+
+    // Returns the pilot name, or '' + points at the field when missing.
+    requireName(joinFlow) {
+        try {
+            if (typeof Multiplayer === 'undefined' || !Multiplayer.playerName) return 'Angler';
+            let nm = Multiplayer.playerName();
+            if (!nm) {
+                const el = $(joinFlow ? 'mp-player-name-join' : 'mp-player-name');
+                if (el && el.value && el.value.trim()) {
+                    nm = Multiplayer.setPlayerName(el.value);
+                }
+            }
+            if (!nm) {
+                if (joinFlow) this.setJoinStatus('Type your pilot name first — the room will see it.', 'rose');
+                else UI.updateStatusBanner('Type your pilot name first — the room will see it.', 'Name', 'rose');
+                const el = $(joinFlow ? 'mp-player-name-join' : 'mp-player-name');
+                if (el) el.focus();
+                return '';
+            }
+            return nm;
+        } catch (e) { return 'Angler'; }
+    },
+
+    // ---- Personal MP files: slots 1-3, separate from single player ----
+    mpSlot() {
+        try {
+            if (this.state && this.state.mpSaveSlot) return this.state.mpSaveSlot;
+            if (typeof SaveSystem !== 'undefined') return SaveSystem.getMPSlot();
+        } catch (e) {}
+        return 1;
+    },
+
+    refreshMPSlotRow() {
+        try {
+            if (typeof SaveSystem === 'undefined' || !this.state) return;
+            const cur = this.mpSlot();
+            document.querySelectorAll('.mp-slot-btn').forEach(btn => {
+                const slot = parseInt(btn.dataset.slot, 10);
+                const meta = SaveSystem.mpMeta(slot);
+                const active = slot === cur;
+                btn.className = `mp-slot-btn flex-1 px-2 py-1.5 rounded-lg text-xs font-black border transition-all ${
+                    active
+                        ? 'bg-sky-500/25 border-sky-400 text-sky-300'
+                        : 'bg-slate-800/60 border-slate-700 text-slate-300'
+                }`;
+                btn.innerHTML = meta ? `Slot ${slot}<br><span class="text-[9px] font-bold opacity-80">Lv.${meta.level} · ${meta.coins}c</span>` : `Slot ${slot}<br><span class="text-[9px] font-bold opacity-60">empty</span>`;
+            });
+            const metaEl = $('mp-slot-meta');
+            if (metaEl) {
+                const meta = SaveSystem.mpMeta(cur);
+                metaEl.innerText = meta && meta.savedAt
+                    ? `Slot ${cur} · Lv.${meta.level} · ${meta.coins}c · saved ${new Date(meta.savedAt).toLocaleString()}`
+                    : `Slot ${cur} selected · no MP save yet (fresh pilot)`;
+            }
+        } catch (e) {}
+    },
+
+    selectMPSlot(slot) {
+        try {
+            if (typeof Multiplayer !== 'undefined' && Multiplayer.enterMPProfile) {
+                Multiplayer.enterMPProfile(slot);
+            }
+            this.refreshMPSlotRow();
+            this.refreshExpeditionBox();
+            this.refreshRoster();
+        } catch (e) {}
+    },
+
+    // ---- Lobby roster (names, not just counts) ----
+    refreshRoster() {
+        try {
+            if (typeof Multiplayer === 'undefined' || !Multiplayer.getRoster) return;
+            const roster = Multiplayer.getRoster();
+            this.renderLobbyPlayers(roster);
+            const cnt = roster.length;
+            const startBtn = $('btn-start-mp');
+            if (startBtn && window.Multiplayer && window.Multiplayer.isHost) {
+                startBtn.disabled = cnt < 2;
+            }
+        } catch (e) {}
+    },
+
     // ---- Host expedition save (shared MP file) ----
     expeditionMode: 'continue', // 'new' | 'continue'
 
@@ -888,19 +1030,22 @@ const MultiplayerUI = {
         const isHostView = !window.Multiplayer || window.Multiplayer.isHost || !window.Multiplayer.roomCode;
         const box = $('mp-expedition-box');
         if (box) box.style.display = isHostView ? '' : 'none';
+        const title = $('mp-expedition-title');
+        if (title) title.innerText = isHostView ? 'EXPEDITION SAVE (YOUR MP FILE)' : 'EXPEDITION SAVE';
+        const slot = this.mpSlot();
         const metaEl = $('mp-save-meta');
         if (typeof SaveSystem !== 'undefined' && metaEl) {
-            const meta = SaveSystem.mpMeta();
+            const meta = SaveSystem.mpMeta(slot);
             metaEl.innerText = meta && meta.savedAt
-                ? `Saved expedition · Lv.${meta.level} · ${meta.coins}c · ${new Date(meta.savedAt).toLocaleString()}`
-                : 'No expedition save yet — pick NEW';
+                ? `Slot ${slot} · Lv.${meta.level} · ${meta.coins}c · ${new Date(meta.savedAt).toLocaleString()}`
+                : `Slot ${slot} has no expedition yet — pick NEW`;
             if (!meta && this.expeditionMode === 'continue') this.expeditionMode = 'new';
         }
         const nBtn = $('btn-mp-new');
         const cBtn = $('btn-mp-continue');
         if (nBtn) nBtn.className = `flex-1 px-2 py-2 rounded-xl text-xs font-black border transition-all ${this.expeditionMode === 'new' ? 'bg-sky-500/25 border-sky-400 text-sky-300' : 'bg-slate-800/60 border-slate-600 text-slate-200'}`;
         if (cBtn) {
-            const has = typeof SaveSystem !== 'undefined' && SaveSystem.existsMP();
+            const has = typeof SaveSystem !== 'undefined' && SaveSystem.existsMP(this.mpSlot());
             cBtn.disabled = !has;
             cBtn.className = `flex-1 px-2 py-2 rounded-xl text-xs font-black border transition-all ${this.expeditionMode === 'continue' ? 'bg-emerald-500/25 border-emerald-400 text-emerald-300' : 'bg-slate-800/60 border-slate-600 text-slate-200'} ${has ? '' : 'opacity-40 cursor-not-allowed'}`;
         }
@@ -917,51 +1062,59 @@ const MultiplayerUI = {
         const panelEl = $(`mp-panel-${panel}`);
         if (panelEl) panelEl.classList.remove('hidden');
         this.currentPanel = panel;
-        if (panel === 'multiplayer') this.refreshServerUrlRow();
-        if (panel === 'lobby') this.refreshExpeditionBox();
+        if (panel === 'multiplayer') { this.refreshPeerRow(); this.paintNameInputs(); }
+        if (panel === 'join') this.paintNameInputs();
+        if (panel === 'lobby') {
+            this.paintNameInputs();
+            this.refreshMPSlotRow();
+            this.refreshExpeditionBox();
+            this.refreshRoster();
+        }
         if (panel === 'main' && typeof MainMenu !== 'undefined' && MainMenu.refreshContinueBtn) {
             try { MainMenu.refreshContinueBtn(); } catch (e) {}
         }
     },
 
-    refreshServerUrlRow() {
+    // PeerJS cloud status (no localhost server needed anymore).
+    // Pre-warms the cloud link so Host/Join is instant.
+    refreshPeerRow() {
         try {
-            const saved = localStorage.getItem('ah_signaling_server');
-            const input = $('mp-server-url');
-            const status = $('mp-server-status');
-            if (input && document.activeElement !== input) input.value = saved || '';
-            if (status) {
-                status.innerText = saved
-                    ? `Using custom server: ${saved}`
-                    : 'Default: auto (same network, port 8080)';
-                status.className = `text-[10px] mt-1 ${saved ? 'text-emerald-400' : 'text-slate-500'}`;
+            const status = $('mp-peer-status');
+            const verTag = $('mp-version-tag');
+            if (verTag) {
+                const v = (typeof GAME_VERSION === 'string' && GAME_VERSION) ? GAME_VERSION : '1.2.5';
+                verTag.innerText = 'v' + v + ' · same version required to play together';
+            }
+            if (!status) return;
+            if (typeof PeerLink === 'undefined' || typeof Peer === 'undefined') {
+                status.innerText = 'PeerJS library blocked — check connection/adblock and reload.';
+                status.className = 'text-[10px] mt-1 text-rose-400';
+                return;
+            }
+            const paint = () => {
+                const el = $('mp-peer-status');
+                if (!el) return;
+                const st = (typeof PeerLink !== 'undefined' && PeerLink.cloud) || 'idle';
+                if (st === 'online') {
+                    el.innerText = '● PeerJS cloud: online — host or join with a 4-character code.';
+                    el.className = 'text-[10px] mt-1 text-emerald-400';
+                } else if (st === 'connecting') {
+                    el.innerText = '● PeerJS cloud: connecting…';
+                    el.className = 'text-[10px] mt-1 text-sky-400';
+                } else if (st === 'error') {
+                    el.innerText = '● PeerJS cloud: ' + ((PeerLink && PeerLink.cloudError) || 'unreachable — Try again.');
+                    el.className = 'text-[10px] mt-1 text-rose-400';
+                } else {
+                    el.innerText = '● PeerJS cloud: checking…';
+                    el.className = 'text-[10px] mt-1 text-slate-500';
+                }
+            };
+            paint();
+            if (typeof PeerLink !== 'undefined' && PeerLink.warmup && !window.Multiplayer.roomCode) {
+                PeerLink.onCloudStatus = () => paint();
+                PeerLink.warmup(9000).then(paint, paint);
             }
         } catch (e) {}
-    },
-
-    saveServerUrl() {
-        const input = $('mp-server-url');
-        const val = input ? input.value.trim() : '';
-        try {
-            if (val) localStorage.setItem('ah_signaling_server', val);
-            else localStorage.removeItem('ah_signaling_server');
-        } catch (e) {}
-        // Apply live (takes effect on next Host/Join)
-        if (window.Multiplayer) {
-            try {
-                const u = val || null;
-                let resolved = null;
-                if (u) {
-                    if (/^wss?:\/\//i.test(u)) resolved = u;
-                    else if (/^https:\/\//i.test(u)) resolved = 'wss://' + u.slice(8);
-                    else if (/^http:\/\//i.test(u)) resolved = 'ws://' + u.slice(7);
-                    else resolved = 'wss://' + u.replace(/^\/+/, '');
-                }
-                if (resolved) window.Multiplayer.signalingUrl = resolved;
-            } catch (e) {}
-        }
-        this.refreshServerUrlRow();
-        UI.updateStatusBanner(val ? 'Signaling server saved.' : 'Custom server cleared (back to auto).', 'Server', 'emerald');
     },
 
     async hostGame() {
@@ -969,19 +1122,26 @@ const MultiplayerUI = {
             UI.updateStatusBanner('Multiplayer module not loaded', 'Error', 'rose');
             return;
         }
+        // Pilot name first — the room sees it, and rejoining with it works.
+        if (!this.requireName(false)) return;
 
         this.showPanel('lobby');
         this.setLobbyStatus('Creating room...');
-        this.renderLobbyPlayers(1, true);
+        this.refreshRoster();
 
         try {
             const roomCode = await window.Multiplayer.createRoom();
+            // Switch to the personal MP profile (SP files stay untouched).
+            if (window.Multiplayer.enterMPProfile) window.Multiplayer.enterMPProfile();
             this.setLobbyStatus(`Room created: ${roomCode} - Waiting for player...`);
             const codeEl = $('mp-room-code');
             if (codeEl) codeEl.innerText = roomCode;
             // Start stays disabled until Player 2 joins
             const startBtn = $('btn-start-mp');
             if (startBtn) startBtn.disabled = true;
+            this.refreshMPSlotRow();
+            this.refreshExpeditionBox();
+            this.refreshRoster();
         } catch (e) {
             this.setLobbyStatus(`Failed: ${e.message}`, 'rose');
             this.showPanel('multiplayer');
@@ -998,28 +1158,62 @@ const MultiplayerUI = {
             this.setJoinStatus('Enter a 4-character room code', 'rose');
             return;
         }
+        if (!this.requireName(true)) return;
 
         this.setJoinStatus('Connecting...');
 
         try {
             await window.Multiplayer.joinRoom(roomCode.toUpperCase());
+            // Personal MP profile for this browser (SP files stay untouched).
+            if (window.Multiplayer.enterMPProfile) window.Multiplayer.enterMPProfile();
             this.showPanel('lobby');
             this.setLobbyStatus(`Joined room: ${roomCode.toUpperCase()} - Waiting for host to start...`);
             const codeEl = $('mp-room-code');
             if (codeEl) codeEl.innerText = roomCode.toUpperCase();
             const startBtn = $('btn-start-mp');
             if (startBtn) startBtn.disabled = true;
-            const cnt = (window.Multiplayer && window.Multiplayer._lobbyCount) || 2;
-            this.renderLobbyPlayers(cnt, false);
+            this.refreshMPSlotRow();
+            this.refreshExpeditionBox();
+            this.refreshRoster();
         } catch (e) {
-            this.setJoinStatus(`Failed: ${e.message}`, 'rose');
+            const msg = (e && e.message) || 'Join failed';
+            if (/Name taken/i.test(msg)) {
+                // Same-origin tabs share localStorage — and a DUPLICATED
+                // tab even clones sessionStorage — so the rejected name
+                // may not be the player's fault at all. Hand them a free
+                // name instead of a dead end (retrying with it succeeds).
+                try {
+                    const inp = $('mp-player-name-join');
+                    const raw = ((inp && inp.value) || (window.Multiplayer && window.Multiplayer.playerName && window.Multiplayer.playerName()) || 'Angler');
+                    const base = String(raw).replace(/[<>&"']/g, '').trim().slice(0, 9) || 'Angler';
+                    const sug = (base + Math.floor(Math.random() * 90 + 10)).slice(0, 12);
+                    if (inp) { inp.value = sug; inp.focus(); inp.select(); }
+                    if (window.Multiplayer && window.Multiplayer.setPlayerName) window.Multiplayer.setPlayerName(sug);
+                    try { if (window.Multiplayer && window.Multiplayer.mpLog) window.Multiplayer.mpLog('name-taken', `"${base}" taken — suggested "${sug}"`); } catch (ee) {}
+                    this.setJoinStatus(`"${base}" is taken in this room — try "${sug}" (filled in, hit Join again).`, 'rose');
+                } catch (ee) {
+                    this.setJoinStatus(`Failed: ${msg}`, 'rose');
+                }
+                return;
+            }
+            this.setJoinStatus(`Failed: ${msg}`, 'rose');
         }
     },
 
-    renderLobbyPlayers(count, isHost) {
+    renderLobbyPlayers(roster) {
         const list = $('mp-lobby-players');
         const countEl = $('mp-lobby-count');
-        count = Math.min(4, Math.max(1, count));
+        // Legacy callers passed a headcount — upgrade to a 1-deep roster.
+        if (typeof roster === 'number') {
+            const n = Math.min(4, Math.max(1, roster));
+            roster = [];
+            for (let i = 0; i < n; i++) {
+                roster.push({ id: 'p' + i, name: i === 0 ? 'Host' : 'Player ' + (i + 1), isYou: false, isHost: i === 0 });
+            }
+        }
+        if (!Array.isArray(roster)) roster = [];
+        roster = roster.slice(0, 4);
+        const count = Math.max(1, roster.length);
         if (countEl) countEl.innerText = `${count} / 4`;
         if (!list) return;
         const row = (name, badge, badgeCls, dot) => `
@@ -1029,22 +1223,30 @@ const MultiplayerUI = {
                 <span class="text-xs font-bold text-white flex-1">${name}</span>
                 <span class="px-1.5 py-0.5 rounded text-[9px] font-black ${badgeCls}">${badge}</span>
             </div>`;
-        let html = row(
-            isHost ? 'Player 1 (You)' : 'Player 1 (Host)',
-            isHost ? 'HOST · YOU' : 'HOST',
-            'bg-amber-500/20 text-amber-300 border border-amber-500/30',
-            'bg-emerald-400 animate-pulse'
-        );
-        for (let i = 2; i <= 4; i++) {
-            const filled = i <= count;
-            const you = filled && !isHost && i === count;
+        let html = '';
+        roster.forEach((m, i) => {
+            const nm = this.esc(m.name || ('Player ' + (i + 1)));
+            const tags = [];
+            if (m.isHost) tags.push('HOST');
+            if (m.isYou) tags.push('YOU');
+            const badge = tags.length ? tags.join(' · ') : ('P' + (i + 1));
             html += row(
-                filled ? (you ? `Player ${i} (You)` : `Player ${i}`) : `Player ${i}`,
-                filled ? (you ? 'YOU' : 'JOINED') : 'WAITING...',
-                filled
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                    : 'bg-slate-700/60 text-slate-400 border border-slate-600',
-                filled ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                nm,
+                badge,
+                m.isYou
+                    ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                    : (m.isHost
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'),
+                'bg-emerald-400 animate-pulse'
+            );
+        });
+        for (let i = roster.length; i < 4; i++) {
+            html += row(
+                `Player ${i + 1}`,
+                'WAITING...',
+                'bg-slate-700/60 text-slate-400 border border-slate-600',
+                'bg-slate-500'
             );
         }
         list.innerHTML = html;
@@ -1100,21 +1302,28 @@ const MultiplayerUI = {
 
     leaveLobby() {
         this.hideLoading();
-        if (window.Multiplayer) window.Multiplayer.leaveRoom();
+        if (window.Multiplayer) {
+            if (window.Multiplayer.exitMPProfile) window.Multiplayer.exitMPProfile();
+            window.Multiplayer.leaveRoom();
+        }
         this.showPanel('multiplayer');
     },
 
     async startMultiplayerGame() {
         if (!window.Multiplayer || !window.Multiplayer.isHost) return;
-        // Apply the host's expedition choice: shared file for everyone
+        // Apply the host's expedition choice on THEIR MP slot: shared
+        // world for the room, personal file for the host.
         if (typeof SaveSystem !== 'undefined') {
-            if (this.expeditionMode === 'continue' && SaveSystem.existsMP()) {
-                SaveSystem.loadMP(this.state);
-                UI.updateStatusBanner('Expedition save loaded.', 'Expedition', 'emerald');
+            const slot = this.mpSlot();
+            if (this.expeditionMode === 'continue' && SaveSystem.existsMP(slot)) {
+                SaveSystem.loadMP(this.state, slot);
+                UI.updateStatusBanner(`Expedition slot ${slot} loaded.`, 'Expedition', 'emerald');
             } else {
+                SaveSystem.wipeMP(slot);
                 SaveSystem.freshPlayer(this.state);
+                SaveSystem.saveMP(this.state, slot);
                 this.expeditionMode = 'new';
-                UI.updateStatusBanner('New expedition started.', 'Expedition', 'emerald');
+                UI.updateStatusBanner(`New expedition started (slot ${slot}).`, 'Expedition', 'emerald');
             }
             if (typeof Player !== 'undefined') {
                 Player.refreshHUD(this.state);
@@ -1132,6 +1341,11 @@ const MultiplayerUI = {
         // Host sim stays authoritative — start pushing world state now
         if (window.Multiplayer.startStateSync) window.Multiplayer.startStateSync();
         const acked = await window.Multiplayer.sendGameStartWithRetry();
+        // Custom-art sync: everyone publishes their skins so all peers
+        // render the same pixels (streams in background, game is playable).
+        try {
+            if (typeof PeerSkins !== 'undefined') PeerSkins.startSession();
+        } catch (e) {}
         this.hideLoading();
         if (acked) {
             this.setLobbyStatus('Player 2 is in!', 'emerald');
@@ -1154,24 +1368,13 @@ const MultiplayerUI = {
     forceExitMultiplayer() {
         this.hideLoading();
         if (window.Multiplayer) {
+            // Saves the MP character, restores the SP slot, then leaves.
+            if (window.Multiplayer.exitMPProfile) window.Multiplayer.exitMPProfile();
             window.Multiplayer.cleanup();
         }
         this.hideInGameHUD();
-        // Restore your single-player file — MP never touches local slots
-        if (typeof SaveSystem !== 'undefined' && this.state) {
-            SaveSystem.load(this.state, this.state.saveSlot || SaveSystem.getSlot());
-            if (typeof Player !== 'undefined') {
-                Player.refreshHUD(this.state);
-                Player.refreshWeaponHUD(this.state);
-            }
-            if (typeof UI !== 'undefined' && UI.renderWeaponToolbar) UI.renderWeaponToolbar(this.state);
-            if (typeof UI !== 'undefined' && UI.refreshLuckDisplay) UI.refreshLuckDisplay(this.state);
-            if (typeof Casino !== 'undefined') {
-                try { Casino.tokens = this.state.player.casinoTokens || 0; Casino.updateTokenDisplay(); } catch (e) {}
-            }
-        }
         if (typeof MainMenu !== 'undefined') MainMenu.show();
-        UI.updateStatusBanner('Left multiplayer session (local save restored)', 'Exit', 'amber');
+        UI.updateStatusBanner('Left multiplayer session (single-player save restored)', 'Exit', 'amber');
     },
 
     updateHUD() {
@@ -1181,10 +1384,46 @@ const MultiplayerUI = {
         }
     },
 
+    // Player-visible MP event log: last 5 in the lobby box, last event
+    // on the in-game HUD. Called by Multiplayer.mpLog on every event.
+    refreshMpLog() {
+        try {
+            if (typeof Multiplayer === 'undefined' || !Multiplayer.mpLogList) return;
+            const list = Multiplayer.mpLogList().slice(-5);
+            const box = $('mp-log-list');
+            if (box) {
+                if (!list.length) {
+                    box.innerHTML = '<div class="text-slate-600">— no events yet —</div>';
+                } else {
+                    box.innerHTML = list.map(e => {
+                        const d = new Date(e.t);
+                        const hh = String(d.getHours()).padStart(2, '0');
+                        const mm = String(d.getMinutes()).padStart(2, '0');
+                        const ss = String(d.getSeconds()).padStart(2, '0');
+                        const hot = /reject|mismatch|full|taken|unavailable|left|no-snapshot|bad-pid|fail|error/i.test(e.code);
+                        return `<div class="${hot ? 'text-rose-300' : 'text-slate-400'}">[${hh}:${mm}:${ss}] <b>${this.esc(e.code)}</b>: ${this.esc(e.msg)}</div>`;
+                    }).join('');
+                    box.scrollTop = box.scrollHeight;
+                }
+            }
+            const hud = $('mp-hud-log');
+            if (hud) {
+                const last = Multiplayer.mpLogList().slice(-1)[0];
+                hud.innerText = last ? `${last.code}: ${last.msg}` : '—';
+            }
+            // Feedback panel preview stays fresh while open.
+            try {
+                if (typeof Feedback !== 'undefined' && !document.getElementById('feedback-modal').classList.contains('hidden')) {
+                    Feedback.refreshLogPreview();
+                }
+            } catch (e) {}
+        } catch (e) {}
+    },
+
     onPlayerJoined() {
         const cnt = (window.Multiplayer && window.Multiplayer._lobbyCount) || 2;
         this.setLobbyStatus(`Player joined! (${cnt}/4) Ready to start.`, 'emerald');
-        this.renderLobbyPlayers(cnt, true);
+        this.refreshRoster();
         const startBtn = $('btn-start-mp');
         if (startBtn) startBtn.disabled = false;
     },
@@ -1192,9 +1431,163 @@ const MultiplayerUI = {
     onPlayerLeft() {
         const cnt = (window.Multiplayer && window.Multiplayer._lobbyCount) || 1;
         this.setLobbyStatus(`Player left. (${cnt}/4) Waiting for players...`, 'rose');
-        this.renderLobbyPlayers(cnt, true);
+        this.refreshRoster();
         const startBtn = $('btn-start-mp');
         if (startBtn) startBtn.disabled = cnt < 2;
+    }
+};
+
+// ==========================================
+// PAUSE MENU (in-game ESC — never jumps to the main menu)
+// ==========================================
+const PauseMenu = {
+    isOpen() {
+        const el = $('pause-menu');
+        return !!(el && !el.classList.contains('hidden'));
+    },
+
+    open() {
+        const el = $('pause-menu');
+        if (!el) return;
+        try {
+            if (typeof state !== 'undefined' && state.player && state.player.isDead) return;
+        } catch (e) {}
+        const quit = $('btn-pause-quit');
+        if (quit) {
+            const span = quit.querySelector('span');
+            let inRoom = false;
+            try { inRoom = !!(typeof Multiplayer !== 'undefined' && Multiplayer.roomCode); } catch (e) {}
+            if (span) span.innerText = inRoom ? 'Leave Server' : 'Leave to Main Menu';
+        }
+        const msg = $('pause-save-msg');
+        if (msg) msg.innerText = '';
+        el.classList.remove('hidden');
+        el.classList.add('flex');
+        try { if (typeof state !== 'undefined') state.paused = true; } catch (e) {}
+    },
+
+    close(resume) {
+        const el = $('pause-menu');
+        if (el) { el.classList.add('hidden'); el.classList.remove('flex'); }
+        if (resume === false) return;
+        try {
+            const menu = $('main-menu');
+            const dead = state.player && state.player.isDead;
+            if ((!menu || menu.classList.contains('hidden')) && !dead) state.paused = false;
+        } catch (e) {}
+    },
+
+    bind() {
+        const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
+        on('btn-pause-resume', () => {
+            try { audio.playUIClick(); } catch (e) {}
+            this.close(true);
+        });
+        on('btn-pause-save', () => {
+            try { audio.playUIClick(); } catch (e) {}
+            const msg = $('pause-save-msg');
+            let ok = false;
+            try { if (typeof SaveSystem !== 'undefined') ok = SaveSystem.save(state); } catch (e) {}
+            if (msg) {
+                msg.innerText = ok ? 'Progress saved!' : 'Save failed.';
+                msg.className = 'text-center text-[11px] font-bold min-h-[1rem] ' + (ok ? 'text-emerald-300' : 'text-rose-300');
+            }
+        });
+        on('btn-pause-quit', () => {
+            try { audio.playUIClick(); } catch (e) {}
+            this.close(false);
+            try {
+                if (typeof MultiplayerUI !== 'undefined' && window.Multiplayer && window.Multiplayer.roomCode) {
+                    MultiplayerUI.forceExitMultiplayer();
+                } else if (typeof MainMenu !== 'undefined') {
+                    MainMenu.show();
+                }
+            } catch (e) {}
+        });
+    }
+};
+
+// ==========================================
+// TAB PLAYER LIST (Minecraft-style: visible only while TAB is held)
+// Bug report + Leave server live here — nowhere else in-game.
+// ==========================================
+const TabList = {
+    esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    },
+
+    isOpen() {
+        const ov = $('tablist-overlay');
+        return !!(ov && !ov.classList.contains('hidden'));
+    },
+
+    show() {
+        const ov = $('tablist-overlay');
+        if (!ov) return;
+        try {
+            const menu = $('main-menu');
+            if (menu && !menu.classList.contains('hidden')) return; // in-game only
+            if (typeof state !== 'undefined' && state.player && state.player.isDead) return;
+        } catch (e) {}
+        this.render();
+        ov.classList.remove('hidden');
+        ov.classList.add('flex');
+    },
+
+    hide() {
+        const ov = $('tablist-overlay');
+        if (ov) { ov.classList.add('hidden'); ov.classList.remove('flex'); }
+    },
+
+    render() {
+        const rows = $('tablist-rows');
+        const cnt = $('tablist-count');
+        const room = $('tablist-room');
+        let list = [];
+        try {
+            if (typeof Multiplayer !== 'undefined' && Multiplayer.roomCode && Multiplayer.getRoster) {
+                list = Multiplayer.getRoster() || [];
+            }
+        } catch (e) { list = []; }
+        list = list.slice(0, 4);
+        const inRoom = list.length > 0;
+        if (cnt) cnt.innerText = inRoom ? `${list.length}/4` : 'SOLO';
+        if (room) {
+            let code = '';
+            try { code = (typeof Multiplayer !== 'undefined' && Multiplayer.roomCode) || ''; } catch (e) {}
+            room.innerText = code ? `· ${code}` : '';
+        }
+        if (!rows) return;
+        if (!inRoom) {
+            let me = 'You';
+            try {
+                if (typeof Multiplayer !== 'undefined' && Multiplayer.playerName) me = Multiplayer.playerName() || 'You';
+            } catch (e) {}
+            rows.innerHTML =
+                `<div class="flex items-center gap-2 glass-panel px-3 py-2 rounded-xl">` +
+                `<span class="w-2 h-2 rounded-full bg-sky-400"></span>` +
+                `<i class="fa-solid fa-user text-slate-400 text-xs"></i>` +
+                `<span class="text-xs font-bold text-white flex-1">${this.esc(me)}</span>` +
+                `<span class="px-1.5 py-0.5 rounded text-[9px] font-black bg-slate-700/60 text-slate-300 border border-slate-600">SOLO</span></div>`;
+            return;
+        }
+        rows.innerHTML = list.map((m, i) => {
+            const nm = this.esc(m.name || ('Player ' + (i + 1)));
+            const tags = [];
+            if (m.isHost) tags.push('👑 HOST');
+            if (m.isYou) tags.push('YOU');
+            const badge = tags.length ? tags.join(' · ') : ('P' + (i + 1));
+            const cls = m.isYou
+                ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                : (m.isHost
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30');
+            return `<div class="flex items-center gap-2 glass-panel px-3 py-2 rounded-xl">` +
+                `<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>` +
+                `<i class="fa-solid fa-user text-slate-400 text-xs"></i>` +
+                `<span class="text-xs font-bold text-white flex-1">${nm}</span>` +
+                `<span class="px-1.5 py-0.5 rounded text-[9px] font-black ${cls}">${this.esc(badge)}</span></div>`;
+        }).join('');
     }
 };
 
@@ -1596,7 +1989,7 @@ const Tutorial = {
 // ==========================================
 const Settings = {
     KEY: 'ah_settings',
-    data: { sound: true, fx: 'med', shake: true, master: 100, music: 80, sfx: 100 },
+    data: { sound: true, fx: 'med', shake: true, dayNightFx: true, master: 100, music: 80, sfx: 100, touch: 'auto' },
 
     load() {
         try {
@@ -1606,9 +1999,13 @@ const Settings = {
                 if (typeof d.sound === 'boolean') this.data.sound = d.sound;
                 if (['low', 'med', 'high'].includes(d.fx)) this.data.fx = d.fx;
                 if (typeof d.shake === 'boolean') this.data.shake = d.shake;
+                // 1.1.5: day/night LIGHTING toggle (time always keeps running)
+                if (typeof d.dayNightFx === 'boolean') this.data.dayNightFx = d.dayNightFx;
+                if (typeof d.dayNight === 'boolean' && typeof d.dayNightFx !== 'boolean') this.data.dayNightFx = d.dayNight;
                 ['master', 'music', 'sfx'].forEach(k => {
                     if (typeof d[k] === 'number') this.data[k] = Math.max(0, Math.min(100, Math.round(d[k])));
                 });
+                if (['auto', 'on', 'off'].includes(d.touch)) this.data.touch = d.touch;
             }
         } catch (e) {}
         return this.data;
@@ -1648,6 +2045,9 @@ const Settings = {
         set('set-sound-val', this.data.sound ? 'ON' : 'OFF', this.data.sound);
         set('set-fx-val', this.data.fx.toUpperCase(), true);
         set('set-shake-val', this.data.shake ? 'ON' : 'OFF', this.data.shake);
+        // 1.1.5: lighting only — the clock keeps ticking when OFF.
+        set('set-daynight-val', this.data.dayNightFx !== false ? 'ON' : 'OFF', this.data.dayNightFx !== false);
+        set('set-touch-val', this.data.touch.toUpperCase(), this.data.touch !== 'off');
         ['master', 'music', 'sfx'].forEach(k => {
             const r = $(`set-${k}`);
             const v = $(`set-${k}-val`);
@@ -1666,6 +2066,18 @@ const Settings = {
             this.save(); this.apply(); this.render();
         });
         on('set-shake', () => { this.data.shake = !this.data.shake; this.save(); this.render(); });
+        on('set-daynight', () => {
+            this.data.dayNightFx = !(this.data.dayNightFx !== false);
+            this.save(); this.render();
+            try { if (typeof audio !== 'undefined' && audio.playUIClick) audio.playUIClick(); } catch (e) {}
+        });
+        on('set-touch', () => {
+            this.data.touch = this.data.touch === 'auto' ? 'on' : this.data.touch === 'on' ? 'off' : 'auto';
+            this.save(); this.render();
+            try {
+                if (typeof TouchControls !== 'undefined' && typeof state !== 'undefined') TouchControls.refresh(state);
+            } catch (e) {}
+        });
         ['master', 'music', 'sfx'].forEach(k => {
             const r = $(`set-${k}`);
             if (r) r.oninput = () => {
@@ -1692,6 +2104,21 @@ window.Settings = Settings;
 const Intro = {
     idx: 0,
     pages: [
+        // 1.1.5 PROLOGUE: every new game washes you ashore (drift intro).
+        {
+            kicker: 'PROLOGUE',
+            title: 'ADRIFT',
+            body: 'You wake to gulls and salt. Your boat went down in the night storm — ' +
+                'all that is left is you, a rod, and a splintered plank. ' +
+                'The current drags you toward a lamplit shore…',
+        },
+        {
+            kicker: 'PROLOGUE',
+            title: 'BLACKTIDE SHORE',
+            body: 'Sand under your boots. Someone left a tackle box by the pier, ' +
+                'and Old Marlin is already watching from his camp. ' +
+                'The sea took everything once — time to take back more.',
+        },
         {
             kicker: 'CHAPTER I',
             title: 'THE HOLLOW TIDE',
@@ -1711,7 +2138,9 @@ const Intro = {
             title: 'THE HUNT',
             body: 'WASD to move · hold SPACE to cast, ease off before the line snaps · ' +
                 'click to shoot hooked horrors · E talks, shops and rituals · ' +
-                'J opens the fish index. North of the beach, a sealed cave waits for clever feet.',
+                'J opens the fish index. Walk the pier for deeper water, watch the clock ' +
+                'chip (time + weather + tier), and save coins for the ferryman\'s 3 wild isles. ' +
+                'North of the beach, a sealed cave waits for clever feet.',
         },
     ],
 
@@ -1773,12 +2202,75 @@ const Intro = {
 };
 
 // Single source of truth for the displayed game version.
-const GAME_VERSION = '1.1.0';
+const GAME_VERSION = '1.2.5';
 
 // Newest first. Shown in Menu > Updates.
 const CHANGELOG = [
     {
-        ver: 'v1.1.0', date: 'Oct 2026', tag: 'LATEST',
+        ver: 'v1.2.5', date: 'Oct 2026', tag: 'LATEST',
+        items: [
+            'Multiplayer identities: pilot name asked once, remembered, shown in lobby + name tags (same name rejoins seamlessly)',
+            'Separate MP save system: personal slots 1-3 per browser, never touches single-player files; per-slot NEW/CONTINUE expedition',
+            'Shared everything, personal everything: host clock/weather syncs to all, one boss per room (peers’ hooked bosses block summons), cross-island bodies culled — while catches, casino tokens, assets and Settings stay personal',
+            'Island/cave travel is strictly per-player; host leaving banks your MP file and returns you to single player',
+        ],
+    },
+    {
+        ver: 'v1.2.4', date: 'Oct 2026', tag: '',
+        items: [
+            'FIXED: invisible surf-line wall blocked every dragged catch from beaching — BEACHING fish can cross onto sand/deck again, dead fish shift inward to loot even from afar',
+            'Beached fish tire fast: stronger beach drag + eased tension on land (no more line snaps meters from your hands)',
+            'Bobber now flies toward the mouse on every map (touch/gamepad aim included), with walk-back water validation; falls back to facing',
+            'Sea detection cells unified: one detector drives spawn rates, bite waits and water tint (shore/shallow/deep/island)',
+        ],
+    },
+    {
+        ver: 'v1.2.3', date: 'Oct 2026', tag: '',
+        items: [
+            'FIXED: clients never entered the game on host start (message envelope mismatch dropped every gameState/input/start packet) — host start now loads + renders for everyone',
+            'Dying on an isle respawns you at the island dock (stays on the isle); beach/camp still return to the mainland',
+            'Ritual summons stay on the mainland beach — only bait-hooked bosses fight on the isles',
+            'BOSS TIDE: Hydra + Crimson now bite far rarer than the other bosses',
+        ],
+    },
+    {
+        ver: 'v1.2.2', date: 'Oct 2026', tag: '',
+        items: [
+            'Background run: the world keeps simulating while the tab is hidden (1s steps) — no more freeze, no more forced pause-to-menu in MP rooms',
+            'MP heartbeats in background so the host never ghost-drops a tabbed-out member; autosaves keep going',
+            'Tab-return guards: stuck keys/mouse cleared, audio resumed, fresh snapshot for clients',
+        ],
+    },
+    {
+        ver: 'v1.2.1', date: 'Oct 2026', tag: '',
+        items: [
+            'Isle rework: shared-style open sea around every isle (shore/shallow/deep from the sand edge) + per-isle lakes (lagoon / river / twin ponds) + its own pier and dock',
+            'Ferry rides are real boat trips now: board, sail with a wake, then the crossing (same sailing home)',
+            'Pier/isle fishing fixed: deck and sand count as shore for beaching, loot no longer sinks on piers or isles, knockbacks can\'t nudge you off the deck',
+            'Zone orbs removed — water color itself shows the tiers (light shallow → dark deep); catches announce normally again',
+        ],
+    },
+    {
+        ver: 'v1.2.0', date: 'Oct 2026', tag: '',
+        items: [
+            'Online P2P multiplayer (PeerJS): no localhost server — host/join from anywhere, itch.io included, same version required',
+            'Shared vision: custom fish/gun/bobber art syncs across peers, catch popups + boss banners mirrored (same text/colors/pixels)',
+            'Kept personal: your Settings (day/night FX, particles, shake, volumes) stay local, so screens may differ slightly there',
+        ],
+    },
+    {
+        ver: 'v1.1.5', date: 'Oct 2026', tag: '',
+        items: [
+            'Map expansion: long pier reaches SHALLOW then DEEP water — sea tiers by distance (Shore / Shallow / Deep)',
+            'Ferryman boat at the pier end: 3 detached wild isles (Sunspill 500c, Mistfall 1500c, Abyssal Maw 3000c) with loading screens + sailing intros',
+            'Time + weather system: day/night cycle, clear/clouds/rain/storm/fog — matching fish get big spawn-rate boosts',
+            'Clock chip in the HUD (time · weather · water tier) + Day/Night FX toggle in Settings (time keeps running when OFF)',
+            'New-game drift intro: you wash ashore from a wreck before Chapter I',
+            'Menu safety: Slot 1 pre-selected, TOP button is Continue, New Game sits below with a wipe confirm',
+        ],
+    },
+    {
+        ver: 'v1.1.0', date: 'Oct 2026', tag: '',
         items: [
             'Update log added — this panel, with the current version up top',
             'Teleport loading screen for cave descents and returns',
@@ -1830,14 +2322,48 @@ const MainMenu = {
         }
     },
 
+    // 1.1.5 MENU SAFETY: Slot 1 is always pre-selected at boot, and the
+    // TOP button is Continue (never a save-wiping New Game). The New Game
+    // action lives UNDERNEATH and asks for confirmation when the slot
+    // already has progress. With zero saves anywhere, the top button IS
+    // Start New Game and no Continue shows at all.
+    anySave() {
+        try {
+            if (typeof SaveSystem === 'undefined') return false;
+            return (SaveSystem.SLOTS || [1, 2, 3]).some(s => SaveSystem.exists(s));
+        } catch (e) { return false; }
+    },
+
     refreshContinueBtn() {
-        const contBtn = $('btn-load');
-        if (!contBtn || typeof SaveSystem === 'undefined') return;
-        const slot = (typeof state !== 'undefined' && state.saveSlot) || SaveSystem.getSlot();
-        const hasSave = SaveSystem.exists(slot);
-        contBtn.disabled = !hasSave;
-        const span = contBtn.querySelector('span');
-        if (span) span.innerText = hasSave ? `Continue (Slot ${slot})` : 'No Save Found';
+        const topBtn = $('btn-start');
+        const newBtn = $('btn-load');
+        if (!topBtn || !newBtn || typeof SaveSystem === 'undefined') return;
+        const slot = (typeof state !== 'undefined' && state.saveSlot) || SaveSystem.getSlot() || 1;
+        const hasAny = this.anySave();
+        const hasSlot = SaveSystem.exists(slot);
+        const topSpan = topBtn.querySelector('span');
+        const newSpan = newBtn.querySelector('span');
+        const topIcon = topBtn.querySelector('i');
+        const newIcon = newBtn.querySelector('i');
+        if (!hasAny) {
+            // Fresh player: one big Start button, no Continue to misclick.
+            topBtn.dataset.mode = 'new';
+            topBtn.disabled = false;
+            if (topSpan) topSpan.innerText = 'Start New Game';
+            if (topIcon) topIcon.className = 'fa-solid fa-play';
+            newBtn.classList.add('hidden');
+        } else {
+            // TOP = Continue (safe default), BELOW = Start New Game.
+            topBtn.dataset.mode = 'continue';
+            topBtn.disabled = !hasSlot;
+            if (topSpan) topSpan.innerText = hasSlot ? `Continue (Slot ${slot})` : `Slot ${slot} Empty — Pick a Save`;
+            if (topIcon) topIcon.className = 'fa-solid fa-folder-open';
+            newBtn.classList.remove('hidden');
+            newBtn.dataset.mode = 'new';
+            newBtn.disabled = false;
+            if (newSpan) newSpan.innerText = hasSlot ? `Start New Game (Slot ${slot})` : `Start New Game (Slot ${slot})`;
+            if (newIcon) newIcon.className = 'fa-solid fa-play';
+        }
         const saveBtn = $('btn-save-menu');
         if (saveBtn) {
             const sspan = saveBtn.querySelector('span');
@@ -1855,7 +2381,7 @@ const MainMenu = {
     // Stamp the single-source version everywhere it shows.
     stampVersion() {
         try {
-            const v = (typeof GAME_VERSION === 'string' && GAME_VERSION) ? GAME_VERSION : 'v1.1.0';
+            const v = (typeof GAME_VERSION === 'string' && GAME_VERSION) ? GAME_VERSION : 'v1.2.5';
             const disp = v.startsWith('v') ? v : 'v' + v;
             ['menu-ver-hero', 'menu-ver-foot', 'menu-ver-chip', 'changelog-ver'].forEach(id => {
                 const el = $(id);
@@ -1886,8 +2412,40 @@ const MainMenu = {
         const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
 
         on('btn-start', () => {
+            const mode = ($('btn-start') && $('btn-start').dataset.mode) || (self.anySave() ? 'continue' : 'new');
+            if (mode === 'continue') {
+                // TOP button: always a safe load, never a wipe.
+                if (typeof SaveSystem === 'undefined') return;
+                const ok = SaveSystem.load(state);
+                if (ok) {
+                    if (typeof Player !== 'undefined') {
+                        if (typeof Player.initWeaponAmmo === 'function') Player.initWeaponAmmo(state);
+                        Player.refreshHUD(state);
+                        Player.refreshWeaponHUD(state);
+                    }
+                    UI.renderWeaponToolbar(state);
+                    UI.refreshLuckDisplay(state);
+                    if (typeof Casino !== 'undefined') {
+                        try { Casino.tokens = state.player.casinoTokens || 0; Casino.updateTokenDisplay(); } catch (e) {}
+                    }
+                    try {
+                        if (typeof WorldSystem !== 'undefined' && WorldSystem.refreshClockUI) WorldSystem.refreshClockUI(state);
+                    } catch (e) {}
+                    self.hide();
+                    UI.updateStatusBanner('Progress loaded.', 'Loaded', 'emerald');
+                } else {
+                    UI.updateStatusBanner('No save found in this slot — pick a slot with progress.', 'Load', 'rose');
+                }
+                return;
+            }
+            // Fresh run in the selected slot (records kept). Confirm when
+            // this would wipe an existing expedition.
             if (typeof SaveSystem !== 'undefined') {
                 const slot = (typeof state !== 'undefined' && state.saveSlot) || SaveSystem.getSlot();
+                if (SaveSystem.exists(slot)) {
+                    const okGo = window.confirm(`Start a NEW game in Slot ${slot}? This wipes that slot's expedition (records kept).`);
+                    if (!okGo) return;
+                }
                 SaveSystem.wipe(slot);
                 // Fresh run in the selected slot (records kept)
                 SaveSystem.freshPlayer(state);
@@ -1901,23 +2459,20 @@ const MainMenu = {
         });
 
         on('btn-load', () => {
+            // SECOND button: explicit Start New Game (confirm on wipe).
             if (typeof SaveSystem === 'undefined') return;
-            const ok = SaveSystem.load(state);
-            if (ok) {
-                if (typeof Player !== 'undefined') {
-                    if (typeof Player.initWeaponAmmo === 'function') Player.initWeaponAmmo(state);
-                    Player.refreshHUD(state);
-                    Player.refreshWeaponHUD(state);
-                }
-                UI.renderWeaponToolbar(state);
-                UI.refreshLuckDisplay(state);
-                if (typeof Casino !== 'undefined') {
-                    try { Casino.tokens = state.player.casinoTokens || 0; Casino.updateTokenDisplay(); } catch (e) {}
-                }
+            const slot = (typeof state !== 'undefined' && state.saveSlot) || SaveSystem.getSlot();
+            if (SaveSystem.exists(slot)) {
+                const okGo = window.confirm(`Start a NEW game in Slot ${slot}? This wipes that slot's expedition (records kept).`);
+                if (!okGo) return;
+                SaveSystem.wipe(slot);
+            }
+            SaveSystem.freshPlayer(state);
+            SaveSystem.save(state, slot);
+            if (typeof Intro !== 'undefined') Intro.show();
+            else {
                 self.hide();
-                UI.updateStatusBanner('Progress loaded.', 'Loaded', 'emerald');
-            } else {
-                UI.updateStatusBanner('No save found.', 'Load', 'rose');
+                UI.updateStatusBanner('New game started. Cast your line!', 'Start', 'emerald');
             }
         });
 
@@ -1981,16 +2536,60 @@ const MainMenu = {
         on('btn-settings', () => showMenuPanel('mp-panel-settings'));
         on('btn-settings-back', () => showMenuPanel('mp-panel-main'));
 
-        // Menu button in HUD (not for corpses)
+        // Menu button in HUD (not for corpses) — opens the in-game
+        // pause menu, never the main menu.
         const hudMenuBtn = $('btn-menu');
         if (hudMenuBtn) hudMenuBtn.onclick = () => {
             if (state.player && state.player.isDead) return;
-            self.show();
+            if (typeof PauseMenu !== 'undefined') PauseMenu.open();
         };
+
+        // TAB-hold player list (Minecraft-style). preventDefault stops
+        // focus-jumping; ignored while typing in any field.
+        const typingTarget = (e) => {
+            try {
+                const t = e.target;
+                if (!t || !t.tagName) return false;
+                const tag = t.tagName.toUpperCase();
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+                return !!(t.isContentEditable);
+            } catch (ee) { return false; }
+        };
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Tab') {
+                if (typingTarget(e)) return;
+                e.preventDefault();
+                if (!e.repeat && typeof TabList !== 'undefined') TabList.show();
+            }
+        });
+        window.addEventListener('keyup', (e) => {
+            if (e.key === 'Tab' && typeof TabList !== 'undefined') TabList.hide();
+        });
+        window.addEventListener('blur', () => {
+            try { if (typeof TabList !== 'undefined') TabList.hide(); } catch (e) {}
+        });
+        // Touch fallback (no TAB key): tapping the MP status bar toggles
+        // the same player list.
+        try {
+            const hud = $('mp-hud');
+            if (hud) hud.onclick = () => {
+                if (typeof TabList === 'undefined') return;
+                if (TabList.isOpen()) TabList.hide();
+                else TabList.show();
+            };
+        } catch (e) {}
+        if (typeof PauseMenu !== 'undefined') PauseMenu.bind();
 
         // ESC opens the menu
         window.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
+                // 1.1.5: ferry menu closes first
+                try {
+                    if (typeof WorldSystem !== 'undefined' && WorldSystem.isBoatMenuOpen && WorldSystem.isBoatMenuOpen()) {
+                        WorldSystem.closeBoatMenu();
+                        return;
+                    }
+                } catch (ee) {}
                 // Intro finishes on ESC (same as Begin/Skip)
                 if (typeof Intro !== 'undefined' && Intro.isOpen && Intro.isOpen()) {
                     Intro.finish();
@@ -2021,6 +2620,12 @@ const MainMenu = {
                     Ritual.close();
                     return;
                 }
+                const fb = $('feedback-modal');
+                if (fb && !fb.classList.contains('hidden')) {
+                    try { if (typeof Feedback !== 'undefined') Feedback.close(); }
+                    catch (e) { fb.classList.add('hidden'); }
+                    return;
+                }
                 const menu = $('main-menu');
                 if (menu && !menu.classList.contains('hidden')) {
                     const main = $('mp-panel-main');
@@ -2041,7 +2646,12 @@ const MainMenu = {
                         if (main) main.classList.remove('hidden');
                     }
                 } else {
-                    self.show();
+                    // In-game ESC toggles the pause menu — it never jumps
+                    // straight to the main menu anymore.
+                    if (typeof PauseMenu !== 'undefined') {
+                        if (PauseMenu.isOpen()) PauseMenu.close(true);
+                        else PauseMenu.open();
+                    }
                 }
             }
         });
@@ -2057,8 +2667,24 @@ const MainMenu = {
 // ==========================================
 let loadedFromSave = false;
 if (typeof SaveSystem !== 'undefined') {
-    state.saveSlot = SaveSystem.getSlot();
-    loadedFromSave = SaveSystem.load(state);
+    // 1.1.5: always pre-select Slot 1 at boot (no surprise slot).
+    try { SaveSystem.setSlot(1); } catch (e) {}
+    state.saveSlot = 1;
+    loadedFromSave = SaveSystem.load(state, 1);
+    // Booting straight into a detached island is disorienting — start the
+    // session back on the beach, keeping the island unlocks/fees intact.
+    try {
+        if (state.player && state.player.onIsland) {
+            state.player.onIsland = null;
+            state.player.boatReturn = null;
+            state.player.islandSpawn = null;
+            state.player.x = 300; state.player.y = 300;
+        }
+        if (state.player && state.player.inCave) {
+            state.player.inCave = false;
+            state.player.returnPos = null;
+        }
+    } catch (e) {}
 }
 
 if (typeof Player !== 'undefined' && typeof Player.initWeaponAmmo === 'function') {
@@ -2092,6 +2718,16 @@ if (typeof NPC !== 'undefined') NPC.init(state);
 // Init Settings (sound / particles / shake / tutorial)
 if (typeof Settings !== 'undefined') Settings.init();
 
+// Init World (1.1.5: clock, weather, pier, ferry isles)
+if (typeof WorldSystem !== 'undefined' && WorldSystem.init) {
+    try { WorldSystem.init(state); } catch (e) {}
+}
+
+// Init BackgroundTick (keeps the sim + MP alive while the tab is hidden)
+if (typeof BackgroundTick !== 'undefined' && BackgroundTick.init) {
+    try { BackgroundTick.init(state); } catch (e) {}
+}
+
 // Apply armor stats from save
 if (typeof Shop !== 'undefined' && Shop.applyArmorStats) {
     try { Shop.applyArmorStats(state); } catch (e) {}
@@ -2099,6 +2735,16 @@ if (typeof Shop !== 'undefined' && Shop.applyArmorStats) {
 
 // Init Multiplayer UI
 if (typeof MultiplayerUI !== 'undefined') MultiplayerUI.init(state);
+
+// Init Feedback panel (Discord webhook bug reports + MP log attach)
+if (typeof Feedback !== 'undefined') {
+    try { Feedback.init(); } catch (e) {}
+    try {
+        if (typeof MultiplayerUI !== 'undefined' && MultiplayerUI.refreshMpLog) {
+            MultiplayerUI.refreshMpLog();
+        }
+    } catch (e) {}
+}
 
 // Initialize Multiplayer system
 if (typeof Multiplayer !== 'undefined') {
@@ -2115,28 +2761,73 @@ if (typeof Multiplayer !== 'undefined') {
             MultiplayerUI.onPlayerLeft();
         },
         onGameStart: () => {
-            // Client receives game start signal: loading on ALL screens,
-            // then enter the game and pull the host's world state.
+            // Client receives game start signal: opaque loading on ALL
+            // screens, then enter the game ONLY after the first host
+            // snapshot lands (no more fixed-timer reveal into an empty
+            // world where the host is invisible).
             if (typeof MultiplayerUI !== 'undefined') {
                 MultiplayerUI.showLoading('JOINING...', 'Syncing with host');
             }
-            setTimeout(() => {
-                if (typeof MainMenu !== 'undefined') MainMenu.hide();
-                if (typeof MultiplayerUI !== 'undefined') {
-                    MultiplayerUI.showInGameHUD();
-                    MultiplayerUI.hideLoading();
-                }
-                UI.updateStatusBanner('Multiplayer game started!', 'Start', 'emerald');
-
-                // Ack so the host's loading screen can clear
+            try {
                 if (window.Multiplayer) {
+                    window.Multiplayer._hasEverSynced = false;
                     if (window.Multiplayer.sendGameStartAck) window.Multiplayer.sendGameStartAck();
                     if (window.Multiplayer.sendSyncRequest) window.Multiplayer.sendSyncRequest();
                 }
-            }, 1500);
+            } catch (e) {}
+            const t0 = Date.now();
+            const waitFirst = () => {
+                let ready = false;
+                try { ready = !!(window.Multiplayer && window.Multiplayer.hasEverSynced && window.Multiplayer.hasEverSynced()); } catch (e) {}
+                if (ready || Date.now() - t0 > 8000) {
+                    if (typeof MainMenu !== 'undefined') MainMenu.hide();
+                    if (typeof MultiplayerUI !== 'undefined') {
+                        MultiplayerUI.showInGameHUD();
+                        MultiplayerUI.hideLoading();
+                    }
+                    if (!ready) {
+                        UI.updateStatusBanner('Still syncing with host… moving you in anyway (snapshot on the way).', 'Start', 'amber');
+                    } else {
+                        UI.updateStatusBanner('Multiplayer game started!', 'Start', 'emerald');
+                    }
+
+                    // Ack so the host's loading screen can clear
+                    if (window.Multiplayer) {
+                        if (window.Multiplayer.sendGameStartAck) window.Multiplayer.sendGameStartAck();
+                        if (window.Multiplayer.sendSyncRequest) window.Multiplayer.sendSyncRequest();
+                        // Publish our custom art so the room renders the same skins
+                        try {
+                            if (typeof PeerSkins !== 'undefined') PeerSkins.startSession();
+                        } catch (e) {}
+                    }
+                    return;
+                }
+                // Keep asking until the host answers (join-while-host-busy).
+                try {
+                    if (window.Multiplayer && window.Multiplayer.sendSyncRequest && (Date.now() - t0) % 1000 < 120) {
+                        window.Multiplayer.sendSyncRequest();
+                    }
+                } catch (e) {}
+                setTimeout(waitFirst, 120);
+            };
+            setTimeout(waitFirst, 150);
         },
         onError: (msg) => {
             UI.updateStatusBanner(msg, 'Error', 'rose');
+        },
+        onHostLeft: () => {
+            // No host = no shared world. Bank the MP character, restore
+            // single player, and go back to the menu (never strand the
+            // MP character in SP slots, never freeze in a dead room).
+            if (typeof MultiplayerUI !== 'undefined') {
+                MultiplayerUI.hideLoading();
+                MultiplayerUI.hideInGameHUD();
+            }
+            if (window.Multiplayer && window.Multiplayer.exitMPProfile) {
+                window.Multiplayer.exitMPProfile();
+            }
+            if (typeof MainMenu !== 'undefined') MainMenu.show();
+            UI.updateStatusBanner('Host left — single-player save restored.', 'Exit', 'amber');
         }
     });
     state.multiplayer = Multiplayer;
@@ -2146,6 +2837,39 @@ if (typeof Multiplayer !== 'undefined') {
 // MAIN GAME LOOP
 // ==========================================
 let lastTime = performance.now();
+
+// Shared client input snapshot (foreground loop + background ticks so a
+// tabbed-out member keeps heartbeating and is never ghost-dropped).
+function mpClientInput() {
+    return {
+        keys: { ...state.keys },
+        // Identity + map slice ride every snapshot: the host always
+        // knows WHO (name) and WHERE (mainland / isle / cave) we are.
+        playerName: (typeof Multiplayer !== 'undefined' && Multiplayer.playerName)
+            ? (Multiplayer.playerName() || '') : '',
+        mouse: {
+            x: state.mouse.x,
+            y: state.mouse.y,
+            worldX: state.mouse.worldX,
+            worldY: state.mouse.worldY,
+            isDown: state.mouse.isDown
+        },
+        aim: Math.atan2(state.mouse.worldY - state.player.y, state.mouse.worldX - state.player.x),
+        player: {
+            x: state.player.x,
+            y: state.player.y,
+            hp: state.player.hp,
+            maxHp: state.player.maxHp,
+            facing: state.player.facing,
+            aim: Math.atan2(state.mouse.worldY - state.player.y, state.mouse.worldX - state.player.x),
+            activeSlot: state.player.activeSlot,
+            equippedWeapons: [...state.player.equippedWeapons],
+            gunSkins: state.player.gunSkins ? { ...state.player.gunSkins } : {},
+            onIsland: state.player.onIsland || null,
+            inCave: !!state.player.inCave
+        }
+    };
+}
 
 function mainLoop(time) {
     const delta = Math.min(0.05, (time - lastTime) / 1000);
@@ -2166,6 +2890,11 @@ function mainLoop(time) {
 
     state.time += delta;
 
+    // 1.1.5 WORLD: clock + weather always tick while playing.
+    if (typeof WorldSystem !== 'undefined' && WorldSystem.update) {
+        try { WorldSystem.update(state, delta); } catch (e) {}
+    }
+
     if (state.screenShake > 0) {
         if (typeof Settings !== 'undefined' && Settings.data.shake === false) {
             state.screenShake = 0;
@@ -2183,6 +2912,14 @@ function mainLoop(time) {
 
     if (typeof Camera !== 'undefined') Camera.update(state, delta);
     if (typeof Input !== 'undefined') Input.updateMouseWorld(state);
+    // Alt controls: gamepad (Xbox/PlayStation) + touch joysticks feed the
+    // same keys/mouse pipeline, so everything downstream just works.
+    if (typeof GamepadControls !== 'undefined') {
+        try { GamepadControls.update(state); } catch (e) {}
+    }
+    if (typeof TouchControls !== 'undefined') {
+        try { TouchControls.update(state, delta); } catch (e) {}
+    }
     if (typeof Player !== 'undefined') Player.update(state, delta);
     if (typeof Ritual !== 'undefined' && Ritual.update) {
         try { Ritual.update(state, delta); } catch (e) {}
@@ -2200,28 +2937,7 @@ function mainLoop(time) {
         state.multiplayer.update(delta);
 
         if (state.multiplayer.roomCode && !state.multiplayer.isHost) {
-            const input = {
-                keys: { ...state.keys },
-                mouse: {
-                    x: state.mouse.x,
-                    y: state.mouse.y,
-                    worldX: state.mouse.worldX,
-                    worldY: state.mouse.worldY,
-                    isDown: state.mouse.isDown
-                },
-                aim: Math.atan2(state.mouse.worldY - state.player.y, state.mouse.worldX - state.player.x),
-                player: {
-                    x: state.player.x,
-                    y: state.player.y,
-                    hp: state.player.hp,
-                    maxHp: state.player.maxHp,
-                    facing: state.player.facing,
-                    aim: Math.atan2(state.mouse.worldY - state.player.y, state.mouse.worldX - state.player.x),
-                    activeSlot: state.player.activeSlot,
-                    equippedWeapons: [...state.player.equippedWeapons],
-                    gunSkins: state.player.gunSkins ? { ...state.player.gunSkins } : {}
-                }
-            };
+            const input = mpClientInput();
             state.multiplayer.sendInput(input);
         }
 
@@ -2253,8 +2969,19 @@ function mainLoop(time) {
     const beachIndicator = $('beach-shop-indicator');
     if (beachIndicator) {
         let prompt = null;
+        // 1.1.5 WORLD: ferry + island dock prompts first (never mid-voyage)
         try {
-            if (typeof NPC !== 'undefined' && NPC.near && !state.paused && NPC.near(state) < (NPC.RADIUS || 115) + 40) {
+            if (typeof WorldSystem !== 'undefined' && !state.paused &&
+                !(WorldSystem.boatRiding && WorldSystem.boatRiding(state))) {
+                if (state.player.onIsland && WorldSystem.nearIslandExit(state) < 120 + 60) {
+                    prompt = 'SAIL HOME (free)';
+                } else if (!state.player.onIsland && !state.player.inCave && WorldSystem.nearBoat(state) < 130 + 60) {
+                    prompt = "FERRYMAN'S BOAT";
+                }
+            }
+        } catch (e) {}
+        try {
+            if (!prompt && typeof NPC !== 'undefined' && NPC.near && !state.paused && NPC.near(state) < (NPC.RADIUS || 115) + 40) {
                 prompt = 'TALK TO OLD MARLIN';
             }
         } catch (e) {}
@@ -2341,16 +3068,12 @@ bootScreen();
 // AUTOSAVE + HOTKEYS
 // ==========================================
 if (typeof SaveSystem !== 'undefined') {
-    // Save router: host's MP session -> shared expedition file,
-    // single player -> selected local slot, clients save nothing.
+    // Save router: in-room (host or client) -> personal MP-slot file,
+    // single player -> selected local slot. MP never touches SP slots.
     const autoSave = () => {
         if (state.paused) return;
         if (state.player && state.player.isDead) return; // never save a corpse
-        if (typeof Multiplayer !== 'undefined' && Multiplayer.isHost && Multiplayer.roomCode) {
-            SaveSystem.saveMP(state);
-        } else if (!(typeof Multiplayer !== 'undefined' && Multiplayer.roomCode)) {
-            SaveSystem.save(state);
-        }
+        SaveSystem.save(state);
     };
     setInterval(autoSave, 30000);
 
@@ -2358,19 +3081,12 @@ if (typeof SaveSystem !== 'undefined') {
 
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
+            // Save immediately. The sim itself keeps running via
+            // BackgroundTick (1s steps) — no more forced pause-to-menu,
+            // so tabbing out mid-room no longer kicks you out of the game.
             autoSave();
-            // Background tabs throttle timers/rAF and desync MP — a room
-            // member that tabs out pauses cleanly instead of breaking the game.
-            // (Single player just freezes via rAF and resumes fine.)
-            const inRoom = (typeof Multiplayer !== 'undefined' && Multiplayer.roomCode);
-            if (inRoom && !state.paused) {
-                state.paused = true;
-                if (typeof MainMenu !== 'undefined') MainMenu.show();
-                UI.updateStatusBanner(
-                    'Paused — tab was hidden (MP desync protection).',
-                    'Paused', 'amber'
-                );
-            }
+            // Held TAB never fires keyup when the tab loses focus.
+            try { if (typeof TabList !== 'undefined') TabList.hide(); } catch (e) {}
         } else {
             // Back: MP clients pull a fresh snapshot, host broadcast resumes
             if (typeof Multiplayer !== 'undefined' && !Multiplayer.isHost && Multiplayer.roomCode) {
@@ -2384,15 +3100,13 @@ if (typeof SaveSystem !== 'undefined') {
     window.addEventListener('keydown', (e) => {
         if (e.key === 'F9') {
             e.preventDefault();
-            let ok = false;
-            let label = 'Progress saved to disk.';
-            if (typeof Multiplayer !== 'undefined' && Multiplayer.isHost && Multiplayer.roomCode) {
-                ok = SaveSystem.saveMP(state);
-                label = ok ? 'Expedition saved (personal host file).' : 'Expedition save failed.';
-            } else {
-                ok = SaveSystem.save(state);
-                label = ok ? 'Progress saved to disk.' : 'Save failed.';
-            }
+            // SaveSystem.save routes itself: MP room -> MP slot file,
+            // single player -> local slot. Never cross the streams.
+            const ok = SaveSystem.save(state);
+            const inRoom = (typeof Multiplayer !== 'undefined' && Multiplayer.roomCode);
+            const label = ok
+                ? (inRoom ? 'MP file saved (personal slot).' : 'Progress saved to disk.')
+                : 'Save failed.';
             if (typeof Particles !== 'undefined' && Particles.showFloatingText) {
                 Particles.showFloatingText(state,
                     ok ? "Progress saved!" : "Save failed!",

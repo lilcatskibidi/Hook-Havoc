@@ -254,7 +254,9 @@ const Ritual = {
                 : Math.max(0, curFog - 0.06);
             const p = state.player;
             if (!p || p.caveUnlocked || p.inCave) return;
-            const dt = (typeof delta === 'number' && delta > 0) ? Math.min(delta, 0.1) : 0.016;
+            // Cap at 1s (not 0.1s): foreground frames never exceed 0.05s so
+            // they behave identically, while 1s background ticks stay exact.
+            const dt = (typeof delta === 'number' && delta > 0) ? Math.min(delta, 1.0) : 0.016;
             state._caveTouchCd = Math.max(0, (state._caveTouchCd || 0) - dt);
             const R = this.RUNE_TOUCH_RADIUS;
             const stones = this.runeStones(state);
@@ -662,7 +664,20 @@ const Ritual = {
         if (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient()) {
             return { ok: false, why: 'Only the host can perform rituals.' };
         }
+        // Ritual circles belong to the mainland beach — sail home first.
+        // (Bait-hooked bosses are the only ones that fight on the isles.)
+        if (state.player && state.player.onIsland) {
+            return { ok: false, why: 'No ritual ground here — sail back to the mainland beach.' };
+        }
         if (this.bossAlive(state)) return { ok: false, why: 'A boss already walks. Slay it first.' };
+        // One boss per room: if a crewmate is already fighting one (their
+        // hooked boss), nobody else may summon — even with full items.
+        try {
+            if (typeof Multiplayer !== 'undefined' && Multiplayer.roomBossBusy) {
+                const busy = Multiplayer.roomBossBusy();
+                if (busy) return { ok: false, why: `${busy.by} is already fighting a boss — one per room.` };
+            }
+        } catch (e) {}
         const rs = this.ritualState(state, ritual);
         const missing = rs.lines.filter(l => l.have < l.need).map(l => `${l.label} (have ${l.have})`);
         if (missing.length) return { ok: false, why: 'Missing: ' + missing.join(' · ') };
@@ -684,6 +699,13 @@ const Ritual = {
     spawnBoss(state, bossId, introDurSec) {
         const sp = FISH_SPECIES.find(s => s.id === bossId);
         if (!sp) return false;
+        // Ritual summons stay on the mainland beach — never on an isle.
+        // (Bait-hooked bosses fight wherever they were hooked instead.)
+        if (state.player && state.player.onIsland) {
+            Particles.showFloatingText(state, 'No ritual ground here — sail back to the mainland beach.', state.player.x, state.player.y - 50, '#f87171');
+            try { audio.playError(); } catch (e) {}
+            return false;
+        }
         const hpMult = (typeof CONFIG !== 'undefined' && CONFIG.DIFFICULTY && CONFIG.DIFFICULTY.FISH_HP_MULT) || 1;
         const B = CONFIG.WORLD;
         const px = Utils.clamp(state.player.x + (Math.random() - 0.5) * 120, B.MIN_X + 40, state.waterBoundaryX - 40);
@@ -732,6 +754,7 @@ const Ritual = {
             try { UI.triggerDamageFlash(); } catch (e) {}
             try { audio.playThunder(); } catch (e) {}
             try { audio.playBossRoar(); } catch (e) {}
+            try { if (typeof GamepadControls !== 'undefined') GamepadControls.rumble(0.8, 1.0, 0.7); } catch (e) {}
             state.screenShake = Math.max(state.screenShake || 0, 32);
             // Camera lock: pan to the boss and hold for the intro. The
             // camera update tracks bossRef (bosses keep moving) and releases
@@ -1503,7 +1526,15 @@ const Teleport = {
         const fill = document.getElementById('teleport-bar-fill');
         if (title && opts.title) title.innerText = opts.title;
         if (sub && opts.sub) sub.innerText = opts.sub;
-        if (overlay) overlay.classList.remove('hidden');
+        // OPAQUE cover FIRST: visible instantly (no transition in), so no
+        // frame of the position swap ever leaks through. Fade-out happens
+        // only at the very end (see step k>=1 below).
+        if (overlay) {
+            overlay.style.transition = 'none';
+            overlay.classList.remove('hidden');
+            try { void overlay.offsetWidth; } catch (e) {}
+            overlay.style.transition = '';
+        }
         if (fill) fill.style.width = '0%';
         try { if (typeof audio !== 'undefined' && audio.playPortal) audio.playPortal(); } catch (e) {}
         const t0 = performance.now();

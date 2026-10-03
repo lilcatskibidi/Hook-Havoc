@@ -16,6 +16,8 @@ const Combat = {
         if (opts.attacker && p.armorReflect > 0) {
             opts.attacker.hp -= Math.round(raw * p.armorReflect);
         }
+        // Gamepad rumble (guarded, throttled inside)
+        try { if (typeof GamepadControls !== 'undefined') GamepadControls.rumble(0.25, 0.7, 0.5); } catch (e) {}
         Player.refreshHUD(state);
         UI.triggerDamageFlash();
         if (p.hp <= 0) Player.die(state);
@@ -74,9 +76,16 @@ const Combat = {
 
         // Co-op client: the host simulates ALL shared entities. The client
         // only takes damage from them (identical positions = identical view).
+        // While the link is STALE (host tab hidden/killed), incoming danger
+        // freezes too — frozen bullets must not kill you. Own actions
+        // (fishing, shooting, looting below) keep working.
         if (isMPClient) {
-            this.applyClientIntake(state, delta);
-            this.updateGroundLoot(state);
+            let stale = false;
+            try {
+                stale = !!(typeof Multiplayer !== 'undefined' && Multiplayer.syncStale && Multiplayer.syncStale());
+            } catch (e) {}
+            if (!stale) this.applyClientIntake(state, delta);
+            this.updateGroundLoot(state, delta);
             return;
         }
 
@@ -234,15 +243,31 @@ const Combat = {
             m.x = Utils.clamp(m.x, B.MIN_X + size, state.waterBoundaryX - size);
             m.y = Utils.clamp(m.y, B.MIN_Y + size, B.MAX_Y - size);
 
-            // --- Contact damage ---
+            // --- Contact damage (with opener telegraph) ---
+            // First touch after closing in is a WARNING, not damage: red
+            // ring + screech + 0.4s grace. Back off and the opener whiffs;
+            // standing in it eats the hit like before. Rhythm hits (0.6s)
+            // are unchanged — dodge by leaving.
             const hitDist = (p.radius || 15) + size;
+            if (dist < hitDist + 46 && !m._meleeWarned) {
+                m._meleeWarned = true;
+                m.meleeCd = Math.max(m.meleeCd || 0, 0.4);
+                state.delayedBlasts.push({
+                    x: m.x, y: m.y, radius: hitDist + 26, damage: 0,
+                    timer: 0.4, color: '#ef4444', shake: 0,
+                });
+                Particles.showFloatingText(state, '⚠ TEETH!', m.x, m.y - 50, '#f87171');
+                try { audio.playFishScreech(); } catch (e) {}
+            } else if (dist > hitDist + 90) {
+                m._meleeWarned = false; // fully disengaged: next touch warns again
+            }
             if (dist < hitDist && m.meleeCd <= 0) {
                 this.handleDirectMeleeContact(state, m, p, dist, dx, dy);
                 m.meleeCd = 0.6;
             }
         }
 
-        this.updateGroundLoot(state);
+        this.updateGroundLoot(state, delta);
     },
 
     // ============================================================
@@ -390,9 +415,21 @@ const Combat = {
             }
         }
 
-        // Host fish-skill projectiles — same one-hit-per-id rule
+        // Host fish-skill projectiles — same one-hit-per-id rule.
+        // Skipped when the shot belongs to ANOTHER catcher (catcherOnly):
+        // you SEE crewmates' fights, but their fish can't hurt you by
+        // proxy. Your own echoed shots are skipped too (your sim already
+        // resolved them). Ownerless shots (bosses) threaten everyone.
         for (const b of (state.projectiles || [])) {
             if (!b.id || cd['p:' + b.id]) continue;
+            if (b.catcherOnly) {
+                let mine2 = false;
+                try {
+                    const me = (typeof Multiplayer !== 'undefined' && Multiplayer.localClientId) || null;
+                    mine2 = !!(me && b.owner && b.owner === me);
+                } catch (e) {}
+                if (!mine2) continue;
+            }
             const dist = Math.hypot(p.x - b.x, p.y - b.y);
             if (dist < (p.radius || 15) + (b.radius || 8)) {
                 cd['p:' + b.id] = 1;
@@ -714,7 +751,8 @@ const Combat = {
                 vx: 0, vy: 0,
                 isRaging: m.isEnraged,
                 isInflated: m.isInflated,
-                dragState: 'BEACHED'
+                dragState: 'BEACHED',
+                _monster: m, // back-ref: delayed skill stages can steer the real body
             };
             try {
                 FISH_SKILLS[skill](virtualFish, {
@@ -1277,8 +1315,14 @@ const Combat = {
         p.x += (dx / dist) * knockback;
         p.y += (dy / dist) * knockback;
 
+        // Pier/isle-aware: a hit on the deck must NOT yank you back to the
+        // beach (the old beach-only clamp teleported pier walkers ashore).
+        if (typeof WorldSystem !== 'undefined' && WorldSystem.clampPlayer) {
+            try { WorldSystem.clampPlayer(state); } catch (e) {}
+        } else {
         p.x = Utils.clamp(p.x, B.MIN_X + p.radius, state.waterBoundaryX - p.radius);
         p.y = Utils.clamp(p.y, B.MIN_Y + p.radius, B.MAX_Y - p.radius);
+        }
 
         if (p.hp <= 0) Player.die(state);
     },
@@ -1381,21 +1425,45 @@ const Combat = {
         }
     },
 
-    updateGroundLoot(state) {
+    updateGroundLoot(state, delta) {
         const p = state.player;
         if (!state.groundLoot) state.groundLoot = [];
+        // Real delta (not a hardcoded 1/60 step) so background ticks
+        // (1s steps while the tab is hidden) advance loot at true speed.
+        // Foreground callers pass ~0.016 — behavior there is unchanged.
+        const DT = (typeof delta === 'number' && delta > 0) ? Math.min(delta, 5) : 0.016;
 
         const MAGNET_RADIUS = 90;
         const PICKUP_RADIUS = 55;
+        // Small isle sands are less forgiving than the long mainland beach:
+        // widen the grab so edge-beached loot stays reachable.
+        let magnetR = MAGNET_RADIUS, pickupR = PICKUP_RADIUS;
+        try {
+            if (typeof WorldSystem !== 'undefined' && WorldSystem.islandOf && WorldSystem.islandOf(state)) {
+                magnetR = 150; pickupR = 80;
+            }
+        } catch (e) {}
         const B = (typeof CONFIG !== 'undefined' && CONFIG.WORLD) || { MIN_X: 0, MAX_X: 9999, MIN_Y: 0, MAX_Y: 9999 };
 
         for (let i = state.groundLoot.length - 1; i >= 0; i--) {
             const item = state.groundLoot[i];
-            // Lost to the sea / out of bounds: sink with bubbles, then gone
+            // Lost to the sea / out of bounds: sink with bubbles, then gone.
+            // Pier decks and isle sand/piers count as SAFE ground — only true
+            // open water (and off-map) sinks loot now.
             if (!item.sinking) {
-                const lost = item.x > state.waterBoundaryX + 15 ||
-                    item.x < B.MIN_X - 20 || item.x > B.MAX_X + 20 ||
-                    item.y < B.MIN_Y - 20 || item.y > B.MAX_Y + 20;
+                let lost = item.x < B.MIN_X - 20 || item.x > B.MAX_X + 20 ||
+                    item.y < B.MIN_Y - 20 || item.y > B.MAX_Y - 20;
+                if (!lost) {
+                    try {
+                        if (typeof WorldSystem !== 'undefined' && WorldSystem.lootSafe) {
+                            lost = !WorldSystem.lootSafe(state, item.x, item.y);
+                        } else {
+                            lost = item.x > state.waterBoundaryX + 15;
+                        }
+                    } catch (e) {
+                        lost = item.x > state.waterBoundaryX + 15;
+                    }
+                }
                 if (lost) {
                     item.sinking = 1.2;
                     item.sinkMax = 1.2;
@@ -1406,8 +1474,8 @@ const Combat = {
                 }
             }
             if (item.sinking) {
-                item.sinking -= 0.016;
-                item.y += 22 * 0.016; // settle down
+                item.sinking -= DT;
+                item.y += 22 * DT; // settle down
                 if (Math.random() < 0.25 && typeof Particles !== 'undefined') {
                     Particles.spawnWaterSplashes(state, item.x, item.y, 1);
                 }
@@ -1422,14 +1490,14 @@ const Combat = {
 
             // Host owns loot physics — clients only pick up (then claim)
             const isMPClient = (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient());
-            if (dist < MAGNET_RADIUS && dist > 4 && !isMPClient) {
-                const strength = 1 + (1 - dist / MAGNET_RADIUS) * 3;
+            if (dist < magnetR && dist > 4 && !isMPClient) {
+                const strength = 1 + (1 - dist / magnetR) * 3;
                 const pullSpeed = 260 * strength;
-                item.x += (dx / dist) * pullSpeed * 0.016;
-                item.y += (dy / dist) * pullSpeed * 0.016;
+                item.x += (dx / dist) * pullSpeed * DT;
+                item.y += (dy / dist) * pullSpeed * DT;
             }
 
-            if (dist < PICKUP_RADIUS) {
+            if (dist < pickupR) {
                 // Summon-item loot: straight into the bucket (capacity
                 // respected). Never indexed, never quest-counted.
                 if (item.item && item.item.keyItem) {

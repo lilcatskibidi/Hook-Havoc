@@ -134,8 +134,29 @@ class SoundEngine {
     preloadAssets() {
         if (this._preloadStarted || !this.ctx) return;
         this._preloadStarted = true;
-        const names = Object.keys(SoundEngine.ASSETS);
-        names.forEach(n => { try { this._loadAsset(n); } catch (e) {} });
+        // Extension manifest: fetch the exact formats that exist so the
+        // loader never 404-probes missing ones (those browser console
+        // errors are harmless but noisy). Unreachable manifest (file://,
+        // offline) falls back to mp3 -> ogg -> wav probing per asset.
+        try {
+            this._fetchUrl('assets/audio/manifest.json', 5000).then(ab => {
+                try {
+                    const txt = new TextDecoder().decode(ab);
+                    const m = JSON.parse(txt);
+                    if (m && typeof m === 'object') this._manifest = m;
+                } catch (e) {}
+                this._preloadAll();
+            }).catch(() => this._preloadAll());
+        } catch (e) {
+            this._preloadAll();
+        }
+    }
+
+    _preloadAll() {
+        try {
+            const names = Object.keys(SoundEngine.ASSETS);
+            names.forEach(n => { try { this._loadAsset(n); } catch (e) {} });
+        } catch (e) {}
     }
 
     _fetchUrl(url, timeoutMs) {
@@ -165,7 +186,15 @@ class SoundEngine {
         const base = SoundEngine.ASSETS[name];
         if (!base) { this._missing[name] = true; return; }
         this._inflight[name] = true;
-        const exts = SoundEngine.ASSET_EXTS.slice();
+        // Manifest hit: only fetch formats that exist (no 404 probes).
+        // Otherwise: legacy mp3 -> ogg -> wav probing.
+        let exts = SoundEngine.ASSET_EXTS.slice();
+        try {
+            if (this._manifest && Array.isArray(this._manifest[name]) && this._manifest[name].length) {
+                exts = this._manifest[name].filter(e => SoundEngine.ASSET_EXTS.includes(e));
+                if (!exts.length) exts = SoundEngine.ASSET_EXTS.slice();
+            }
+        } catch (e) {}
         const tryNext = () => {
             if (!exts.length) {
                 // Every format failed: synth takes over, never retry.

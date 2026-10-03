@@ -17,6 +17,8 @@ const Player = {
             // (Releasing SPACE throws from exactly where the press validated.)
         } else if (typeof state._fightFreezeUntil === 'number' && state.time < state._fightFreezeUntil) {
             // Boss-fight countdown: hold still until FIGHT!
+        } else if (typeof WorldSystem !== 'undefined' && WorldSystem.boatRiding && WorldSystem.boatRiding(state)) {
+            // Mid ferry ride: the boat owns your legs (see WorldSystem.updateBoatRide).
         } else {
             let dx = 0, dy = 0;
             if (state.keys['w'] || state.keys['arrowup']) dy -= 1;
@@ -53,9 +55,31 @@ const Player = {
             }
         }
 
-        // Beach clamp — bypassed inside the cave (own room collision).
-        if (state.player.inCave && typeof Ritual !== 'undefined' && Ritual.caveCollide) {
+        // One front door for every map's walkable area (beach, pier,
+        // cave, isle sand + isle pier) — knockbacks land here too, so the
+        // player can never be left standing a step off the deck.
+        if (typeof WorldSystem !== 'undefined' && WorldSystem.clampPlayer) {
+            try { WorldSystem.clampPlayer(state); } catch (e) {}
+        } else if (state.player.inCave && typeof Ritual !== 'undefined' && Ritual.caveCollide) {
             try { Ritual.caveCollide(state); } catch (e) {}
+        } else if (state.player.onIsland && typeof WorldSystem !== 'undefined' && WorldSystem.collide) {
+            // 1.1.5: detached island rooms have their own collision.
+            try { WorldSystem.collide(state); } catch (e) {}
+        } else if (typeof WorldSystem !== 'undefined' && WorldSystem.onBridge && WorldSystem.bridgeDef) {
+            // 1.1.5: the pier deck extends over the sea — walking its
+            // plank lets the player reach SHALLOW then DEEP water.
+            // Rule: past the surf you MUST be on the deck band (no
+            // sideways escape over water); back on the sand you walk free.
+            const b = WorldSystem.bridgeDef(state);
+            const half = 46 + p.radius;
+            const inBand = Math.abs(p.y - b.y) <= half + 26;
+            const maxX = inBand ? b.x1 + p.radius : state.waterBoundaryX - p.radius;
+            p.x = Utils.clamp(p.x, B.MIN_X + p.radius, maxX);
+            if (p.x > state.waterBoundaryX - p.radius) {
+                p.y = Utils.clamp(p.y, b.y - half, b.y + half);
+            } else {
+                p.y = Utils.clamp(p.y, B.MIN_Y + p.radius, B.MAX_Y - p.radius);
+            }
         } else {
         p.x = Utils.clamp(p.x, B.MIN_X + p.radius, state.waterBoundaryX - p.radius);
         p.y = Utils.clamp(p.y, B.MIN_Y + p.radius, B.MAX_Y - p.radius);
@@ -285,7 +309,18 @@ const Player = {
             ? `Boss fight — ${chances} ${chances === 1 ? 'chance' : 'chances'} left before it leaves · Penalty −${lost}c`
             : `Lv.${p.level} · Bucket kept (${(p.bucket || []).length} fish) · Penalty −${lost}c`);
         const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
-        on('btn-respawn-beach', () => this.respawnAt(state, 220, 300, 'Beach'));
+        // Dying on an isle offers the island dock as respawn (stays on the
+        // isle); camp/menu still send you back to the mainland beach.
+        const isleSpawn = (p.onIsland && p.islandSpawn &&
+            typeof p.islandSpawn.x === 'number') ? p.islandSpawn : null;
+        const beachBtn = document.getElementById('btn-respawn-beach');
+        if (isleSpawn) {
+            if (beachBtn) beachBtn.innerHTML = '<i class="fa-solid fa-anchor mr-2"></i> Respawn — Island Dock';
+            on('btn-respawn-beach', () => this.respawnAt(state, isleSpawn.x, isleSpawn.y, 'Island Dock', false, true));
+        } else {
+            if (beachBtn) beachBtn.innerHTML = '<i class="fa-solid fa-heart-pulse mr-2"></i> Respawn — Beach';
+            on('btn-respawn-beach', () => this.respawnAt(state, 220, 300, 'Beach'));
+        }
         on('btn-respawn-camp', () => {
             let s = { x: 220, y: 300 };
             try {
@@ -336,7 +371,7 @@ const Player = {
         } catch (e) {}
     },
 
-    respawnAt(state, x, y, label, silent) {
+    respawnAt(state, x, y, label, silent, keepIsland) {
         const p = state.player;
         p.isDead = false;
         p.hp = p.maxHp;
@@ -345,6 +380,13 @@ const Player = {
         // Death ejects you from the cave (no corpse-camping the circle)
         p.inCave = false;
         p.returnPos = null;
+        // Detached islands normally eject you to the beach — UNLESS you
+        // respawn at your island spawn (dock), which keeps you on the isle.
+        if (!(keepIsland && p.onIsland)) {
+            p.onIsland = null;
+            p.boatReturn = null;
+            p.islandSpawn = null;
+        }
         p.stunTimer = 0;
         p.slowTimer = 0;
         p.burnTimer = 0;

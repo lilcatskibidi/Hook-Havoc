@@ -21,6 +21,9 @@ const EnemySpawner = {
 
         // No wild spawns inside the sealed cave (its fights come via ritual)
         if (this.state.player && this.state.player.inCave) return;
+        // 1.1.5: detached isles are peaceful fishing grounds — wild beach
+        // spawns stay on the mainland (bosses can still follow via ritual).
+        if (this.state.player && this.state.player.onIsland) return;
 
         // Only spawn if player is alive
         if (this.state.player.hp <= 0) return;

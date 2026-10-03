@@ -430,14 +430,86 @@ body {
     100% { transform: scale(1); opacity: 1; }
 }
 
-/* ================= TELEPORT LOADING SCREEN ================= */
+#gameCanvas { touch-action: none; }
+
+/* Dynamic viewport height (mobile address bars) */
+html, body { height: 100%; }
+body { min-height: 100vh; min-height: 100dvh; }
+#game-container { min-height: 100vh; min-height: 100dvh; }
+
+/* ================= SMALL-SCREEN COMPACT HUD ==================
+   Phones (narrow portrait) and landscape (short height): shrink the
+   HUD so it never covers the game or pushes touch controls around. */
+@media (max-width: 760px), (max-height: 520px) {
+    #top-hud { padding: 6px !important; gap: 6px !important; }
+    #top-hud .w-72 { width: 12.5rem !important; }
+    #top-hud .stat-chip { display: none !important; }
+    #top-hud .stat-chip:nth-child(1),
+    #top-hud .stat-chip:nth-child(2) { display: flex !important; }
+    #top-hud .glass-panel { border-radius: 12px !important; }
+    #active-weapon { padding: 8px !important; gap: 8px !important; bottom: 8px !important; right: 8px !important; }
+    #active-weapon #weapon-icon-box { width: 34px !important; height: 34px !important; font-size: 18px !important; }
+    #active-weapon #weapon-desc { display: none !important; }
+    #active-weapon #weapon-name { font-size: 15px !important; }
+    #weapon-toolbar { bottom: 8px !important; left: 8px !important; padding: 4px !important; }
+    #weapon-toolbar .weapon-slot { width: 40px !important; height: 40px !important; }
+    #zoom-chip { display: none !important; }
+    #status-banner { bottom: 64px !important; max-width: 94vw !important; font-size: 11px !important; padding: 6px 10px !important; }
+    #fight-list { display: none !important; }
+    #quest-tracker { display: none !important; }
+    #main-menu { padding: 8px !important; }
+    #touch-joy { bottom: 132px !important; width: 108px !important; height: 108px !important; }
+    #touch-btns { bottom: 126px !important; }
+    .touch-big { width: 70px !important; height: 70px !important; font-size: 13px !important; }
+    .touch-small { width: 46px !important; height: 46px !important; }
+    .menu-grid { grid-template-columns: 1fr !important; }
+    .boss-intro-name { font-size: clamp(38px, 12vw, 70px) !important; }
+}
+
+/* ================= TOUCH CONTROLS ================= */
+#touch-ui { position: absolute; inset: 0; z-index: 25; pointer-events: none; }
+#touch-ui.hidden { display: none; }
+#touch-joy {
+    position: absolute; left: 14px; bottom: 110px;
+    width: 124px; height: 124px; border-radius: 50%;
+    background: rgba(15,23,42,0.45); border: 2px solid rgba(56,189,248,0.4);
+    box-shadow: 0 0 18px rgba(56,189,248,0.25), inset 0 0 24px rgba(0,0,0,0.5);
+    pointer-events: auto; touch-action: none;
+}
+#touch-joy-knob {
+    position: absolute; left: 50%; top: 50%;
+    width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, rgba(125,211,252,0.9), rgba(14,165,233,0.55));
+    border: 2px solid rgba(186,230,253,0.7);
+    box-shadow: 0 0 14px rgba(56,189,248,0.6);
+}
+#touch-btns { position: absolute; right: 12px; bottom: 104px; pointer-events: auto; touch-action: none; }
+.touch-row-big { display: flex; gap: 10px; justify-content: flex-end; margin-bottom: 10px; }
+.touch-row-small { display: flex; gap: 8px; justify-content: flex-end; }
+.touch-btn {
+    border-radius: 50%; font-weight: 900; color: #f8fafc;
+    border: 2px solid rgba(255,255,255,0.25);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.2);
+    touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.touch-btn:active { filter: brightness(1.35); transform: scale(0.94); }
+.touch-big { width: 82px; height: 82px; font-size: 15px; letter-spacing: 0.05em; }
+.touch-fire { background: radial-gradient(circle at 35% 30%, rgba(239,68,68,0.85), rgba(127,29,29,0.85)); }
+.touch-cast { background: radial-gradient(circle at 35% 30%, rgba(56,189,248,0.85), rgba(12,74,110,0.9)); }
+.touch-small { width: 52px; height: 52px; font-size: 15px; background: rgba(30,41,59,0.85); }
+@media (max-width: 560px) {
+    #touch-joy { bottom: 128px; }
+    #touch-btns { bottom: 122px; }
+}
 .teleport-overlay {
     position: absolute; inset: 0; z-index: 55;
     display: flex; align-items: center; justify-content: center;
-    background: radial-gradient(ellipse at center, rgba(24,10,46,0.88) 0%, rgba(2,6,23,0.96) 75%);
-    opacity: 1; transition: opacity 0.35s ease;
+    /* OPAQUE: the world must never show through mid-teleport — the
+       player only sees the world again on fade-out AFTER the swap. */
+    background: #020617;
+    opacity: 1; transition: opacity 0.45s ease;
 }
-.teleport-overlay.hidden { opacity: 0; pointer-events: none; }
+.teleport-overlay.hidden { opacity: 0; pointer-events: none; visibility: hidden; transition: opacity 0.45s ease, visibility 0s linear 0.45s; }
 .teleport-inner { text-align: center; width: min(80%, 360px); }
 .teleport-swirl {
     width: 92px; height: 92px; margin: 0 auto 16px; border-radius: 50%;
@@ -461,6 +533,22 @@ body {
     background: linear-gradient(90deg, #7c3aed, #c4b5fd);
     box-shadow: 0 0 12px rgba(168,85,247,0.9); transition: width 0.1s linear; }
 .teleport-sub { margin-top: 10px; font-size: 12px; color: #a78bfa; font-weight: 600; }
+
+/* Island-discovery splash (opaque banner, self-fades — see WorldSystem.showIslandBanner) */
+#island-intro-banner {
+    position: absolute; left: 50%; top: 22%; transform: translateX(-50%);
+    z-index: 56; text-align: center; pointer-events: none;
+    padding: 18px 42px; border-radius: 20px;
+    background: rgba(2,6,23,0.92);
+    border: 1px solid rgba(251,191,36,0.5);
+    box-shadow: 0 0 44px rgba(251,191,36,0.35), inset 0 1px 0 rgba(255,255,255,0.08);
+    animation: islandBannerIn 0.5s cubic-bezier(0.2,1.4,0.4,1);
+}
+@keyframes islandBannerIn { 0% { transform: translateX(-50%) scale(0.85); opacity: 0; } 100% { transform: translateX(-50%) scale(1); opacity: 1; } }
+.island-intro-kicker { font-size: 11px; font-weight: 900; letter-spacing: 0.35em; color: #fcd34d; }
+.island-intro-name { font-family: 'Teko', sans-serif; font-size: 44px; letter-spacing: 0.08em; color: #fff;
+    text-shadow: 0 0 22px rgba(251,191,36,0.8), 0 3px 0 #000; line-height: 1; margin: 4px 0; }
+.island-intro-sub { font-size: 12px; font-weight: 600; color: #e2e8f0; max-width: 420px; }
 
 /* ================= MAIN MENU REMAKE ================= */
 .menu-vignette { background: radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.55) 100%); }

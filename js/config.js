@@ -152,6 +152,16 @@ const CONFIG = {
     // enemy projectiles stay readable. Does not touch damage.
     FX_DENSITY: 0.55,
 
+    // 1.1.5 WORLD — day length, pier reach, ferry fees (island defs live
+    // in js/world.js; fees duplicated here for shop-balance reference).
+    WORLD15: {
+        DAY_LENGTH_SEC: 480,
+        PIER_REACH: 680,       // px past the surf at the pier end (DEEP tier)
+        SHORE_EDGE: 250,       // SHORE < +250px, SHALLOW < +650px, else DEEP
+        SHALLOW_EDGE: 650,
+        FERRY_FEES: { isle_sun: 800, isle_mist: 2200, isle_abyss: 4500 },
+    },
+
     //  Rarity colors
     RARITY_COLORS: {
         common:    '#94a3b8',

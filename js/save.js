@@ -1,11 +1,46 @@
 const SaveSystem = {
     KEY: 'aquatic_havoc_save_v1', // legacy single save (migrates to slot 1)
     SLOT_PREFIX: 'aquatic_havoc_save_v1_s',
-    MP_KEY: 'aquatic_havoc_mp_save_v1',
+    MP_KEY: 'aquatic_havoc_mp_save_v1', // legacy single MP file (migrates to MP slot 1)
     LAST_SLOT_KEY: 'ah_slot',
     SLOTS: [1, 2, 3],
 
+    // ---- Multiplayer namespace: own slots, own files, never SP slots ----
+    MP_SLOT_PREFIX: 'aquatic_havoc_mp_s',
+    MP_LAST_SLOT_KEY: 'ah_mp_slot',
+    MP_SLOTS: [1, 2, 3],
+
     slotKey(slot) { return this.SLOT_PREFIX + (slot || 1); },
+
+    mpSlotKey(slot) {
+        const base = this.MP_SLOT_PREFIX + (slot || 1);
+        // Per-host scoping: a CLIENT's character file belongs to ONE host's
+        // server (scope = host stable pid). Unscoped (null) = the HOST's own
+        // expedition file, unchanged from before.
+        return this.mpScope ? base + '_h' + this.mpScope : base;
+    },
+
+    // Scope for the NEXT mpSlotKey call. Set on room join (clients), cleared
+    // on leave. Sanitized: alphanumerics only, max 16 chars.
+    mpScope: null,
+
+    setMPScope(scope) {
+        try {
+            scope = String(scope || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 16);
+            this.mpScope = scope || null;
+        } catch (e) { this.mpScope = null; }
+    },
+
+    getMPSlot() {
+        try {
+            const s = parseInt(localStorage.getItem(this.MP_LAST_SLOT_KEY) || '1', 10);
+            return this.MP_SLOTS.includes(s) ? s : 1;
+        } catch (e) { return 1; }
+    },
+
+    setMPSlot(slot) {
+        try { localStorage.setItem(this.MP_LAST_SLOT_KEY, String(slot)); } catch (e) {}
+    },
 
     getSlot() {
         try {
@@ -62,6 +97,8 @@ const SaveSystem = {
             tutorialDone: !!p.tutorialDone,
             tut: p.tut ? { ...p.tut } : { cast: false, hook: false, beach: false },
             quests: p.quests ? JSON.parse(JSON.stringify(p.quests)) : { active: null, offered: [], done: 0 },
+            // 1.1.5 WORLD: clock + island position (restored safely)
+            world: (typeof WorldSystem !== 'undefined' && WorldSystem.saveExtra) ? WorldSystem.saveExtra(state) : null,
             x: p.x,
             y: p.y
         };
@@ -69,10 +106,10 @@ const SaveSystem = {
 
     // ---- Local slots (single player) ----
     save(state, slot) {
-        // MP sessions: host writes the expedition file, clients write
-        // their own personal file (progression is per-player now).
+        // MP rooms (host AND client) always write the personal MP-slot
+        // file — SP slots are never touched while a room is open.
         try {
-            if (typeof Multiplayer !== 'undefined' && Multiplayer.roomCode && Multiplayer.isHost) {
+            if (typeof Multiplayer !== 'undefined' && Multiplayer.roomCode) {
                 return this.saveMP(state);
             }
         } catch (e) {}
@@ -134,11 +171,17 @@ const SaveSystem = {
         } catch (e) {}
     },
 
-    // ---- Shared multiplayer expedition (host-owned, one file for all) ----
-    saveMP(state) {
+    // ---- Personal multiplayer files (per browser, per MP slot) ----
+    // Host and client each own theirs: coins, bucket, gear, casino
+    // tokens and position persist across sessions without ever
+    // touching single-player slots.
+    saveMP(state, slot) {
+        slot = slot || state.mpSaveSlot || this.getMPSlot();
+        state.mpSaveSlot = slot;
+        this.setMPSlot(slot);
         try {
             const data = this.collect(state);
-            localStorage.setItem(this.MP_KEY, JSON.stringify(data));
+            localStorage.setItem(this.mpSlotKey(slot), JSON.stringify(data));
             return true;
         } catch (e) {
             console.warn('[SaveSystem] mp save failed:', e);
@@ -146,12 +189,21 @@ const SaveSystem = {
         }
     },
 
-    loadMP(state) {
+    loadMP(state, slot) {
+        slot = slot || state.mpSaveSlot || this.getMPSlot();
         try {
-            const raw = localStorage.getItem(this.MP_KEY);
+            // Slot file first; legacy single MP file migrates into play
+            // (read-only — the next saveMP writes the proper slot file).
+            // Scoped (per-host) lookups NEVER fall back to the legacy
+            // global file — that file is exactly the cross-server
+            // contamination this scoping exists to kill.
+            let raw = localStorage.getItem(this.mpSlotKey(slot));
+            if (!raw && !this.mpScope) raw = localStorage.getItem(this.MP_KEY);
             if (!raw) return false;
             const data = JSON.parse(raw);
             if (!data || data.version !== 1) return false;
+            state.mpSaveSlot = slot;
+            this.setMPSlot(slot);
             return this.apply(state, data);
         } catch (e) {
             console.warn('[SaveSystem] mp load failed:', e);
@@ -159,13 +211,21 @@ const SaveSystem = {
         }
     },
 
-    existsMP() {
-        try { return !!localStorage.getItem(this.MP_KEY); } catch (e) { return false; }
+    existsMP(slot) {
+        slot = slot || this.getMPSlot();
+        try {
+            if (localStorage.getItem(this.mpSlotKey(slot))) return true;
+            // Legacy global file only counts for UNSCOPED (host) lookups.
+            if (!this.mpScope && localStorage.getItem(this.MP_KEY)) return true;
+            return false;
+        } catch (e) { return false; }
     },
 
-    mpMeta() {
+    mpMeta(slot) {
+        slot = slot || this.getMPSlot();
         try {
-            const raw = localStorage.getItem(this.MP_KEY);
+            let raw = localStorage.getItem(this.mpSlotKey(slot));
+            if (!raw && !this.mpScope) raw = localStorage.getItem(this.MP_KEY);
             if (!raw) return null;
             const d = JSON.parse(raw);
             if (!d || d.version !== 1) return null;
@@ -173,8 +233,11 @@ const SaveSystem = {
         } catch (e) { return null; }
     },
 
-    wipeMP() {
-        try { localStorage.removeItem(this.MP_KEY); } catch (e) {}
+    wipeMP(slot) {
+        try {
+            if (slot) localStorage.removeItem(this.mpSlotKey(slot));
+            else localStorage.removeItem(this.MP_KEY);
+        } catch (e) {}
     },
 
     // Fresh expedition state for a New MP game (or New local slot).
@@ -227,6 +290,16 @@ const SaveSystem = {
         p.caveUnlocked = false;
         p.inCave = false;
         p.returnPos = null;
+        // 1.1.5 WORLD: new run starts ashore on the morning of day 1.
+        p.onIsland = null;
+        p.boatReturn = null;
+        p.islandSpawn = null;
+        try {
+            if (typeof WorldSystem !== 'undefined' && WorldSystem.ensure) {
+                const w = WorldSystem.ensure(state);
+                w.hour = 9; w.day = 1; w.weather = 'clear'; w.weatherT = 90 + Math.random() * 60;
+            }
+        } catch (e) {}
         state._caveSeq = 0;
         state._caveTouchCd = 0;
         state._caveTouchArmed = true;
@@ -462,6 +535,15 @@ const SaveSystem = {
             try { Casino.updateTokenDisplay(); } catch (e) {}
         }
         if (typeof data.beachShopUnlocked === 'boolean') p.beachShopUnlocked = data.beachShopUnlocked;
+        // 1.1.5 WORLD: clock + island restore (safe: islands re-seat you)
+        try {
+            if (data.world && typeof WorldSystem !== 'undefined' && WorldSystem.loadExtra) {
+                WorldSystem.loadExtra(state, data.world);
+            } else if (typeof WorldSystem !== 'undefined' && WorldSystem.ensure) {
+                WorldSystem.ensure(state);
+                p.onIsland = null;
+            }
+        } catch (e) {}
         // Tutorial + NPC quests
         p.tutorialDone = !!data.tutorialDone;
         if (data.tut && typeof data.tut === 'object') {

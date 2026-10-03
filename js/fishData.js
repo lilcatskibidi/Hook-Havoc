@@ -1946,9 +1946,19 @@ const Projectiles = {
         for (let i = state.projectiles.length - 1; i >= 0; i--) {
             const proj = state.projectiles[i];
 
-            // Co-op client: only personal hooked-fish shots simulate locally;
-            // host-owned shots just move via snapshot + hit via intake.
-            if (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient() && !proj.local) {
+            // Ownership: my own hooked-fish shots fully simulate (and can
+            // hurt ME, the catcher). Everyone else's shots are dead-reckoned
+            // visual-only — they home toward the CATCHER, never toward me,
+            // so a crewmate's fight is visible but can't kill me by proxy.
+            let mine = true;
+            try {
+                if (typeof Multiplayer !== 'undefined' && Multiplayer.roomCode) {
+                    mine = Multiplayer.isHost ? !proj.remote : !!proj.local;
+                }
+            } catch (e) {}
+            if (!mine) {
+                this._moveRemote(state, proj, delta);
+                if (proj.life <= 0) state.projectiles.splice(i, 1);
                 continue;
             }
 
@@ -2053,6 +2063,68 @@ const Projectiles = {
         }
     },
 
+    // Dead-reckoning for another catcher's skill shots (shared fight
+    // visibility): integrate motion, home toward the CATCHER's body
+    // (remote snapshot or host roster — never toward my own player),
+    // suppressed trail only, silent expiry. No collision, no damage,
+    // nothing re-emitted: the catcher's sim owns all of that.
+    _moveRemote(state, proj, delta) {
+        try {
+            const B = (typeof CONFIG !== 'undefined' && CONFIG.WORLD) || { MIN_X: 0, MAX_X: 9999, MIN_Y: 0, MAX_Y: 9999 };
+            proj.x += (proj.vx || 0) * delta;
+            proj.y += (proj.vy || 0) * delta;
+            proj.life = (proj.life || 0) - delta;
+            if (proj.isSpiral) {
+                proj.spiralAngle = (proj.spiralAngle || 0) + delta * 8;
+                proj.x += Math.cos(proj.spiralAngle) * (proj.spiralRadius || 3);
+                proj.y += Math.sin(proj.spiralAngle) * (proj.spiralRadius || 3);
+            }
+            // Catcher position: remote snapshot on clients, host roster
+            // on the host (hostPeers mirrors every client's latest input).
+            let tx = null, ty = null;
+            try {
+                const o = proj.ownerPid || proj.owner;
+                if (o && state.remotePlayers && state.remotePlayers[o]) {
+                    const rp = state.remotePlayers[o];
+                    tx = (typeof rp.rx === 'number') ? rp.rx : rp.x;
+                    ty = (typeof rp.ry === 'number') ? rp.ry : rp.y;
+                } else if (o && typeof Multiplayer !== 'undefined' && Multiplayer.hostPeers && Multiplayer.hostPeers[o]) {
+                    tx = Multiplayer.hostPeers[o].x;
+                    ty = Multiplayer.hostPeers[o].y;
+                }
+            } catch (e) {}
+            if (proj.isHoming && proj.life > 0.3 && typeof tx === 'number' && typeof ty === 'number') {
+                const angle = Math.atan2(ty - proj.y, tx - proj.x);
+                proj.vx = (proj.vx || 0) + Math.cos(angle) * (proj.homingForce || 350) * delta;
+                proj.vy = (proj.vy || 0) + Math.sin(angle) * (proj.homingForce || 350) * delta;
+            }
+            // Arrival burst at the catcher: eye candy only.
+            if (typeof tx === 'number' && typeof ty === 'number' &&
+                Math.hypot(tx - proj.x, ty - proj.y) < (proj.radius || 8) + 18) {
+                proj.life = 0;
+            }
+            if (proj.x < B.MIN_X || proj.y < B.MIN_Y || proj.y > B.MAX_Y) proj.life = 0;
+            // Suppressed trail: local-only, never echoed back to the room.
+            let suppress = false;
+            try {
+                if (typeof Multiplayer !== 'undefined' && !Multiplayer._suppressFxEmit) {
+                    Multiplayer._suppressFxEmit = true;
+                    suppress = true;
+                }
+            } catch (e) {}
+            try {
+                if (proj.life > 0 && Math.random() < 0.5 && typeof Particles !== 'undefined') {
+                    Particles.spawnParticles(state, proj.x, proj.y, proj.color, 1, { size: (proj.radius || 8) * 0.4 });
+                }
+                if (proj.life <= 0 && typeof Particles !== 'undefined') {
+                    Particles.spawnParticles(state, proj.x, proj.y, proj.color, 4, { size: 3 });
+                }
+            } finally {
+                try { if (suppress && typeof Multiplayer !== 'undefined') Multiplayer._suppressFxEmit = false; } catch (e) {}
+            }
+        } catch (e) {}
+    },
+
     spawn(state, x, y, targetX, targetY, speed, damage, color, options = {}) {
         if (!state.projectiles) state.projectiles = [];
         const angle = Math.atan2(targetY - y, targetX - x);
@@ -2124,13 +2196,24 @@ function rollFishSpecies(state) {
 
     // BOSS TIDE — very rare hook. Bosses previously could never be rolled,
     // so the boss bar / boss fights were unreachable. High level + luck
-    // slightly raise the odds.
+    // slightly raise the odds. Hydra + Crimson bite far rarer than the
+    // other two (they also have their own dedicated paths: Hydra Lure /
+    // high-tier water), so the tide table weights them down.
+    const BOSS_TIDE_WEIGHTS = { stormlord_hydra: 0.25, crimson_emperor: 0.25 };
     const pLevel = (state && state.player && state.player.level) || 1;
     const bossChance = 0.004 + effLuck * 0.002 + (pLevel >= 10 ? 0.002 : 0);
     if (Math.random() < bossChance) {
         const bosses = FISH_SPECIES.filter(f => f.isBoss);
         if (bosses.length) {
-            const boss = bosses[Math.floor(Math.random() * bosses.length)];
+            // Weighted pick (default weight 1): hydra/crimson = rare guests.
+            let totalW = 0;
+            for (const b of bosses) totalW += BOSS_TIDE_WEIGHTS[b.id] || 1;
+            let rollW = Math.random() * totalW;
+            let boss = bosses[bosses.length - 1];
+            for (const b of bosses) {
+                rollW -= BOSS_TIDE_WEIGHTS[b.id] || 1;
+                if (rollW <= 0) { boss = b; break; }
+            }
             if (typeof Particles !== 'undefined' && state) {
                 Particles.showFloatingText(state, '⚠ BOSS TIDE! ⚠', state.player.x, state.player.y - 70, '#ef4444');
             }
@@ -2153,7 +2236,15 @@ function rollFishSpecies(state) {
     const weighted = FISH_ROLL_TABLE.map(entry => {
         const rarity = (entry.species && entry.species.rarity) || 'common';
         const mult = luckMult[rarity] || 1.0;
-        const w = entry.weight * mult;
+        // 1.1.5 WORLD: time / weather / water-tier conditions reshape the
+        // table — matching fish get up to ~6x weight (see WorldSystem).
+        let cond = 1;
+        try {
+            if (typeof WorldSystem !== 'undefined' && WorldSystem.bonusFor && state) {
+                cond = WorldSystem.bonusFor(entry.species, state) || 1;
+            }
+        } catch (e) { cond = 1; }
+        const w = entry.weight * mult * cond;
         total += w;
         return { species: entry.species, weight: w };
     });
@@ -2765,21 +2856,31 @@ const FISH_SKILLS = {
 
     blink(fish, ctx) {
         const p = ctx.state.player;
-        // Teleport behind the player
+        // BACKSTAB, telegraphed: mark the strike point behind the player
+        // FIRST (warning ring + shout), and only blink in when it lands.
+        // Sidestep the ring and the ambush whiffs.
         const a = Math.atan2(p.y - fish.y, p.x - fish.x) + Math.PI;
         const d = 60;
-        fish.x = Utils.clamp(p.x + Math.cos(a) * d,
+        const sx = Utils.clamp(p.x + Math.cos(a) * d,
             ctx.state.waterBoundaryX + 20, CONFIG.WORLD.MAX_X - 30);
-        fish.y = Utils.clamp(p.y + Math.sin(a) * d,
+        const sy = Utils.clamp(p.y + Math.sin(a) * d,
             CONFIG.WORLD.MIN_Y + 30, CONFIG.WORLD.MAX_Y - 30);
-        ctx.spawnParticles(fish.x, fish.y, '#fde047', 20);
-        // Fake-out flash where it was, so player looks away
+        const dmg = getSkillDamage(fish, 0.9);
         ctx.state.delayedBlasts.push({
-            x: p.x, y: p.y, radius: 55,
-            damage: getSkillDamage(fish, 0.9),
-            timer: 0.5, color: '#fde047', shake: 12
+            x: sx, y: sy, radius: 55, damage: 0,
+            timer: 0.75, color: '#fde047', shake: 0,
+            onDetonate: () => {
+                if (!fish || fish.isDead) return;
+                fish.x = sx;
+                fish.y = sy;
+                ctx.spawnParticles(sx, sy, '#fde047', 20);
+                ctx.state.delayedBlasts.push({
+                    x: sx, y: sy, radius: 55, damage: dmg,
+                    timer: 0.25, color: '#fde047', shake: 12
+                });
+            }
         });
-        ctx.showFloatingText("BLINK!", fish.x, fish.y - 40, '#fde047');
+        ctx.showFloatingText("⚠ BEHIND YOU!", p.x, p.y - 55, '#fde047');
     },
 
     mudSlime(fish, ctx) {
@@ -2849,19 +2950,29 @@ const FISH_SKILLS = {
     charge(fish, ctx) {
         const p = ctx.state.player;
         const angle = Math.atan2(p.y - fish.y, p.x - fish.x);
-        fish.vx += Math.cos(angle) * 800;
-        fish.vy += Math.sin(angle) * 800;
-        ctx.state.screenShake = 10;
+        // Wind-up first: warning ring on the charger, THEN the dash fires
+        // down the telegraphed lane (cast-time angle — dodgers are safe).
+        ctx.state.delayedBlasts.push({
+            x: fish.x, y: fish.y, radius: 55, damage: 0,
+            timer: 0.45, color: '#f87171', shake: 0,
+            onDetonate: () => {
+                if (!fish || fish.isDead) return;
+                const tgt = fish._monster || fish;
+                tgt.vx = (tgt.vx || 0) + Math.cos(angle) * 800;
+                tgt.vy = (tgt.vy || 0) + Math.sin(angle) * 800;
+                ctx.state.screenShake = 10;
+            }
+        });
         // Dust trail telegraphing the charge lane
         for (let i = 1; i <= 6; i++) {
             ctx.state.delayedBlasts.push({
                 x: fish.x + Math.cos(angle) * i * 60,
                 y: fish.y + Math.sin(angle) * i * 60,
                 radius: 50, damage: getSkillDamage(fish, 0.6),
-                timer: 0.3 + i * 0.1, color: '#f87171', shake: 8
+                timer: 0.45 + i * 0.1, color: '#f87171', shake: 8
             });
         }
-        ctx.showFloatingText("🦈 CHARGE!", fish.x, fish.y - 40, '#f87171');
+        ctx.showFloatingText("⚠ CHARGE INCOMING!", fish.x, fish.y - 40, '#f87171');
     },
 
     // ============================================================
@@ -2897,19 +3008,29 @@ const FISH_SKILLS = {
     elderCharge(fish, ctx) {
         const p = ctx.state.player;
         const a = Math.atan2(p.y - fish.y, p.x - fish.x);
-        fish.vx += Math.cos(a) * 1100;
-        fish.vy += Math.sin(a) * 1100;
-        ctx.state.screenShake = 22;
+        // Same wind-up contract as charge, heavier dash.
+        ctx.state.delayedBlasts.push({
+            x: fish.x, y: fish.y, radius: 65, damage: 0,
+            timer: 0.5, color: '#7c3aed', shake: 0,
+            onDetonate: () => {
+                if (!fish || fish.isDead) return;
+                const tgt = fish._monster || fish;
+                tgt.vx = (tgt.vx || 0) + Math.cos(a) * 1100;
+                tgt.vy = (tgt.vy || 0) + Math.sin(a) * 1100;
+                ctx.state.screenShake = 22;
+            }
+        });
+        ctx.state.screenShake = 8;
         // Trail of blasts along the charge path
         for (let i = 1; i <= 6; i++) {
             ctx.state.delayedBlasts.push({
                 x: fish.x + Math.cos(a) * i * 70,
                 y: fish.y + Math.sin(a) * i * 70,
                 radius: 55, damage: getSkillDamage(fish, 0.8),
-                timer: 0.25 + i * 0.08, color: '#7c3aed', shake: 12
+                timer: 0.5 + i * 0.08, color: '#7c3aed', shake: 12
             });
         }
-        ctx.showFloatingText("👑 ELDER CHARGE!", fish.x, fish.y - 40, '#7c3aed');
+        ctx.showFloatingText("⚠ ELDER CHARGE!", fish.x, fish.y - 40, '#7c3aed');
     },
 
     voidRend(fish, ctx) {

@@ -1,63 +1,45 @@
-# Aquatic Havoc — Deep Sea Hunter (with LAN Multiplayer)
+# Aquatic Havoc — Deep Sea Hunter (with Online P2P Multiplayer)
 
-A hybrid fishing/action game with **LAN multiplayer support** using WebRTC.
+A hybrid fishing/action game with **online peer-to-peer multiplayer** (PeerJS, no server to run).
 
 ## Features
 - Single player fishing & combat
-- **LAN Multiplayer (up to 4 players)** - Host/Join via room codes
-- **Shared Healing System** - Heal your partner (3 heals per session, 10s cooldown)
-- Real-time game state synchronization
-- In-game chat
-- WebRTC peer-to-peer connection (low latency on LAN)
+- **Online Multiplayer (up to 4 players)** - Host/Join via room codes, works on itch.io
+- **Shared vision** - custom fish/gun/bobber art syncs across peers; catch popups + boss banners mirrored
+- Real-time game state synchronization (host-authoritative)
+- WebRTC peer-to-peer data (low latency), brokered by the free PeerJS cloud
 
 ---
 
 ## Quick Start
 
-### 1. Start the Signaling Server (Required for Multiplayer)
+### 1. Open the Game
 
-**On the host computer:**
-```bash
-cd "path/to/Aquatic Havoc"
-npm start
-```
-This starts the WebSocket signaling server on `port 8080`. You'll see output like:
-```
-Signaling server running on port 8080
-Open http://localhost:8080 in browser
-For LAN: http://192.168.x.x:8080
-```
+Open `index.html` in a browser (Chrome/Edge/Firefox) — or play the itch.io build.
+No server needed for anything, including multiplayer.
 
-### 2. Open the Game
-
-Open `index.html` in a browser (Chrome/Edge/Firefox) on **both computers**.
-
-**Option A: Via signaling server (recommended for LAN)**
-- Navigate to `http://<host-ip>:8080` on both computers
-
-**Option B: Direct file open (single player only)**
-- Double-click `index.html` on each computer
-- Multiplayer will NOT work without the signaling server
+`npm start` (optional) only serves the files locally for development.
 
 ---
 
-## Multiplayer Setup (LAN)
+## Multiplayer Setup (Online P2P)
 
-### Host Computer (Player 1)
-1. Open the game at `http://<host-ip>:8080`
-2. Click **"Multiplayer (LAN)"** in the main menu
-3. Click **"Host Game"**
-4. Share the **4-character room code** (e.g., `A3F2`) with Player 2
-5. Wait for Player 2 to join
-6. Click **"Start Game"**
+Everyone must run the **same game version** (room ids embed the version —
+different versions can't even see each other's rooms).
 
-### Client Computer (Player 2)
-1. Open the game at `http://<host-ip>:8080`
-2. Click **"Multiplayer (LAN)"** in the main menu
-3. Click **"Join Game"**
-4. Enter the **4-character room code** from Player 1
-3. Click **"Join"**
-4. Wait for host to start the game
+### Host (Player 1)
+1. Click **"Multiplayer"** in the main menu
+2. Click **"Host Game"**
+3. Share the **4-character room code** (e.g., `A3F2`)
+4. Wait for players to join
+5. Click **"Start Game"**
+
+### Clients (Players 2-4)
+1. Click **"Multiplayer"** in the main menu
+2. Click **"Join Game"**
+3. Enter the **4-character room code** from the host
+4. Click **"Join"**
+5. Wait for host to start the game
 
 ---
 
@@ -85,20 +67,19 @@ Open `index.html` in a browser (Chrome/Edge/Firefox) on **both computers**.
 
 ## Network Requirements
 
-- Both computers must be on the **same LAN/WiFi network**
-- Host computer runs the signaling server (`node server.js`)
-- Port **8080** must be accessible on the host (check firewall)
-- WebRTC uses STUN servers (Google's public STUN) for NAT traversal
-- If direct P2P fails, relay through signaling server (higher latency)
+- Internet access (PeerJS cloud brokers the handshake; game data is P2P WebRTC)
+- Same game version on all PCs
+- WebRTC-capable browser (Chrome/Edge/Firefox/Safari); allow UDP where possible
+- Max 4 players per room (star topology through the host)
 
 ---
 
 ## Troubleshooting
 
-### "Cannot connect to signaling server"
-- Make sure `node server.js` is running on host
-- Check Windows Firewall: Allow Node.js on port 8080
-- Try `http://localhost:8080` on host to verify server works
+### "PeerJS cloud unreachable" / "Room not found"
+- Check internet connection / adblock (it must load `cdn.jsdelivr.net` + reach `0.peerjs.com`)
+- Room codes are 4 characters; host and clients must share the **same game version**
+- "Room is full" means 4 players already joined
 
 ### "Room not found" / "Room is full"
 - Room codes are 4 characters, case-insensitive
@@ -189,28 +170,16 @@ Then drag `dist/itch.zip` onto
 
 ### Multiplayer on itch.io
 
-itch.io only hosts the **game page** — it cannot run `server.js`. Single player
-works out of the box. For online 2-player sessions, host the signaling server
-yourself (Render, Railway, Fly.io, a VPS — anything that runs `npm start` and
-supports WebSockets, with `wss://`), then point players at it:
-
-```
-https://<user>.itch.io/<game>?server=wss://your-signaling-host
-```
-
-The game reads the `?server=` parameter first, then a `localStorage` value, then
-falls back to `<current host>:8080` (the LAN default). Plain hostnames work too:
-`?server=my-host.com` becomes `ws://my-host.com`.
-
-> itch.io pages are HTTPS, so the connection must be `wss://` — a bare `ws://`
-> URL is blocked by the browser as mixed content.
+Works out of the box: the build loads PeerJS from CDN and uses the free
+PeerJS cloud to broker rooms, so host/join works right inside the itch.io
+embed. Just make sure everyone plays the **same uploaded version**.
 
 ---
 
 ## Project Structure
 ```
 ├── index.html          # Main game HTML
-├── server.js           # WebSocket signaling server (NOT shipped to itch.io)
+├── server.js           # Static dev server (NOT shipped to itch.io; MP needs no server)
 ├── package.json        # Node dependencies (ws)
 ├── scripts/
 │   └── build-itch.mjs  # Builds the itch.io zip (npm run build:itch)
@@ -222,7 +191,8 @@ falls back to `<current host>:8080` (the LAN default). Plain hostnames work too:
 │   └── style.css       # Styles including multiplayer UI
 └── js/
     ├── main.js         # Game loop, menu, multiplayer integration
-    ├── multiplayer.js  # WebRTC, signaling, state sync, healing
+    ├── peerlink.js     # PeerJS transport, custom-art sync, announce mirroring
+    ├── multiplayer.js  # Room flow, host-authoritative state sync, remote rendering
     ├── player.js       # Player logic + heal effect
     ├── fishing.js      # Fishing mechanics
     ├── combat.js       # Combat & bosses
@@ -244,10 +214,10 @@ falls back to `<current host>:8080` (the LAN default). Plain hostnames work too:
 ## Technical Details
 
 ### Architecture
-- **Signaling Server** (`server.js`): WebSocket server for room management & WebRTC signaling
-- **WebRTC DataChannels**: Ordered, reliable channels for game state & inputs
-- **Host Authoritative**: Host simulates physics, sends state at 20Hz
-- **Client Prediction**: Clients run local prediction, corrected by host state
+- **Transport** (`peerlink.js`): PeerJS cloud broker + WebRTC DataChannels (reliable). Star topology, max 4 players
+- **Same-version gate**: room ids embed the version digits + explicit handshake check
+- **Shared vision** (`PeerSkins`, `PeerAnnounce`): custom art syncs per-session (your local art always wins on your screen); catch popups + boss banners mirrored; Settings stay local
+- **Host Authoritative**: Host simulates physics, sends state at ~12Hz
 
 ### State Synchronization
 - Player positions, HP, fishing state, monsters, bullets, loot, hazards

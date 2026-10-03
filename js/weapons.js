@@ -918,6 +918,53 @@ const WeaponSystem = {
                 }
             }
 
+            // MP client instant echo: synced enemies/monsters are damaged in
+            // the HOST sim (this bullet rides there via outbox) — here we
+            // only flash + bleed the LOCAL copy so hits feel instant.
+            // No hp touched (host owns it), no popText (the real damage
+            // number rides back via snapshot fx a moment later).
+            if (!consumed && mpClient) {
+                const echoHit = (ex, ey, col) => {
+                    try {
+                        if (state.particles) {
+                            for (let k = 0; k < 5; k++) {
+                                state.particles.push({
+                                    x: ex, y: ey,
+                                    vx: (Math.random() - 0.5) * 260,
+                                    vy: (Math.random() - 0.5) * 260,
+                                    color: col, life: 0.3, size: 3
+                                });
+                            }
+                        }
+                    } catch (e) {}
+                };
+                if (state.enemies) {
+                    for (const e of state.enemies) {
+                        if (!e || e.burrowed || e.state === 'burrowed') continue;
+                        const er = e.enemyType === 'seagull' ? 20
+                            : e.enemyType === 'beachCrab' ? 22
+                            : ((e.species && e.species.size) || 20) + 4;
+                        if (this.segHitsCircle(b.x - stepX, b.y - stepY, b.x, b.y, e.x, e.y, er)) {
+                            e.hitFlash = 0.25;
+                            echoHit(e.x, e.y, '#f87171');
+                            try { audio.playHit(); } catch (e2) {}
+                            break;
+                        }
+                    }
+                }
+                if (state.monstersOnLand) {
+                    for (const m of state.monstersOnLand) {
+                        if (!m || !m.species) continue;
+                        if (this.segHitsCircle(b.x - stepX, b.y - stepY, b.x, b.y, m.x, m.y, (m.species.size || 16) + 5)) {
+                            m.hitFlash = 0.25;
+                            echoHit(m.x, m.y, (m.species.color || '#f87171'));
+                            try { audio.playHit(); } catch (e2) {}
+                            break;
+                        }
+                    }
+                }
+            }
+
             if (consumed) state.bullets.splice(i, 1);
         }
 

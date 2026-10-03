@@ -70,7 +70,6 @@ const Casino = {
         on('casino-buy-tokens-10', () => this.buyTokens(10));
         on('casino-buy-tokens-100', () => this.buyTokens(100));
         on('casino-cashout', () => this.cashout());
-        on('casino-free-tokens', () => this.claimFreeTokens());
     },
 
     open() {
@@ -710,25 +709,6 @@ const Casino = {
         this.highlowPot = 0; this.highlowStreak = 0;
         try { audio.playCoin(); } catch (e) {}
         this.updateTokenDisplay(); this.renderTab(); this.saveTokens();
-    },
-
-    claimFreeTokens() {
-        const now = Date.now();
-        const cd = 120 * 1000;
-        if (now - (this.freeClaimAt || 0) < cd) {
-            const left = Math.ceil((cd - (now - this.freeClaimAt)) / 1000);
-            if (typeof Particles !== 'undefined') Particles.showFloatingText(this.state, `FREE TOKENS IN ${left}s`, this.state.player.x, this.state.player.y - 50, '#f87171');
-            try { audio.playError(); } catch (e) {}
-            return;
-        }
-        this.freeClaimAt = now;
-        this.tokens += 3;
-        if (this.betAmount < 1) this.betAmount = 1;
-        this.updateTokenDisplay();
-        this.saveTokens();
-        if (typeof Particles !== 'undefined') Particles.showFloatingText(this.state, '+3 FREE TOKENS!', this.state.player.x, this.state.player.y - 50, '#34d399');
-        try { audio.playCoin(); } catch (e) {}
-        this.renderTab();
     },
 
     buyTokens(amount = 1) {

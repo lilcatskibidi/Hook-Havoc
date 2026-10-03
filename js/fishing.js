@@ -3,6 +3,10 @@ const Fishing = {
         if (!state.player || state.player.isDead || state.player.hp <= 0) return;
         // No casting during the boss-fight countdown.
         if (typeof state._fightFreezeUntil === 'number' && state.time < state._fightFreezeUntil) return;
+        // No casting mid ferry ride.
+        try {
+            if (typeof WorldSystem !== 'undefined' && WorldSystem.boatRiding && WorldSystem.boatRiding(state)) return;
+        } catch (e) {}
 
         const p = state.player;
         const distToWater = state.waterBoundaryX - p.x;
@@ -19,7 +23,21 @@ const Fishing = {
         } catch (e) {}
 
         if (f.mode === 'IDLE') {
-            if (distToWater > 160 || distToWater < -20) {
+            // 1.2.1: the pier deck hangs over the sea and isles have
+            // their own lakes + surrounding sea — all legal casting spots.
+            let onPier = false, onIsle = false;
+            try {
+                if (typeof WorldSystem !== 'undefined') {
+                    onPier = WorldSystem.onBridge(state, p.x, p.y);
+                    onIsle = !!WorldSystem.islandOf(state);
+                }
+            } catch (e) {}
+            if (onIsle) {
+                // Isle sand + both piers are all legal casting spots —
+                // collision already guarantees you stand somewhere sane.
+            } else if (onPier) {
+                // casting from the pier: always fine (deck is over water)
+            } else if (distToWater > 160 || distToWater < -20) {
                 Particles.showFloatingText(state, "Move closer to the shore!", p.x, p.y - 30, '#f87171');
                 return;
             }
@@ -64,21 +82,56 @@ const Fishing = {
 
     onSpaceUp(state) {
         if (!state.player || state.player.isDead || state.player.hp <= 0) return;
+        try {
+            if (typeof WorldSystem !== 'undefined' && WorldSystem.boatRiding && WorldSystem.boatRiding(state)) return;
+        } catch (e) {}
 
         const f = state.fishing;
         if (f.mode === 'CASTING') {
+            const p = state.player;
+            // Aim: live mouse direction in world space on every map
+            // (touch + gamepad feed the same mouse pipeline). Falls back
+            // to the body facing on a fresh page / keyboard-only play.
+            let dx = 0, dy = 0, aimed = false;
+            try {
+                const m = state.mouse;
+                if (m && m._moved) {
+                    const mx = (m.worldX || 0) - p.x, my = (m.worldY || 0) - p.y;
+                    const ml = Math.hypot(mx, my);
+                    if (ml > 8) { dx = mx / ml; dy = my / ml; aimed = true; }
+                }
+            } catch (e) {}
+            if (!aimed) { dx = (p.facing && p.facing < 0) ? -1 : 1; dy = 0; }
             // Release-point validation: the throw must land in open water.
             // (Movement is locked while charging, but knockback or edge cases
             // must never produce a land bobber that fishes from the sand.)
             const castDist = CONFIG.CAST_MIN_DIST + (f.castPower / 100) * (CONFIG.CAST_MAX_DIST - CONFIG.CAST_MIN_DIST);
-            const lx = state.player.x + castDist;
-            const ly = state.player.y + Utils.rand(-50, 50);
-            const WB = CONFIG.WORLD;
-            if (lx <= state.waterBoundaryX + 30 || ly < WB.MIN_Y + 30 || ly > WB.MAX_Y - 30) {
+            // Small natural spread so full-power hurls don't laser-stack.
+            const spread = 14;
+            let lx = p.x + dx * castDist - dy * Utils.rand(-spread, spread);
+            let ly = p.y + dy * castDist + dx * Utils.rand(-spread, spread);
+            // Walk the point back toward the rod until it sits in real
+            // water — beach, pier deck, isle lake and open sea all share
+            // one rule: land = sand/deck, sea = water (see isWaterAt).
+            let waterOk = false;
+            try {
+                if (typeof WorldSystem !== 'undefined' && WorldSystem.isWaterAt) {
+                    for (let k = 0; k < 32; k++) {
+                        if (WorldSystem.isWaterAt(state, lx, ly)) { waterOk = true; break; }
+                        lx -= dx * 15; ly -= dy * 15;
+                        if (Math.hypot(lx - p.x, ly - p.y) < 50) break;
+                    }
+                    waterOk = waterOk && WorldSystem.isWaterAt(state, lx, ly);
+                } else {
+                    const WB = CONFIG.WORLD;
+                    waterOk = lx > state.waterBoundaryX + 30 && ly > WB.MIN_Y + 30 && ly < WB.MAX_Y - 30;
+                }
+            } catch (e) { waterOk = false; }
+            if (!waterOk) {
                 f.mode = 'IDLE';
                 f.castPower = 0;
                 f.castDir = 1;
-                Particles.showFloatingText(state, 'No water there — cast from the shore!', state.player.x, state.player.y - 30, '#f87171');
+                Particles.showFloatingText(state, 'No water that way — aim at the sea!', state.player.x, state.player.y - 30, '#f87171');
                 try { audio.playError(); } catch (e) {}
                 return;
             }
@@ -120,6 +173,13 @@ const Fishing = {
             if (hb && hb.biteMult) biteMult *= hb.biteMult;
         } catch (e) {}
         f.biteTimer = Utils.rand(CONFIG.BITE_MIN_DELAY, CONFIG.BITE_MAX_DELAY) * biteMult;
+        // 1.1.5 WORLD: weather + water tier shorten the wait when
+        // conditions are right (deep water and islands bite faster).
+        try {
+            if (typeof WorldSystem !== 'undefined' && WorldSystem.biteMult) {
+                f.biteTimer *= WorldSystem.biteMult(state) || 1;
+            }
+        } catch (e) {}
         try { audio.playWaterTouch(); } catch (e) {}
         if (typeof Particles !== 'undefined') {
             Particles.spawnWaterSplashes(state, f.bobber.x, f.bobber.y, 8);
@@ -547,8 +607,17 @@ const Fishing = {
             const ang = (fish.orbitAngle = (fish.orbitAngle || Math.random() * Math.PI * 2) + delta * (isHydraSea ? 0.95 : 0.55));
             const R = isHydraSea ? 360 : 300;
             const weave = isHydraSea ? Math.sin(state.time * 2.2) * 90 : 0;
-            const tx = Utils.clamp(p.x + Math.cos(ang) * R, state.waterBoundaryX + 30, B.MAX_X - 60);
-            const ty = Utils.clamp(p.y + Math.sin(ang) * R * 0.7 + weave, B.MIN_Y + 40, B.MAX_Y - 40);
+            // Encounter-local bounds: isles use their own room, never the
+            // mainland surf line (which used to fling isle bosses ashore).
+            let fb = null;
+            try {
+                fb = (typeof WorldSystem !== 'undefined' && WorldSystem.fishBounds)
+                    ? WorldSystem.fishBounds(state) : null;
+            } catch (e) {}
+            const tx = fb ? Utils.clamp(p.x + Math.cos(ang) * R, fb.x0, fb.x1)
+                : Utils.clamp(p.x + Math.cos(ang) * R, state.waterBoundaryX + 30, B.MAX_X - 60);
+            const ty = fb ? Utils.clamp(p.y + Math.sin(ang) * R * 0.7 + weave, fb.y0, fb.y1)
+                : Utils.clamp(p.y + Math.sin(ang) * R * 0.7 + weave, B.MIN_Y + 40, B.MAX_Y - 40);
             const swimSpd = ((fish.species && fish.species.speed) || 100) * (isHydraSea ? 3.4 : 2.4)
                 * (fish.freezeTimer > 0 ? 0.25 : 1.0)
                 * (fish.stunTimer > 0 ? 0.0 : 1.0)
@@ -560,9 +629,14 @@ const Fishing = {
             const waterFriction = Math.pow(CONFIG.DRAG_WATER_RESISTANCE, delta * 60);
             fish.vx *= waterFriction;
             fish.vy *= waterFriction;
-            // Stay under the sea
+            // Stay under the sea (encounter-local water)
+            if (fb) {
+                fish.x = Utils.clamp(fish.x, fb.x0, fb.x1);
+                fish.y = Utils.clamp(fish.y, fb.y0, fb.y1);
+            } else {
             fish.x = Utils.clamp(fish.x, state.waterBoundaryX + 15, B.MAX_X - 30);
             fish.y = Utils.clamp(fish.y, B.MIN_Y + 30, B.MAX_Y - 30);
+            }
             const spd = Math.hypot(fish.vx, fish.vy);
             if (spd > 5) {
                 const velAngle = Math.atan2(fish.vy, fish.vx);
@@ -630,7 +704,20 @@ const Fishing = {
             }
 
             const reelPower = (rod.reelPower || 80) * (rod.pullMult || 1.0);
-            const pullAccel = reelPower * pullMultiplier * 1.2;
+            // Beached fish are out of their element: they slide in fast
+            // and barely fight the line (otherwise pier/isle drags crawl
+            // at ~25px/s while tension climbs and the line snaps first).
+            // Piers + isles get the biggest boost: short decks and small
+            // sands must still finish the drag.
+            let beachedBoost = 2.2;
+            try {
+                const offMain = (typeof WorldSystem !== 'undefined' &&
+                    ((WorldSystem.islandOf && WorldSystem.islandOf(state)) ||
+                     (WorldSystem.onBridge && WorldSystem.onBridge(state, p.x, p.y)) ||
+                     (WorldSystem.onIslandPier && WorldSystem.onIslandPier(state, p.x, p.y, 60))));
+                if (offMain) beachedBoost = 3.2;
+            } catch (e) {}
+            const pullAccel = reelPower * pullMultiplier * 1.2 * beachedBoost;
             fish.vx += (dx / dist) * pullAccel * delta;
             fish.vy += (dy / dist) * pullAccel * delta;
 
@@ -638,7 +725,14 @@ const Fishing = {
                 const save = rod.staminaSave || 0;
                 fish.stamina -= CONFIG.STAMINA_DRAIN_PER_REEL * (1 - save) * delta;
                 const ragePenalty = fish.isRaging ? 2.2 : 1.0;
-                f.lineTension += CONFIG.TENSION_PER_REEL * ragePenalty * staminaRatio * delta;
+                let tensionEase = (fish.dragState === 'BEACHING') ? 0.35 : 1.0;
+                try {
+                    const offMain2 = (typeof WorldSystem !== 'undefined' &&
+                        ((WorldSystem.islandOf && WorldSystem.islandOf(state)) ||
+                         (WorldSystem.onBridge && WorldSystem.onBridge(state, p.x, p.y))));
+                    if (offMain2 && fish.dragState === 'BEACHING') tensionEase = 0.25;
+                } catch (e) {}
+                f.lineTension += CONFIG.TENSION_PER_REEL * ragePenalty * staminaRatio * tensionEase * delta;
             }
 
             if (fish.dragState === 'IN_WATER' && Math.random() < 0.5) {
@@ -655,9 +749,20 @@ const Fishing = {
             }
         }
 
-        const onLand = fish.x <= state.waterBoundaryX + CONFIG.BEACH_TRIGGER_OFFSET;
+        // "Land" = mainland surf line, either pier deck, or isle sand /
+        // isle pier. (The old surf-line-only check could never beach on
+        // piers or isles, so those fish swam away forever.)
+        let onLand = false;
+        try {
+            onLand = (typeof WorldSystem !== 'undefined' && WorldSystem.isBeachAt)
+                ? WorldSystem.isBeachAt(state, fish.x, fish.y)
+                : fish.x <= state.waterBoundaryX + CONFIG.BEACH_TRIGGER_OFFSET;
+        } catch (e) {
+            onLand = fish.x <= state.waterBoundaryX + CONFIG.BEACH_TRIGGER_OFFSET;
+        }
         if (onLand && fish.dragState === 'IN_WATER') {
             fish.dragState = 'BEACHING';
+            fish.beachFrom = Math.hypot(p.x - fish.x, p.y - fish.y) || 1;
             try { audio.playSplash(); } catch (e) {}
             state.screenShake = 5;
             Particles.spawnParticles(state, fish.x, fish.y, '#fef3c7', 14);
@@ -678,8 +783,26 @@ const Fishing = {
             fish.vy *= waterFriction;
         }
 
+        // Encounter-local world clamp (isles have their own room).
+        // BEACHING / BEACHED / dead fish MUST be allowed onto land:
+        // clamping every hooked fish to the surf line was an invisible
+        // wall — nothing dragged ashore could ever cross onto the sand,
+        // so beach (and pier/isle) catches were impossible from afar.
+        try {
+            if (typeof WorldSystem !== 'undefined' && WorldSystem.fishBounds) {
+                const fb2 = WorldSystem.fishBounds(state);
+                const ashore = fish.dragState === 'BEACHING' || fish.dragState === 'BEACHED' || fish.isDead;
+                const x0 = (ashore && !WorldSystem.islandOf(state)) ? B.MIN_X + 30 : fb2.x0;
+                fish.x = Utils.clamp(fish.x, x0, fb2.x1);
+                fish.y = Utils.clamp(fish.y, fb2.y0, fb2.y1);
+            } else {
         fish.x = Utils.clamp(fish.x, B.MIN_X + 30, B.MAX_X - 30);
         fish.y = Utils.clamp(fish.y, B.MIN_Y + 30, B.MAX_Y - 30);
+            }
+        } catch (e) {
+            fish.x = Utils.clamp(fish.x, B.MIN_X + 30, B.MAX_X - 30);
+            fish.y = Utils.clamp(fish.y, B.MIN_Y + 30, B.MAX_Y - 30);
+        }
 
         const speed = Math.hypot(fish.vx, fish.vy);
         if (speed > 5) {
@@ -692,22 +815,48 @@ const Fishing = {
         //  Also clamps dead fish inside the player's walkable area
         // ------------------------------------------------------------
         if (fish.dragState === 'BEACHING') {
-            const dxToPlayer = Math.abs(p.x - fish.x);
+            const distToP = Math.hypot(p.x - fish.x, p.y - fish.y);
             const dxToShore = fish.x - state.waterBoundaryX;
-            const closeEnough = dxToShore < -30 || dxToPlayer < 60;
+            // LAND RULE: the fish itself is already on LAND (surf / sand /
+            // bridge deck / isle pier) — finish the catch by distance to
+            // YOU, never by a mainland-only x check. Decks and small isles
+            // use a generous radius so the drag can actually complete.
+            let fishOnLand = false;
+            let offMain = false;
+            try {
+                if (typeof WorldSystem !== 'undefined' && WorldSystem.isLandAt) {
+                    fishOnLand = !!WorldSystem.isLandAt(state, fish.x, fish.y);
+                } else if (typeof WorldSystem !== 'undefined' && WorldSystem.isBeachAt) {
+                    fishOnLand = !!WorldSystem.isBeachAt(state, fish.x, fish.y);
+                }
+                offMain = !!((typeof WorldSystem !== 'undefined' && WorldSystem.islandOf)
+                    ? WorldSystem.islandOf(state)
+                    : (p.onIsland)) ||
+                    !!((typeof WorldSystem !== 'undefined' && WorldSystem.onBridge)
+                        ? (WorldSystem.onBridge(state, p.x, p.y) || WorldSystem.onBridge(state, fish.x, fish.y)) : false);
+            } catch (e) {}
+            const grabR = offMain ? 130 : 70;
+            const closeEnough = distToP < grabR || (fishOnLand && distToP < grabR + 60) || (!offMain && dxToShore < -30);
 
-            if (closeEnough || (fish.isDead && dxToShore < 0)) {
+            if (closeEnough || (fish.isDead && (offMain ? distToP < 130 : dxToShore < 0))) {
                 fish.dragState = 'BEACHED';
                 fish.beachedTimer = 0;
 
                 // If dead, snap inside player's reachable area right away
                 if (fish.isDead) {
+                    try {
+                        if (typeof WorldSystem !== 'undefined' && WorldSystem.lootClamp) {
+                            const c = WorldSystem.lootClamp(state, fish.x, fish.y);
+                            fish.x = c.x; fish.y = c.y;
+                        } else {
                     const minX = B.MIN_X + p.radius + 4;
                     const maxX = state.waterBoundaryX - p.radius - 4;
                     const minY = B.MIN_Y + p.radius + 4;
                     const maxY = B.MAX_Y - p.radius - 4;
                     fish.x = Utils.clamp(fish.x, minX, maxX);
                     fish.y = Utils.clamp(fish.y, minY, maxY);
+                        }
+                    } catch (e) {}
                 }
             }
         }
@@ -722,7 +871,15 @@ const Fishing = {
                 const dyToP = p.y - fish.y;
                 const distToP = Math.hypot(dxToP, dyToP);
 
-                const MAGNET_RADIUS = 150;
+                // Dead fish magnet: bigger on piers/isles so loot stuck
+                // on a deck edge or small sand still reaches you.
+                let MAGNET_RADIUS = 150;
+                try {
+                    const offMain3 = (typeof WorldSystem !== 'undefined' &&
+                        ((WorldSystem.islandOf && WorldSystem.islandOf(state)) ||
+                         (WorldSystem.onBridge && (WorldSystem.onBridge(state, p.x, p.y) || WorldSystem.onBridge(state, fish.x, fish.y)))));
+                    if (offMain3) MAGNET_RADIUS = 240;
+                } catch (e) {}
                 if (distToP < MAGNET_RADIUS && distToP > 1) {
                     // Stronger pull the closer the player is
                     const strength = 1 + (1 - distToP / MAGNET_RADIUS) * 3;
@@ -744,12 +901,19 @@ const Fishing = {
                 fish.vy *= friction;
 
                 // Hard clamp — never let dead fish escape the walkable zone
+                try {
+                    if (typeof WorldSystem !== 'undefined' && WorldSystem.lootClamp) {
+                        const c = WorldSystem.lootClamp(state, fish.x, fish.y);
+                        fish.x = c.x; fish.y = c.y;
+                    } else {
                 const minX = B.MIN_X + p.radius + 4;
                 const maxX = state.waterBoundaryX - p.radius - 4;
                 const minY = B.MIN_Y + p.radius + 4;
                 const maxY = B.MAX_Y - p.radius - 4;
                 fish.x = Utils.clamp(fish.x, minX, maxX);
                 fish.y = Utils.clamp(fish.y, minY, maxY);
+                    }
+                } catch (e) {}
             }
 
             fish.beachedTimer += delta;
@@ -779,9 +943,26 @@ const Fishing = {
         if (fish.dragState === 'BEACHING') {
             const dragHud = document.getElementById('drag-hud');
             if (dragHud) dragHud.classList.remove('hidden');
-            const startX = state.waterBoundaryX + 35;
-            const endX = state.waterBoundaryX - 40;
-            const progress = Utils.clamp((startX - fish.x) / (startX - endX), 0, 1);
+            // Piers + isles: progress = distance closed since beaching
+            // (the surf-line bar is meaningless off the mainland beach).
+            let progress = 0;
+            try {
+                const offBeach = (typeof WorldSystem !== 'undefined' &&
+                    ((WorldSystem.islandOf && WorldSystem.islandOf(state)) ||
+                     (WorldSystem.onBridge && WorldSystem.onBridge(state, p.x, p.y))));
+                if (offBeach) {
+                    const from = fish.beachFrom || 1;
+                    progress = Utils.clamp(1 - Math.hypot(p.x - fish.x, p.y - fish.y) / from, 0, 1);
+                } else {
+                    const startX = state.waterBoundaryX + 35;
+                    const endX = state.waterBoundaryX - 40;
+                    progress = Utils.clamp((startX - fish.x) / (startX - endX), 0, 1);
+                }
+            } catch (e) {
+                const startX = state.waterBoundaryX + 35;
+                const endX = state.waterBoundaryX - 40;
+                progress = Utils.clamp((startX - fish.x) / (startX - endX), 0, 1);
+            }
 
             const dragBar = document.getElementById('drag-bar');
             if (dragBar) dragBar.style.width = `${progress * 100}%`;
@@ -803,12 +984,14 @@ const Fishing = {
         if (typeof FISH_SKILLS !== 'undefined') {
             const handler = FISH_SKILLS[selectedSkillKey] || FISH_SKILLS.waterJet;
             if (typeof handler === 'function') {
-                // In co-op the client's own hooked fish fights back personally:
-                // flag its fresh projectiles local so the host snapshot keeps them.
-                let before = -1;
+                // In co-op the catcher's sim owns the fight: fresh shots
+                // are tagged (owner = catcher) and, for clients, mirrored
+                // to the room so EVERY peer sees the skill (see mirrorSkill).
+                let beforeP = -1, beforeH = -1, beforeB = -1;
                 try {
-                    const isMPClient = (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient());
-                    if (isMPClient && state.projectiles) before = state.projectiles.length;
+                    if (state.projectiles) beforeP = state.projectiles.length;
+                    if (state.groundHazards) beforeH = state.groundHazards.length;
+                    if (state.delayedBlasts) beforeB = state.delayedBlasts.length;
                 } catch (e) {}
                 handler(fish, {
                     state,
@@ -817,10 +1000,23 @@ const Fishing = {
                     spawnParticles: (x, y, c, n) => Particles.spawnParticles(state, x, y, c, n)
                 });
                 try {
-                    if (before >= 0 && state.projectiles) {
-                        for (let i = before; i < state.projectiles.length; i++) {
-                            state.projectiles[i].local = true;
+                    let me = null;
+                    try {
+                        me = (typeof Multiplayer !== 'undefined' && Multiplayer.roomCode)
+                            ? (Multiplayer.localClientId || 'host') : null;
+                    } catch (e) {}
+                    const isMPClient = (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient());
+                    if (state.projectiles && beforeP >= 0) {
+                        for (let i = beforeP; i < state.projectiles.length; i++) {
+                            const pr = state.projectiles[i];
+                            if (!pr) continue;
+                            if (me) pr.ownerPid = me;
+                            if (isMPClient) pr.local = true; // host snapshot keeps them
                         }
+                    }
+                    // Mirror the whole skill (shots + zones) to the room.
+                    if (me && isMPClient && typeof Multiplayer !== 'undefined' && Multiplayer.mirrorSkill) {
+                        Multiplayer.mirrorSkill(state, beforeP, beforeH, beforeB);
                     }
                 } catch (e) {}
             }
@@ -860,8 +1056,16 @@ const Fishing = {
             // Spawn loot safely inside the player's reachable zone
             const p = state.player;
             const B = CONFIG.WORLD;
-            const lootX = Utils.clamp(fish.x, B.MIN_X + p.radius + 4, state.waterBoundaryX - p.radius - 4);
-            const lootY = Utils.clamp(fish.y, B.MIN_Y + p.radius + 4, B.MAX_Y - p.radius - 4);
+            let lootX = fish.x, lootY = fish.y;
+            try {
+                if (typeof WorldSystem !== 'undefined' && WorldSystem.lootClamp) {
+                    const c = WorldSystem.lootClamp(state, fish.x, fish.y);
+                    lootX = c.x; lootY = c.y;
+                } else {
+            lootX = Utils.clamp(fish.x, B.MIN_X + p.radius + 4, state.waterBoundaryX - p.radius - 4);
+            lootY = Utils.clamp(fish.y, B.MIN_Y + p.radius + 4, B.MAX_Y - p.radius - 4);
+                }
+            } catch (e) {}
 
             state.groundLoot.push({
                 id: 'l' + (state._lootSeq = (state._lootSeq || 0) + 1),
@@ -872,11 +1076,21 @@ const Fishing = {
             Particles.showFloatingText(state, `+1 ${fish.species ? fish.species.name : 'Fish'}!`, lootX, lootY - 30, '#34d399');
             UI.updateStatusBanner('Dead fish washed ashore! Walk over to collect it.', 'Dead Catch', 'emerald');
         } else {
+            // Live beach: clamp onto a survivable surface (same rule as
+            // dead loot) so the monster never stands on open water where
+            // its kill-drop would instantly sink.
+            let mx = fish.x, my = fish.y;
+            try {
+                if (typeof WorldSystem !== 'undefined' && WorldSystem.lootClamp) {
+                    const c = WorldSystem.lootClamp(state, fish.x, fish.y);
+                    mx = c.x; my = c.y;
+                }
+            } catch (e) {}
             state.monstersOnLand.push({
                 id: Date.now() + Math.random(),
                 species: fish.species,
-                x: fish.x,
-                y: fish.y,
+                x: mx,
+                y: my,
                 hp: fish.hp,
                 maxHp: speciesMaxHp,
                 vx: 0,

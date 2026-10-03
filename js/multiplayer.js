@@ -1,53 +1,14 @@
 /**
  * Multiplayer Module for Aquatic Havoc
- * Handles WebRTC peer-to-peer connections, game state synchronization, and healing system
+ * Online P2P via PeerJS cloud (no localhost server needed — works on itch.io).
+ * Transport lives in js/peerlink.js; this file owns game-state sync.
  */
-
-/**
- * Work out which WebSocket signaling server to use.
- *
- * Priority:
- *   1. ?server= query param   -> e.g. index.html?server=wss://my-host.onrender.com
- *      (required for itch.io builds, where the page host is not your server)
- *   2. localStorage override  -> set once, remembered across sessions
- *   3. same hostname, :8080   -> LAN default (npm start)
- */
-function resolveSignalingUrl() {
-    const toWebSocket = (raw) => {
-        if (raw === null || raw === undefined) return null; // .get() returns null when absent
-        const value = String(raw).trim();
-        if (!value) return null;
-        if (/^wss?:\/\//i.test(value)) return value;
-        if (/^https:\/\//i.test(value)) return 'wss://' + value.slice('https://'.length);
-        if (/^http:\/\//i.test(value)) return 'ws://' + value.slice('http://'.length);
-        return 'ws://' + value.replace(/^\/+/, '');
-    };
-
-    try {
-        const fromQuery = new URLSearchParams(window.location.search).get('server');
-        const resolved = toWebSocket(fromQuery);
-        if (resolved) return resolved;
-    } catch (e) { /* malformed URL, fall through */ }
-
-    try {
-        const resolved = toWebSocket(localStorage.getItem('ah_signaling_server'));
-        if (resolved) return resolved;
-    } catch (e) { /* storage blocked, fall through */ }
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // file:// has no hostname (double-clicked zip build) -> assume local server
-    const host = window.location.hostname || 'localhost';
-    return `${protocol}//${host}:8080`;
-}
 
 const Multiplayer = {
-    // Connection state
+    // Connection state (transport owned by PeerLink — see js/peerlink.js)
     isHost: false,
     isConnected: false,
     roomCode: null,
-    peerConnection: null,
-    dataChannel: null,
-    signalingWs: null,
     localClientId: null,
     remoteClientId: null,
     
@@ -64,25 +25,165 @@ const Multiplayer = {
     hostPeerOrder: null,  // host-only: join order for Player 2/3/4 labels
     _lastGameStateTs: 0,
     _lastInputSent: 0,
+    _roomRoster: null,    // client-side copy: [{id, name}] + hostName
+    _hostName: 'Host',
+
+    // ---- MP diagnostics: player-visible event/error log ----
+    // Every connection/sync/id problem lands here with a short code, so
+    // players can quote EXACTLY what happened (see the Feedback panel).
+    _mpLog: null,       // [{t, code, msg}]
+    _mpLogSeen: null,   // code -> last timestamp (throttle repeats)
+
+    // Short, stable, player-quotable peer id for logs (never the full
+    // PeerJS room id — those are long and contain the room code).
+    shortId(id) {
+        try {
+            const s = String(id == null ? '' : id);
+            if (!s) return '?';
+            if (s.indexOf('aquatic-havoc-') === 0) return '…' + s.slice(-4);
+            return s.length > 8 ? s.slice(0, 4) + '…' + s.slice(-4) : s;
+        } catch (e) { return '?'; }
+    },
+
+    // code: 'join-reject' | 'version-mismatch' | 'room-full' |
+    //   'name-taken' | 'peer-unavailable' | 'cloud-error' | 'host-left' |
+    //   'member-left' | 'no-snapshot' | 'bad-pid' | 'send-fail' |
+    //   'skin-fail' | 'sync-ok' | 'sync-restored' | 'info'
+    mpLog(code, msg) {
+        try {
+            if (!this._mpLog) this._mpLog = [];
+            const now = Date.now();
+            // Throttle identical repeats to 1 per 8s (input/snapshot loops).
+            const k = String(code) + '|' + String(msg || '').slice(0, 80);
+            if (!this._mpLogSeen) this._mpLogSeen = {};
+            if (this._mpLogSeen[k] && now - this._mpLogSeen[k] < 8000) return;
+            this._mpLogSeen[k] = now;
+            this._mpLog.push({ t: now, code: String(code || 'info'), msg: String(msg || '').slice(0, 220) });
+            if (this._mpLog.length > 60) this._mpLog.splice(0, this._mpLog.length - 60);
+            try {
+                if (typeof MultiplayerUI !== 'undefined' && MultiplayerUI.refreshMpLog) MultiplayerUI.refreshMpLog();
+            } catch (e) {}
+        } catch (e) {}
+    },
+
+    mpLogList() {
+        return Array.isArray(this._mpLog) ? this._mpLog.slice() : [];
+    },
+
+    mpLogText(max) {
+        try {
+            const list = this.mpLogList().slice(-(max || 12));
+            return list.map(e => {
+                const d = new Date(e.t);
+                const hh = String(d.getHours()).padStart(2, '0');
+                const mm = String(d.getMinutes()).padStart(2, '0');
+                const ss = String(d.getSeconds()).padStart(2, '0');
+                return `[${hh}:${mm}:${ss}] ${e.code}: ${e.msg}`;
+            }).join('\n');
+        } catch (e) { return ''; }
+    },
+
+    // ---- Peer-id guard: every id crossing the wire is validated ----
+    // Rejects junk placeholders ('peer', 'self', 'me', 'undefined', …)
+    // that used to file ghosts into hostPeers / remotePlayers.
+    _normPid(v, where) {
+        try {
+            if (typeof v !== 'string') {
+                if (v !== undefined && v !== null) this.mpLog('bad-pid', `non-string id from ${where || '?'}`);
+                return null;
+            }
+            const s = v.trim();
+            if (!s || s === 'peer' || s === 'self' || s === 'me' ||
+                s === 'undefined' || s === 'null' || s === 'unknown') {
+                this.mpLog('bad-pid', `placeholder id "${s}" from ${where || '?'}`);
+                return null;
+            }
+            return s;
+        } catch (e) { return null; }
+    },
+
+    // Roster for lobby + HUD: [{id, name, isYou, isHost}]. Host builds it
+    // from members; clients replay the last roster broadcast.
+    getRoster() {
+        try {
+            const out = [];
+            const me = this.localClientId || 'host';
+            if (this.isHost || !this.roomCode) {
+                let myName = 'Host';
+                try { myName = this.playerName() || 'Host'; } catch (e) {}
+                out.push({ id: me, name: myName, isYou: true, isHost: true });
+                const order = Array.isArray(this.hostPeerOrder) ? this.hostPeerOrder : Object.keys(this.hostPeers || {});
+                for (const pid of order) {
+                    let nm = 'Player-' + String(pid == null ? '?' : pid).slice(-4);
+                    try {
+                        if (typeof PeerLink !== 'undefined' && PeerLink.memberNames && PeerLink.memberNames[pid]) {
+                            nm = PeerLink.memberNames[pid];
+                        }
+                    } catch (e) {}
+                    const rp = (this.hostPeers || {})[pid];
+                    if (rp && rp.playerName) nm = rp.playerName;
+                    out.push({ id: pid, name: nm, isYou: false, isHost: false });
+                }
+            } else {
+                const roster = Array.isArray(this._roomRoster) ? this._roomRoster : [];
+                out.push({ id: 'host', name: this._hostName || 'Host', isYou: false, isHost: true });
+                for (const m of roster) {
+                    if (!m || !m.id) continue;
+                    out.push({ id: m.id, name: m.name || ('Player-' + String(m.id).slice(-4)), isYou: m.id === me, isHost: false });
+                }
+            }
+            return out;
+        } catch (e) { return []; }
+    },
+
+    // Room-wide boss lock: a boss ANYWHERE (host sim or a peer's hooked
+    // fish) blocks every other summon — one boss per room, period.
+    roomBossBusy() {
+        try {
+            if (!this.roomCode || !this.state) return null;
+            if (typeof Ritual !== 'undefined' && Ritual.bossAlive && Ritual.bossAlive(this.state)) {
+                return { by: 'the room' };
+            }
+            const hookedIsBoss = (f) => {
+                try {
+                    const h = f && f.mode === 'HOOKED' ? (f.hooked || (f.hookedFish && { species: f.hookedFish.species })) : null;
+                    const sp = h && h.species ? h.species : (h && h.id ? h : null);
+                    if (!sp) return false;
+                    if (sp.isBoss) return true;
+                    return (sp.rarity === 'boss');
+                } catch (e) { return false; }
+            };
+            if (this.isHost) {
+                for (const [pid, rp] of Object.entries(this.hostPeers || {})) {
+                    if (rp && hookedIsBoss(rp.fishing)) {
+                        return { by: (rp.playerName || rp.label || 'a crewmate') };
+                    }
+                }
+            } else {
+                for (const rp of Object.values(this.state.remotePlayers || {})) {
+                    if (rp && hookedIsBoss(rp.fishing)) {
+                        return { by: (rp.label || rp.playerName || 'a crewmate') };
+                    }
+                }
+            }
+            return null;
+        } catch (e) { return null; }
+    },
     
     // Healing system (removed — no heal feature)
     // Chat system (removed — no chat feature)
 
-    // Config
-    signalingUrl: 'ws://localhost:8080', // Will be overridden by current host
-    iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-        { urls: 'stun:global.stun.twilio.com:3478' }
-    ],
-    
-    // Connection retry config
-    maxReconnectAttempts: 3,
-    reconnectDelay: 2000,
-    _reconnectAttempts: 0,
+    // Config: PeerJS cloud (free broker) + public STUN. No self-hosted
+    // signaling server needed — rooms work from anywhere, itch.io included.
+    // Same-version gate: the room id embeds the version digits.
+    peerRoomPrefix() {
+        try {
+            const v = (typeof GAME_VERSION === 'string' && GAME_VERSION) ? GAME_VERSION : '1.2.5';
+            return 'aquatic-havoc-v' + String(v).replace(/[^0-9]/g, '') + '-';
+        } catch (e) {
+            return 'aquatic-havoc-v120-';
+        }
+    },
     
     // Callbacks
     onStatusChange: null,
@@ -90,6 +191,7 @@ const Multiplayer = {
     onPlayerLeft: null,
     onGameStart: null,
     onError: null,
+    onHostLeftCb: null,
 
     // Client outbox (bullets fired since last input send)
     _outboxBullets: null,
@@ -107,6 +209,135 @@ const Multiplayer = {
     isClient() {
         return !this.isHost && !!this.roomCode;
     },
+
+    // ---- Persistent MP identity: stable pid per browser + chosen name ----
+    // Rejoining with the same name just works: the pid never changes, the
+    // name is remembered and shown to the room every session.
+    PID_KEY: 'ah_mp_pid',
+    NAME_KEY: 'ah_mp_name',
+    // Per-TAB override (sessionStorage): two tabs on one origin (same
+    // localhost, two windows) share localStorage, so without this the
+    // 2nd tab's typing would OVERWRITE the host tab's name and every
+    // join would falsely report "Name taken". Session reads win.
+    TAB_NAME_KEY: 'ah_mp_name_tab',
+
+    ensureIdentity() {
+        try {
+            let pid = null;
+            try { pid = localStorage.getItem(this.PID_KEY); } catch (e) {}
+            if (!pid) {
+                pid = 'p' + Date.now().toString(36) + Math.floor(Math.random() * 0xffffff).toString(36);
+                try { localStorage.setItem(this.PID_KEY, pid); } catch (e) {}
+            }
+            return pid;
+        } catch (e) {
+            return 'p' + Math.floor(Math.random() * 0xffffffff).toString(36);
+        }
+    },
+
+    localPid() {
+        try {
+            if (!this._pid) this._pid = this.ensureIdentity();
+            return this._pid;
+        } catch (e) { return 'p0'; }
+    },
+
+    // Display name (1-12 chars, markup stripped). This TAB's choice
+    // wins (sessionStorage); localStorage is only the cross-session
+    // default prefilled into empty fields.
+    playerName() {
+        try {
+            const t = sessionStorage.getItem(this.TAB_NAME_KEY);
+            if (typeof t === 'string' && t.trim()) return t.trim().slice(0, 12);
+        } catch (e) {}
+        try {
+            const n = localStorage.getItem(this.NAME_KEY);
+            return (typeof n === 'string' && n.trim()) ? n.trim().slice(0, 12) : '';
+        } catch (e) { return ''; }
+    },
+
+    setPlayerName(name) {
+        try {
+            name = String(name || '').replace(/[<>&"']/g, '').trim().slice(0, 12);
+            if (!name) return '';
+            try { sessionStorage.setItem(this.TAB_NAME_KEY, name); } catch (e) {}
+            try { localStorage.setItem(this.NAME_KEY, name); } catch (e) {}
+            return name;
+        } catch (e) { return ''; }
+    },
+
+    // ---- MP profile: separate slots + saves, never SP files ----
+    // Entering a room snapshots the SP slot, switches to the MP namespace
+    // (own slots 1-3) and loads-or-freshens it. Leaving restores SP.
+    // CLIENT files are scoped per host server (hostPid): joining a
+    // DIFFERENT host loads a DIFFERENT character — old servers' inventory
+    // never leaks across. The HOST's expedition stays global (unscoped).
+    enterMPProfile(slot) {
+        try {
+            if (typeof SaveSystem === 'undefined' || !this.state) return false;
+            if (this.state._spSlotBackup == null) {
+                this.state._spSlotBackup = this.state.saveSlot || SaveSystem.getSlot();
+            }
+            try {
+                if (typeof SaveSystem.setMPScope === 'function') {
+                    SaveSystem.setMPScope(this.isHost ? null : (this.hostPid || null));
+                }
+            } catch (e) {}
+            slot = SaveSystem.MP_SLOTS.includes(slot) ? slot : SaveSystem.getMPSlot();
+            if (!SaveSystem.loadMP(this.state, slot)) {
+                SaveSystem.freshPlayer(this.state);
+                SaveSystem.saveMP(this.state, slot);
+                try { this.mpLog('info', this.isHost ? 'fresh expedition started' : `fresh character for server ${this.shortId(this.hostPid)}`); } catch (e) {}
+            } else if (!this.isHost) {
+                try { this.mpLog('info', `character restored for server ${this.shortId(this.hostPid)}`); } catch (e) {}
+            }
+            this.refreshMPHud();
+            return true;
+        } catch (e) { return false; }
+    },
+
+    exitMPProfile() {
+        try {
+            if (typeof SaveSystem === 'undefined' || !this.state) return false;
+            // Idempotent: without a backed-up SP slot we are not on a
+            // profile (already exited) — never snapshot SP state into MP.
+            if (this.state._spSlotBackup == null) return false;
+            // Persist the MP character first, then go home to single player.
+            try { SaveSystem.saveMP(this.state); } catch (e) {}
+            // Scope ends with the room: the next room re-scopes on enter.
+            try { if (typeof SaveSystem.setMPScope === 'function') SaveSystem.setMPScope(null); } catch (e) {}
+            this.hostPid = null;
+            const backup = (this.state._spSlotBackup != null)
+                ? this.state._spSlotBackup
+                : (this.state.saveSlot || SaveSystem.getSlot());
+            this.state._spSlotBackup = null;
+            this.state.mpSaveSlot = null;
+            SaveSystem.load(this.state, backup);
+            this.refreshMPHud();
+            return true;
+        } catch (e) { return false; }
+    },
+
+    refreshMPHud() {
+        try {
+            if (typeof Player !== 'undefined' && this.state) {
+                Player.refreshHUD(this.state);
+                Player.refreshWeaponHUD(this.state);
+            }
+        } catch (e) {}
+        try {
+            if (typeof UI !== 'undefined' && this.state) {
+                UI.renderWeaponToolbar(this.state);
+                UI.refreshLuckDisplay(this.state);
+            }
+        } catch (e) {}
+        try {
+            if (typeof Casino !== 'undefined' && this.state) {
+                Casino.tokens = this.state.player.casinoTokens || 0;
+                Casino.updateTokenDisplay();
+            }
+        } catch (e) {}
+    },
     
     // Initialize multiplayer system
     init(state, callbacks = {}) {
@@ -116,10 +347,17 @@ const Multiplayer = {
         this.onPlayerLeft = callbacks.onPlayerLeft || (() => {});
         this.onGameStart = callbacks.onGameStart || (() => {});
         this.onError = callbacks.onError || ((msg) => console.error(msg));
-        
-        // Resolve the signaling server URL
-        this.signalingUrl = resolveSignalingUrl();
+        this.onHostLeftCb = callbacks.onHostLeft || null;
+
         this._installFxTap();
+        // Same text/colors everywhere: mirror catch popups + boss banners,
+        // and share custom art so remote renders match local renders.
+        try {
+            if (typeof PeerAnnounce !== 'undefined') PeerAnnounce.installTap();
+        } catch (e) {}
+        try {
+            if (typeof PeerSkins !== 'undefined') PeerSkins.installUploadTap();
+        } catch (e) {}
         this.updateStatus('Ready to play multiplayer');
     },
 
@@ -243,527 +481,406 @@ const Multiplayer = {
         } catch (e) {}
     },
     
+    // ---- PeerJS transport (v1.2.0+): online P2P via the PeerJS cloud ----
+    // Room identity: PeerLink claims `prefix+code` (see js/peerlink.js).
+    // Same-version gate is enforced twice: the peer id itself embeds the
+    // version digits, and the hello handshake carries an explicit version.
+    _wirePeerLink() {
+        if (this._peerWired || typeof PeerLink === 'undefined') return;
+        this._peerWired = true;
+        PeerLink.onMessage = (msg, fromId) => this.handlePeerMessage(msg, fromId);
+        PeerLink.onMemberJoin = (peerId) => {
+            this.remoteClientId = this.remoteClientId || peerId;
+            this._lobbyCount = PeerLink.memberCount();
+            this.onPlayerJoined(peerId);
+            // New member needs the world NOW (targeted reply, not the
+            // next broadcast tick): unicast a full snapshot so the
+            // newcomer sees the host on the very first packet.
+            try {
+                if (this.isHost && this.isConnected) this.sendStateTo(peerId);
+            } catch (e) {}
+        };
+        PeerLink.onMemberLeave = (peerId) => {
+            try { this.mpLog('member-left', `${this.shortId(peerId)} left`); } catch (e) {}
+            if (this.hostPeers) delete this.hostPeers[peerId];
+            if (this.hostPeerOrder) this.hostPeerOrder = this.hostPeerOrder.filter(id => id !== peerId);
+            if (this.state) {
+                if (this.state.remotePlayers) delete this.state.remotePlayers[peerId];
+                if (this.state.remotePlayer && this.state.remotePlayer._pid === peerId) this.state.remotePlayer = null;
+            }
+            if (peerId === this.remoteClientId) this.remoteClientId = null;
+            this._lobbyCount = PeerLink.memberCount();
+            this.onPlayerLeft(peerId);
+        };
+        PeerLink.onHostLeft = () => {
+            this.updateStatus('Host left the game');
+            try { this.mpLog('host-left', 'host connection closed'); } catch (e) {}
+            this.cleanup();
+            try { if (this.onHostLeftCb) this.onHostLeftCb(); } catch (e) {}
+        };
+        try {
+            if (typeof PeerSkins !== 'undefined') {
+                PeerSkins.onProgress = () => {
+                    try {
+                        if (typeof MultiplayerUI !== 'undefined' && MultiplayerUI.updateHUD) MultiplayerUI.updateHUD();
+                    } catch (e) {}
+                };
+            }
+        } catch (e) {}
+    },
+
     // Create a new room (host)
     async createRoom() {
         try {
-            this.updateStatus('Connecting to signaling server...');
-            await this.connectSignaling();
-            
-            return new Promise((resolve, reject) => {
-                this._createRoomResolve = resolve;
-                this._createRoomReject = reject;
-                
-                const timeout = setTimeout(() => {
-                    this._createRoomResolve = null;
-                    this._createRoomReject = null;
-                    reject(new Error('Room creation timeout'));
-                }, 15000);
-                
-                const handler = (msg) => {
-                    if (msg.type === 'roomCreated') {
-                        clearTimeout(timeout);
-                        this.signalingWs.removeEventListener('message', handler);
-                    } else if (msg.type === 'error') {
-                        clearTimeout(timeout);
-                        this.signalingWs.removeEventListener('message', handler);
-                    }
-                };
-                
-                this.signalingWs.addEventListener('message', handler);
-                this.signalingWs.send(JSON.stringify({ type: 'createRoom' }));
-            });
+            this._wirePeerLink();
+            this.updateStatus('Claiming room on PeerJS cloud...');
+            const code = await PeerLink.hostRoom();
+            this.isHost = true;
+            this.roomCode = code;
+            this.localClientId = PeerLink.myId;
+            // Freeze THIS tab's pilot name for the room roster: other tabs
+            // on the same origin share localStorage, so the live read must
+            // never come from there (see TAB_NAME_KEY).
+            try { this._hostPilot = this.playerName() || 'Host'; } catch (e) { this._hostPilot = 'Host'; }
+            // The host's own expedition file stays GLOBAL (unscoped) — the
+            // host IS the server. Clients scope per hostPid (see joinRoom).
+            try {
+                this.hostPid = this.localPid() || null;
+                if (typeof SaveSystem !== 'undefined') SaveSystem.setMPScope(null);
+            } catch (e) {}
+            this._lobbyCount = 1;
+            this.hostPeers = {};
+            this.hostPeerOrder = [];
+            this.isConnected = true;
+            this.updateStatus(`Room created: ${code} (Share this code)`);
+            this.mpLog('info', `hosting room ${code} as ${this.shortId(this.localClientId)}`);
+            return code;
         } catch (e) {
             this.updateStatus(`Failed to create room: ${e.message}`);
+            this.mpLog('send-fail', `create room failed: ${e.message}`);
             this.onError(e.message);
             throw e;
         }
     },
-    
-    // Join an existing room
+
+    // Join an existing room (client)
     async joinRoom(roomCode) {
         try {
-            this.updateStatus('Connecting to signaling server...');
-            await this.connectSignaling();
-            
-            return new Promise((resolve, reject) => {
-                this._joinRoomResolve = resolve;
-                this._joinRoomReject = reject;
-                
-                const timeout = setTimeout(() => {
-                    this._joinRoomResolve = null;
-                    this._joinRoomReject = null;
-                    reject(new Error('Join timeout'));
-                }, 15000);
-                
-                const handler = (msg) => {
-                    if (msg.type === 'roomJoined') {
-                        clearTimeout(timeout);
-                        this.signalingWs.removeEventListener('message', handler);
-                    } else if (msg.type === 'error') {
-                        clearTimeout(timeout);
-                        this.signalingWs.removeEventListener('message', handler);
-                    } else if (msg.type === 'playerJoined' && this.isHost) {
-                        this.remoteClientId = msg.playerId;
-                        this.onPlayerJoined(msg.playerId);
-                    }
-                };
-                
-                this.signalingWs.addEventListener('message', handler);
-                this.signalingWs.send(JSON.stringify({ type: 'joinRoom', roomCode: roomCode.toUpperCase() }));
-            });
+            this._wirePeerLink();
+            const code = String(roomCode || '').toUpperCase().trim();
+            if (!code || code.length !== 4) throw new Error('Enter the 4-character room code.');
+            this.updateStatus('Connecting to host via PeerJS cloud...');
+            const welcome = await PeerLink.joinRoom(code);
+            this.isHost = false;
+            this.roomCode = code;
+            this.localClientId = PeerLink.myId;
+            this.remoteClientId = 'host';
+            this._lobbyCount = (welcome && welcome.count) || 2;
+            if (welcome) {
+                if (Array.isArray(welcome.roster)) this._roomRoster = welcome.roster;
+                if (welcome.hostName) this._hostName = welcome.hostName;
+                // Server identity for per-host character scoping: a
+                // DIFFERENT host's room loads a DIFFERENT character file,
+                // never the previous server's inventory.
+                this.hostPid = (welcome.hostPid && String(welcome.hostPid)) || ('room:' + code);
+            } else {
+                this.hostPid = 'room:' + code;
+            }
+            this.isConnected = true;
+            this.updateStatus(`Joined room: ${code}`);
+            this.mpLog('info', `joined room ${code} as ${this.shortId(this.localClientId)} (server ${this.shortId(this.hostPid)})`);
         } catch (e) {
             this.updateStatus(`Failed to join: ${e.message}`);
+            const m = String((e && e.message) || '');
+            const code = /Name taken/i.test(m) ? 'name-taken'
+                : /full/i.test(m) ? 'room-full'
+                : /Version mismatch/i.test(m) ? 'version-mismatch'
+                : /not found/i.test(m) ? 'peer-unavailable' : 'join-reject';
+            this.mpLog(code, m.slice(0, 160));
             this.onError(e.message);
             throw e;
         }
     },
-    
-    // Connect to signaling server
-    // On hosted pages (itch.io) there is no LAN server to auto-find, so
-    // failures explain where to paste a public wss:// URL.
-    _signalHelp() {
+
+    // Loading-screen helper: true once the first host snapshot landed.
+    hasEverSynced() {
+        return !!this._hasEverSynced;
+    },
+
+    // Sync counters: prove the host->client direction is alive.
+    // Host: sent snapshots. Client: received snapshots + age of the last.
+    mpStats() {
         try {
-            const host = window.location.hostname || '';
-            const onItch = /itch(\.io|zone)$/.test(host) || /itch\.io/.test(host);
-            if (onItch || window.location.protocol === 'https:' && (host && host !== 'localhost' && host !== '127.0.0.1')) {
-                return 'On itch.io you need a PUBLIC signaling server: deploy server.js (free on Render), then paste its wss:// URL in Multiplayer menu → SIGNALING SERVER → Save. Same URL on both PCs.';
-            }
-        } catch (e) {}
-        return 'Make sure server.js is running (npm start), both PCs are on the same Wi-Fi, and the port 8080 is allowed through the firewall.';
+            const last = this._lastSyncAt || 0;
+            return {
+                sent: this._sentStates || 0,
+                recv: this._recvStates || 0,
+                lastSyncAgo: last ? Math.round((Date.now() - last) / 1000) : -1,
+            };
+        } catch (e) { return { sent: 0, recv: 0, lastSyncAgo: -1 }; }
     },
 
-    connectSignaling() {
-        return new Promise((resolve, reject) => {
-            let url = this.signalingUrl;
-            // Never try ws(s)://<itch-host>:8080 — browsers block it and it
-            // can never work (no server runs on itch's CDN).
-            try {
-                const host = window.location.hostname || '';
-                const u = new URL(url);
-                if (host && u.hostname === host && !/localhost|127\.0\.0\.1/.test(host)) {
-                    reject(new Error(this._signalHelp()));
-                    return;
-                }
-            } catch (e) {}
-            this.signalingWs = new WebSocket(url);
-            let resolved = false;
-            
-            this.signalingWs.onopen = () => {
-                console.log('Connected to signaling server');
-                resolved = true;
-                resolve();
-            };
-            
-            this.signalingWs.onerror = (err) => {
-                console.error('Signaling connection error:', err);
-                if (!resolved) {
-                    resolved = true;
-                    reject(new Error('Cannot connect to signaling server. ' + this._signalHelp()));
-                }
-            };
-            
-            this.signalingWs.onclose = (event) => {
-                console.log('Disconnected from signaling server', event.code, event.reason);
-                if (!resolved) {
-                    resolved = true;
-                    reject(new Error('Signaling connection closed before handshake. ' + this._signalHelp()));
-                } else {
-                    this.handleDisconnect();
-                }
-            };
-            
-            this.signalingWs.onmessage = (event) => {
-                try {
-                    const msg = JSON.parse(event.data);
-                    this.handleSignalingMessage(msg);
-                } catch (e) {
-                    console.error('Failed to parse signaling message:', e);
-                }
-            };
-            
-            // Connection timeout
-            setTimeout(() => {
-                if (!resolved && this.signalingWs && this.signalingWs.readyState !== WebSocket.OPEN) {
-                    resolved = true;
-                    this.signalingWs.close();
-                    reject(new Error('Signaling connection timeout (' + url + '). ' + this._signalHelp()));
-                }
-            }, 10000);
-        });
+    // True when the host link has gone quiet mid-game (client only).
+    // Callers freeze INCOMING danger (not the client's own actions) so a
+    // tabbed-out host can't kill you with frozen bullets/enemies.
+    syncStale() {
+        try {
+            if (!this.isClient() || !this.isConnected || !this._hasEverSynced) return false;
+            return (Date.now() - (this._lastSyncAt || 0)) > 8000;
+        } catch (e) { return false; }
     },
-    
-    // Handle incoming signaling messages
-    handleSignalingMessage(msg) {
-        switch (msg.type) {
-            case 'welcome':
-                this.signalingWs.clientId = msg.clientId;
-                break;
-                
-            case 'roomCreated':
-                // Handle room creation response
-                if (msg.roomCode || msg.code) {
-                    this.isHost = true;
-                    this.roomCode = msg.roomCode || msg.code;
-                    this.localClientId = this.signalingWs.clientId;
-                    this._lobbyCount = msg.count || 1;
-                    this.hostPeers = {};
-                    this.hostPeerOrder = [];
-                    this.setupPeerConnection(true);
-                    this.updateStatus(`Room created: ${this.roomCode} (Share this code)`);
-                    if (this._createRoomResolve) {
-                        this._createRoomResolve(this.roomCode);
-                        this._createRoomResolve = null;
-                    }
-                }
-                break;
-                
-            case 'roomJoined':
-                // Handle join room response
-                if (msg.roomCode || msg.code) {
-                    this.isHost = false;
-                    this.roomCode = msg.roomCode || msg.code;
-                    this.localClientId = this.signalingWs.clientId;
-                    this.remoteClientId = msg.hostId;
-                    this._lobbyCount = msg.count || 2;
-                    this.setupPeerConnection(false);
-                    this.updateStatus(`Joined room: ${this.roomCode}`);
-                    if (this._joinRoomResolve) {
-                        this._joinRoomResolve();
-                        this._joinRoomResolve = null;
-                    }
-                }
-                break;
 
-            case 'playerJoined':
+    // Single entry point for every PeerLink message.
+    // NOTE (v1.2.3 fix): game-protocol sends use `{type: ...}` while
+    // peerlink-internal ones use `{t: ...}` — accept BOTH here, otherwise
+    // every gameState/input/start message is silently dropped and clients
+    // never enter the game.
+    handlePeerMessage(msg, fromId) {
+        if (!msg) return;
+        const kind = (typeof msg.t === 'string') ? msg.t
+            : (typeof msg.type === 'string') ? msg.type : null;
+        if (!kind) return;
+        switch (kind) {
+            case 'lobby': {
+                const was = this._lobbyCount || 1;
                 if (msg.count) this._lobbyCount = msg.count;
-                else this._lobbyCount = Math.min(4, this._lobbyCount + 1);
-                if (this.isHost) {
-                    this.remoteClientId = this.remoteClientId || msg.playerId;
-                    this.onPlayerJoined(msg.playerId);
-                    // Single WebRTC attempt for the first peer only — extra
-                    // players sync via the signaling relay (no mesh needed)
-                    if (this._lobbyCount <= 2) {
-                        setTimeout(() => this.createOffer(), 300);
-                    }
-                } else {
-                    this.onPlayerJoined(msg.playerId);
-                }
-                break;
-                
-            case 'playerLeft':
-                if (msg.count) this._lobbyCount = msg.count;
-                else this._lobbyCount = Math.max(1, this._lobbyCount - 1);
-                if (this.isHost && this.hostPeers && msg.playerId) {
-                    delete this.hostPeers[msg.playerId];
-                    if (this.hostPeerOrder) this.hostPeerOrder = this.hostPeerOrder.filter(id => id !== msg.playerId);
-                    if (this.state) {
-                        if (this.state.remotePlayers) delete this.state.remotePlayers[msg.playerId];
-                        if (this.state.remotePlayer && this.state.remotePlayer._pid === msg.playerId) this.state.remotePlayer = null;
-                    }
-                }
-                if (msg.playerId === this.remoteClientId) {
-                    this.handleRemoteDisconnect();
-                }
-                this.onPlayerLeft(msg.playerId);
-                break;
-                
-            case 'hostLeft':
-                this.updateStatus('Host left the game');
-                this.cleanup();
-                break;
-                
-            case 'signal':
-                // Server relayed signaling (offer/answer/candidate wrapped)
-                if (msg.payload) {
-                    const payload = msg.payload;
-                    if (payload.type === 'offer') {
-                        this.handleOffer(msg.from, payload.offer);
-                    } else if (payload.type === 'answer') {
-                        this.handleAnswer(payload.answer);
-                    } else if (payload.type === 'candidate') {
-                        this.handleCandidate(msg.from, payload.candidate);
-                    }
-                }
-                break;
-                
-            case 'offer':
-                this.handleOffer(msg.from, msg.offer);
-                break;
-                
-            case 'answer':
-                this.handleAnswer(msg.answer);
-                break;
-                
-            case 'candidate':
-                this.handleCandidate(msg.from, msg.candidate);
-                break;
-                
-            case 'gameState':
-                this.handleGameState(msg.state);
-                break;
-                
-            case 'playerInput':
-                this.handlePlayerInput(msg.playerId, msg.input);
-                break;
-                
-            case 'gameStart':
-                // Host signaled game start
+                if (Array.isArray(msg.roster)) this._roomRoster = msg.roster;
+                if (msg.hostName) this._hostName = msg.hostName;
                 if (!this.isHost) {
-                    this.onGameStart();
+                    if ((this._lobbyCount || 1) > was) this.onPlayerJoined();
+                    else if ((this._lobbyCount || 1) < was) this.onPlayerLeft();
+                    else if (typeof MultiplayerUI !== 'undefined' && MultiplayerUI.refreshRoster) {
+                        try { MultiplayerUI.refreshRoster(); } catch (e) {}
+                    }
                 }
                 break;
-
-            case 'gameStartAck':
-                // Client confirmed it entered the game
-                if (this.isHost && this._startAckResolve) {
-                    this._startAckResolve();
-                }
-                break;
-
-            case 'syncRequest':
-                // Client wants a full snapshot — host only
-                if (this.isHost) {
-                    this.sendLocalState();
-                }
-                break;
-                
-            case 'error':
-                this.updateStatus(`Server error: ${msg.message}`, 'rose');
-                if (this._createRoomReject) {
-                    this._createRoomReject(new Error(msg.message));
-                    this._createRoomReject = null;
-                }
-                if (this._joinRoomReject) {
-                    this._joinRoomReject(new Error(msg.message));
-                    this._joinRoomReject = null;
-                }
-                break;
-        }
-    },
-    
-    // Setup WebRTC peer connection
-    setupPeerConnection(isInitiator) {
-        this.peerConnection = new RTCPeerConnection({ 
-            iceServers: this.iceServers,
-            iceCandidatePoolSize: 10
-        });
-        
-        this.peerConnection.onicecandidate = (event) => {
-            if (event.candidate && this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
-                this.signalingWs.send(JSON.stringify({
-                    type: 'candidate',
-                    candidate: event.candidate
-                }));
             }
-        };
-        
-        this.peerConnection.oniceconnectionstatechange = () => {
-            const state = this.peerConnection.iceConnectionState;
-            console.log('ICE connection state:', state);
-            
-            if (state === 'failed' || state === 'disconnected') {
-                this.handleConnectionFailure();
-            } else if (state === 'connected' || state === 'completed') {
-                this._reconnectAttempts = 0; // Reset on successful connection
-            }
-        };
-        
-        this.peerConnection.onconnectionstatechange = () => {
-            const state = this.peerConnection.connectionState;
-            console.log('Connection state:', state);
-            
-            if (state === 'connected') {
-                this.isConnected = true;
-                this.updateStatus('Connected! Game synchronized');
-                this.startStateSync();
-            } else if (state === 'disconnected' || state === 'failed') {
-                this.isConnected = false;
-                this.updateStatus('Connection lost. Reconnecting...');
-                this.handleConnectionFailure();
-            }
-        };
-        
-        // Data channel setup
-        if (isInitiator) {
-            this.dataChannel = this.peerConnection.createDataChannel('game', { 
-                ordered: true,
-                maxRetransmits: 0 // Unreliable for lower latency
-            });
-            this.setupDataChannel();
-        } else {
-            this.peerConnection.ondatachannel = (event) => {
-                this.dataChannel = event.channel;
-                this.setupDataChannel();
-            };
-        }
-    },
-    
-    handleConnectionFailure() {
-        if (this._reconnectAttempts < this.maxReconnectAttempts) {
-            this._reconnectAttempts++;
-            this.updateStatus(`Connection failed. Retry ${this._reconnectAttempts}/${this.maxReconnectAttempts}...`);
-            
-            setTimeout(() => {
-                if (this.isHost) {
-                    this.createOffer();
-                }
-            }, this.reconnectDelay * this._reconnectAttempts);
-        } else {
-            this.updateStatus('Connection failed. Max retries reached.', 'rose');
-            this.onError('WebRTC connection failed after multiple retries');
-            this.cleanup();
-        }
-    },
-    
-    // Setup data channel handlers
-    setupDataChannel() {
-        this.dataChannel.onopen = () => {
-            console.log('Data channel open');
-            this.sendLocalState(); // Send initial state
-        };
-        
-        this.dataChannel.onclose = () => {
-            console.log('Data channel closed');
-            this.isConnected = false;
-        };
-        
-        this.dataChannel.onerror = (err) => {
-            console.error('Data channel error:', err);
-        };
-        
-        this.dataChannel.onmessage = (event) => {
-            const msg = JSON.parse(event.data);
-            this.handleDataChannelMessage(msg);
-        };
-    },
-    
-    // Handle data channel messages (direct peer-to-peer)
-    handleDataChannelMessage(msg) {
-        switch (msg.type) {
             case 'gameState':
                 this.handleGameState(msg.state);
                 break;
             case 'playerInput':
-                this.handlePlayerInput((msg.input && msg.input._from) || this.remoteClientId, msg.input);
+                this.handlePlayerInput(fromId, msg.input);
                 break;
             case 'lootDelete':
-                if (this.isHost) this.handleLootDelete((msg.input && msg.input._from) || msg.from || this.remoteClientId, msg.lootId);
+                if (this.isHost) this.handleLootDelete(fromId, msg.lootId);
                 break;
             case 'beachClaim':
-                if (this.isHost) this.handleBeachClaim((msg.input && msg.input._from) || msg.from || this.remoteClientId, msg.fish);
+                if (this.isHost) this.handleBeachClaim(fromId, msg.fish);
                 break;
             case 'syncRequest':
-                if (this.isHost) this.sendLocalState();
+                // Targeted reply (not broadcast): the requester alone gets
+                // a fresh snapshot — the classic host->client async answer.
+                if (this.isHost) this.sendStateTo(fromId);
                 break;
             case 'gameStart':
-                if (this.onGameStart) this.onGameStart();
+                if (!this.isHost && this.onGameStart) this.onGameStart();
                 break;
             case 'gameStartAck':
                 if (this.isHost && this._startAckResolve) this._startAckResolve();
                 break;
+            case 'announce':
+                // Same text/colors for everyone: relay, then show locally.
+                if (this.isHost) PeerLink.relay(msg, fromId);
+                try {
+                    if (typeof PeerAnnounce !== 'undefined' && this.state) PeerAnnounce.apply(msg, this.state);
+                } catch (e) {}
+                break;
+            case 'skin-manifest':
+                if (this.isHost) PeerLink.relay(msg, fromId);
+                try {
+                    if (typeof PeerSkins !== 'undefined') PeerSkins.onManifest(msg);
+                } catch (e) {}
+                break;
+            case 'skin-request':
+                // Directed at one owner: forward, or answer when it's us.
+                if (this.isHost && msg.to && msg.to !== this.localClientId) {
+                    PeerLink.relay(msg, fromId);
+                } else {
+                    try {
+                        if (typeof PeerSkins !== 'undefined') PeerSkins.onRequest(msg);
+                    } catch (e) {}
+                }
+                break;
+            case 'skin-chunk':
+                if (this.isHost && msg.to && msg.to !== this.localClientId) {
+                    PeerLink.relay(msg, fromId); // passing through
+                } else {
+                    try {
+                        if (typeof PeerSkins !== 'undefined') PeerSkins.onChunk(msg);
+                    } catch (e) {}
+                    // Live pushes (no target) fan out to the rest of the room.
+                    if (this.isHost && !msg.to) PeerLink.relay(msg, fromId);
+                }
+                break;
         }
     },
     
-    // Create WebRTC offer (host)
-    async createOffer() {
-        try {
-            const offer = await this.peerConnection.createOffer();
-            await this.peerConnection.setLocalDescription(offer);
-            
-            if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
-                this.signalingWs.send(JSON.stringify({
-                    type: 'offer',
-                    offer: offer
-                }));
-            }
-        } catch (e) {
-            console.error('Error creating offer:', e);
-        }
-    },
+
     
-    // Handle incoming offer (client)
-    async handleOffer(fromId, offer) {
-        try {
-            this.remoteClientId = fromId;
-            // Ensure peer connection exists
-            if (!this.peerConnection) {
-                console.log('Peer connection not ready, creating...');
-                this.setupPeerConnection(false);
-            }
-            await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-            this._processPendingCandidates();
-            
-            const answer = await this.peerConnection.createAnswer();
-            await this.peerConnection.setLocalDescription(answer);
-            
-            if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
-                this.signalingWs.send(JSON.stringify({
-                    type: 'answer',
-                    answer: answer
-                }));
-            }
-        } catch (e) {
-            console.error('Error handling offer:', e);
-        }
-    },
-    
-    // Handle answer (host)
-    async handleAnswer(answer) {
-        try {
-            await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-            this._processPendingCandidates();
-        } catch (e) {
-            console.error('Error handling answer:', e);
-        }
-    },
-    
-    // Handle ICE candidate
-    async handleCandidate(fromId, candidate) {
-        try {
-            if (this.peerConnection && this.peerConnection.remoteDescription) {
-                await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-            } else {
-                // Queue candidate for later
-                if (!this._pendingCandidates) this._pendingCandidates = [];
-                this._pendingCandidates.push(candidate);
-            }
-        } catch (e) {
-            console.error('Error adding ICE candidate:', e);
-        }
-    },
-    
-    // Process queued ICE candidates
-    _processPendingCandidates() {
-        if (this._pendingCandidates && this._pendingCandidates.length > 0 && this.peerConnection && this.peerConnection.remoteDescription) {
-            this._pendingCandidates.forEach(candidate => {
-                this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => console.error('Error adding queued ICE candidate:', e));
-            });
-            this._pendingCandidates = [];
-        }
-    },
-    
-    // Send local game state to peer (host -> client).
-    // Prefers the WebRTC data channel, falls back to the signaling
-    // server (throttled) so sync works even without WebRTC.
+    // Send local game state to peer (host -> client) over reliable
+    // PeerJS broadcast (star topology, ~12Hz).
     sendLocalState() {
+        // Bufferbloat guard (HaxBall #4): while the path is down, tick at
+        // ~2.5Hz instead of 12Hz so we stop piling a dead channel.
+        try {
+            if (this._bcastSkipUntil && Date.now() < this._bcastSkipUntil) return;
+        } catch (e) {}
+        let gameState = this._buildGameState();
+        if (!gameState) return;
+        gameState = this._wireSafe(gameState);
+        if (!gameState) return;
+        // One reliable PeerJS broadcast reaches every member (star topology).
+        let reached = 0;
+        try {
+            if (typeof PeerLink !== 'undefined') reached = PeerLink.broadcast({ type: 'gameState', state: gameState }) || 0;
+        } catch (e) { reached = 0; }
+        if (!reached) {
+            // Audible instead of silent: broadcast hitting 0 members means
+            // every host->client send is failing (conns closed/not open).
+            try { this.mpLog('send-fail', 'broadcast reached 0 members — host→client path down?'); } catch (e) {}
+            try { this._bcastSkipUntil = Date.now() + 400; } catch (e) {}
+        } else {
+            try { this._bcastSkipUntil = 0; } catch (e) {}
+        }
+
+        this.lastSentState = Date.now();
+        this._sentStates = (this._sentStates || 0) + 1;
+    },
+
+    // Wire-safe serialize: JSON round-trip drops undefined/functions and
+    // maps Infinity->null. PeerJS BinaryPack chokes on some of those and
+    // throws INSIDE conn.send — the deterministic "send threw with conn
+    // open" failure. Falls back to a minimal snapshot (host body + clock)
+    // so the client at least SEES the host even when the full shape dies.
+    _wireSafe(gameState) {
+        try {
+            return JSON.parse(JSON.stringify(gameState));
+        } catch (e) {
+            try { this.mpLog('send-fail', 'snapshot not JSON-safe — downgraded to minimal'); } catch (ee) {}
+            return this._minimalState();
+        }
+    },
+
+    // Smallest useful snapshot: host body + shared clock. ~1KB, proves
+    // the channel itself when the full snapshot won't go through.
+    _minimalState() {
+        try {
+            if (!this.state || !this.state.player) return null;
+            const p = this.state.player;
+            return {
+                players: [this._packPlayer(p, this.localClientId || 'host', this.playerName() || 'Host', this.state.fishing)],
+                world: this._packWorld(),
+                timestamp: Date.now(),
+                minimal: true,
+            };
+        } catch (e) { return null; }
+    },
+
+    // Shared clock block (broadcast + minimal use the same shape).
+    _packWorld() {
+        try {
+            const w = this.state.world;
+            if (!w) return null;
+            return {
+                hour: Math.round((w.hour || 9) * 100) / 100,
+                day: w.day || 1,
+                weather: w.weather || 'clear',
+                weatherT: Math.round(w.weatherT || 90)
+            };
+        } catch (e) { return null; }
+    },
+
+    // Targeted reply: full snapshot to ONE newcomer (unicast). Called the
+    // moment a member joins (or asks via syncRequest), so a client sees
+    // the host on the very first packet instead of waiting for the next
+    // broadcast tick.
+    sendStateTo(peerId) {
+        peerId = this._normPid(peerId, 'sendStateTo');
+        if (!peerId || !this.isHost) return false;
+        let gameState = this._buildGameState();
+        if (!gameState) return false;
+        gameState = this._wireSafe(gameState);
+        if (!gameState) return false;
+        const wasMinimal = !!gameState.minimal;
+        let detail = '';
+        try {
+            const c = (typeof PeerLink !== 'undefined' && PeerLink.conns) ? PeerLink.conns[peerId] : null;
+            if (!c) detail = 'no conn entry (peer gone?)';
+            else if (!c.open) {
+                detail = 'conn not open yet — queued for open';
+                // The hello arrived before 'open' fired: flush the moment
+                // the channel is ready instead of dropping the snapshot.
+                try { c.once('open', () => { try { this.sendStateTo(peerId); } catch (e) {} }); } catch (e) {}
+                try { this.mpLog('send-fail', `unicast to ${this.shortId(peerId)}: ${detail}`); } catch (e) {}
+                return false;
+            }
+        } catch (e) {}
+        let ok = false;
+        try {
+            if (typeof PeerLink !== 'undefined') ok = !!PeerLink.sendTo(peerId, { type: 'gameState', state: gameState });
+        } catch (e) { ok = false; }
+        if (!ok) {
+            // Real reason, not a guess: PeerLink records the throw text.
+            try {
+                if (typeof PeerLink !== 'undefined' && PeerLink.lastSendError) {
+                    const le = PeerLink.lastSendError();
+                    if (le) detail = le;
+                }
+            } catch (e) {}
+            if (!detail) {
+                try {
+                    const c2 = (typeof PeerLink !== 'undefined' && PeerLink.conns) ? PeerLink.conns[peerId] : null;
+                    detail = !c2 ? 'no conn entry' : (!c2.open ? 'conn not open' : 'send threw (no detail)');
+                } catch (e) { detail = 'send failed'; }
+            }
+            // Shape-vs-channel test: if the FULL snapshot won't go, ONE
+            // minimal retry tells us whether the channel itself is alive.
+            if (!wasMinimal) {
+                try {
+                    const m = this._minimalState();
+                    if (m && typeof PeerLink !== 'undefined' && PeerLink.sendTo(peerId, { type: 'gameState', state: m })) {
+                        try { this.mpLog('send-fail', `full snapshot rejected (${detail}) — MINIMAL delivered, channel alive`); } catch (e) {}
+                        this._sentStates = (this._sentStates || 0) + 1;
+                        return true;
+                    }
+                } catch (e) {}
+            }
+            try { this.mpLog('send-fail', `unicast snapshot to ${this.shortId(peerId)} failed: ${detail}`); } catch (e) {}
+        } else {
+            this._sentStates = (this._sentStates || 0) + 1;
+        }
+        return ok;
+    },
+
+    // Snapshot builder shared by broadcast + unicast (null while the sim
+    // is not ready yet — e.g. host still sitting in the menu).
+    _buildGameState() {
+        if (!this.state || !this.state.player || !this.state.fishing) return null;
         const p = this.state.player;
         const f = this.state.fishing;
         const R1 = (v) => Math.round((v || 0) * 10) / 10;
         const RI = (v) => Math.round(v || 0);
 
-        // Drop peers silent for >12s (left without a clean leaveRoom).
+        // Drop peers silent for >30s (left without a clean leaveRoom).
         // Live peers send input at ~15Hz, so this only kills real ghosts.
+        // Skipped while THIS tab is hidden: a background host can't judge
+        // liveness (its timers are throttled) — pruning resumes on return.
+        // (30s, not 12s: hidden-tab heartbeats can legally gap that long.)
         try {
+            let hidden = false;
+            try { hidden = !!(typeof document !== 'undefined' && document.hidden); } catch (e) {}
+            if (!hidden) {
             const now = Date.now();
             for (const pid of Object.keys(this.hostPeers || {})) {
                 const rp = this.hostPeers[pid];
-                if (!rp || !rp._lastUpdate || now - rp._lastUpdate > 12000) {
+                if (!rp || !rp._lastUpdate || now - rp._lastUpdate > 30000) {
                     delete this.hostPeers[pid];
                     if (Array.isArray(this.hostPeerOrder)) {
                         this.hostPeerOrder = this.hostPeerOrder.filter(id => id !== pid);
                     }
                     if (this.state && this.state.remotePlayers) delete this.state.remotePlayers[pid];
                 }
+            }
             }
         } catch (e) {}
         // Lobby snapshots: host + every known peer (clients render all)
@@ -772,7 +889,7 @@ const Multiplayer = {
                 p.aim = Math.atan2(this.state.mouse.worldY - p.y, this.state.mouse.worldX - p.x);
             }
         } catch (e) {}
-        const players = [this._packPlayer(p, this.localClientId || 'host', 'Host', this.state.fishing)];
+        const players = [this._packPlayer(p, this.localClientId || 'host', this.playerName() || 'Host', this.state.fishing)];
         for (const [pid, rp] of Object.entries(this.hostPeers || {})) {
             if (rp && typeof rp.x === 'number') players.push(this._packPlayer(rp, pid, rp.label || 'Player ?'));
         }
@@ -818,7 +935,11 @@ const Multiplayer = {
                 bobber: { x: RI(f.bobber.x), y: RI(f.bobber.y) },
                 lineTension: R1(f.lineTension),
                 hookedFish: f.hookedFish ? {
-                    species: f.hookedFish.species,
+                    // Slim species: render-only fields (full base objects
+                    // with desc/skills balloon the snapshot past what a
+                    // DataChannel reliably delivers — that silent drop is
+                    // exactly "client never sees host").
+                    species: this._slimSpecies(f.hookedFish.species),
                     x: RI(f.hookedFish.x),
                     y: RI(f.hookedFish.y),
                     hp: RI(f.hookedFish.hp),
@@ -835,7 +956,7 @@ const Multiplayer = {
             // World state
             monstersOnLand: this.state.monstersOnLand.map(m => ({
                 id: m.id,
-                species: m.species,
+                species: this._slimSpecies(this._instanceSpecies(m.species) || m.species),
                 x: RI(m.x),
                 y: RI(m.y),
                 hp: RI(m.hp),
@@ -870,12 +991,18 @@ const Multiplayer = {
                 radius: b.radius,
                 life: R1(b.life)
             })),
-            groundLoot: this.state.groundLoot.map(l => ({
-                id: l.id,
-                species: l.species,
-                x: RI(l.x),
-                y: RI(l.y)
-            })),
+            groundLoot: this.state.groundLoot.map(l => {
+                if (!l) return l;
+                // Summon key/trophy items ride as data (species-less).
+                if (l.item) return { id: l.id, item: l.item, x: RI(l.x), y: RI(l.y) };
+                if (!l.species) return { id: l.id, x: RI(l.x), y: RI(l.y) };
+                return {
+                    id: l.id,
+                    species: this._slimSpecies(l.species),
+                    x: RI(l.x),
+                    y: RI(l.y)
+                };
+            }),
             groundHazards: this.state.groundHazards.map(h => ({
                 x: RI(h.x),
                 y: RI(h.y),
@@ -895,10 +1022,16 @@ const Multiplayer = {
                 leaveHazard: b.leaveHazard,
                 hazardType: b.hazardType
             })),
-            // Open-world enemies (host spawns; clients render + touch, host kills)
+            // Open-world enemies (host spawns; clients render + touch, host kills).
+            // Jumping fish carry their instance overlays (see _instanceSpecies).
             enemies: (this.state.enemies || []).slice(0, 24).map(e => ({
                 enemyType: e.enemyType,
                 speciesId: e.species ? e.species.id : null,
+                inst: (e.enemyType === 'jumpingFish' && e.species) ? {
+                    id: e.species.id, name: e.species.name, color: e.species.color,
+                    size: e.species.size, shiny: !!e.species.shiny,
+                    pattern: e.species.pattern || null, mutation: e.species.mutation || null
+                } : null,
                 x: RI(e.x),
                 y: RI(e.y),
                 vx: RI(e.vx),
@@ -918,6 +1051,10 @@ const Multiplayer = {
             // Enemy skill shots (host simulates; clients take the hits)
             projectiles: (this.state.projectiles || []).slice(0, 40).map(b => ({
                 id: b.id,
+                // ownerPid: who caught the fish that fired it (viewers home
+                // the shot toward the CATCHER, never toward themselves).
+                owner: b.ownerPid || null,
+                remote: !!b.remote,
                 x: RI(b.x),
                 y: RI(b.y),
                 vx: RI(b.vx),
@@ -925,14 +1062,26 @@ const Multiplayer = {
                 damage: b.damage,
                 color: b.color,
                 radius: b.radius,
-                life: R1(b.life)
+                life: R1(b.life),
+                isHoming: !!b.isHoming,
+                homingForce: b.homingForce || 0,
+                isSpiral: !!b.isSpiral,
+                spiralRadius: b.spiralRadius || 0,
+                catcherOnly: !!b.catcherOnly
             })),
             waterBoundaryX: this.state.waterBoundaryX,
             time: R1(this.state.time),
+            // Shared sky: hour/day/weather ride along so every peer fishes
+            // the same conditions (personal Settings visuals stay local).
+            world: this._packWorld(),
+            // Portal state: unlock is SHARED (one room, one seal), the cave
+            // itself runs as a personal instance per peer (see same-map
+            // gate in applyRemoteState).
+            cave: { unlocked: !!(this.state.player && this.state.player.caveUnlocked) },
             screenShake: RI(this.state.screenShake),
             activeBoss: this.state.activeBoss ? {
                 id: this.state.activeBoss.id,
-                species: this.state.activeBoss.species,
+                species: this._slimSpecies(this.state.activeBoss.species),
                 x: RI(this.state.activeBoss.x),
                 y: RI(this.state.activeBoss.y),
                 hp: RI(this.state.activeBoss.hp),
@@ -954,50 +1103,21 @@ const Multiplayer = {
             })()
         };
 
-        const payload = JSON.stringify({
-            type: 'gameState',
-            state: gameState
-        });
-
-        const dcOpen = this.dataChannel && this.dataChannel.readyState === 'open';
-        const wsOpen = this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN;
-        if (dcOpen) {
-            try { this.dataChannel.send(payload); } catch (e) {}
-        }
-        // 3-4 player rooms: some peers only have the relay — broadcast there
-        // too (clients dedupe by timestamp). Otherwise WS is just a fallback.
-        const needRelay = (this._lobbyCount || 1) > 2;
-        if (wsOpen && (needRelay || !dcOpen)) {
-            const now = Date.now();
-            if (needRelay || now - (this._lastFallbackSync || 0) > 150) {
-                this._lastFallbackSync = now;
-                try { this.signalingWs.send(payload); } catch (e) {}
-            }
-        }
-
-        this.lastSentState = Date.now();
+        return gameState;
     },
 
-    // Client -> host ack that it entered the game (both channels)
+    // Client -> host ack that it entered the game
     sendGameStartAck() {
-        const ack = JSON.stringify({ type: 'gameStartAck' });
-        if (this.dataChannel && this.dataChannel.readyState === 'open') {
-            try { this.dataChannel.send(ack); } catch (e) {}
-        }
-        if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
-            try { this.signalingWs.send(ack); } catch (e) {}
-        }
+        try {
+            if (typeof PeerLink !== 'undefined') PeerLink.sendToHost({ type: 'gameStartAck' });
+        } catch (e) {}
     },
 
-    // Client -> host full-state request (both channels)
+    // Client -> host full-state request
     sendSyncRequest() {
-        const req = JSON.stringify({ type: 'syncRequest' });
-        if (this.dataChannel && this.dataChannel.readyState === 'open') {
-            try { this.dataChannel.send(req); } catch (e) {}
-        }
-        if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
-            try { this.signalingWs.send(req); } catch (e) {}
-        }
+        try {
+            if (typeof PeerLink !== 'undefined') PeerLink.sendToHost({ type: 'syncRequest' });
+        } catch (e) {}
     },
     
     // Handle incoming game state (client receives from host)
@@ -1012,6 +1132,15 @@ const Multiplayer = {
 
         this.remotePlayerState = remoteState;
 
+        // First-snapshot flag: the client's loading screen waits for
+        // THIS (not a fixed timer) before revealing the world.
+        if (!this._hasEverSynced) {
+            try { this.mpLog('sync-ok', `first host snapshot (${this.shortId(this.remoteClientId)})`); } catch (e) {}
+        }
+        this._hasEverSynced = true;
+        this._lastSyncAt = Date.now();
+        this._recvStates = (this._recvStates || 0) + 1;
+
         // Apply remote state to local game (interpolation would be better but this works for LAN)
         this.applyRemoteState(remoteState);
     },
@@ -1023,12 +1152,14 @@ const Multiplayer = {
         if (Array.isArray(remoteState.players)) {
             const seen = {};
             for (const pl of remoteState.players) {
-                if (!pl || pl.id === this.localClientId) continue;
-                if (!pl.id || pl.id === 'peer') continue; // never render unknowns
-                seen[pl.id] = true;
-                const cur = this.state.remotePlayers[pl.id] || {};
+                if (!pl) continue;
+                const pid = this._normPid(pl.id, 'gameState.player');
+                if (!pid) continue; // logged — never render unknowns
+                if (pid === this.localClientId) continue;
+                seen[pid] = true;
+                const cur = this.state.remotePlayers[pid] || {};
                 const firstSeen = !cur._seen;
-                Object.assign(cur, pl, { _pid: pl.id, _seen: true });
+                Object.assign(cur, pl, { id: pid, _pid: pid, _seen: true });
                 if (firstSeen || typeof cur.rx !== 'number') {
                     cur.rx = pl.x; cur.ry = pl.y;
                     cur._lastFxMode = cur.fishing && cur.fishing.mode;
@@ -1052,6 +1183,39 @@ const Multiplayer = {
         // For non-host, we don't override local player but we sync world state.
         // Progression stays PERSONAL — only kill-credit awards apply here.
         if (!this.isHost) {
+            // Shared sky: adopt the host's clock so weather/time (and the
+            // fish conditions driven by them) match everywhere. Personal
+            // render Settings (day/night FX etc.) stay local by design.
+            if (remoteState.world) {
+                try {
+                    if (typeof WorldSystem !== 'undefined') WorldSystem.ensure(this.state);
+                    const w = this.state.world;
+                    if (w && remoteState.world) {
+                        const oldWeather = w.weather;
+                        if (typeof remoteState.world.hour === 'number') w.hour = remoteState.world.hour;
+                        if (typeof remoteState.world.day === 'number') w.day = remoteState.world.day;
+                        if (typeof remoteState.world.weather === 'string') w.weather = remoteState.world.weather;
+                        if (typeof remoteState.world.weatherT === 'number') w.weatherT = remoteState.world.weatherT;
+                        // Same announcement the host saw when it rolled in.
+                        if (w.weather !== oldWeather && typeof WorldSystem.weatherTip === 'function') {
+                            try {
+                                if (typeof Particles !== 'undefined') {
+                                    Particles.showFloatingText(this.state,
+                                        `${WorldSystem.weatherIcon(w.weather)} ${WorldSystem.weatherName(w.weather)} rolls in — fish moods shift!`,
+                                        this.state.player.x, this.state.player.y - 60, '#7dd3fc');
+                                }
+                                if (typeof UI !== 'undefined') {
+                                    UI.updateStatusBanner(`Weather: <b>${WorldSystem.weatherName(w.weather)}</b> — ${WorldSystem.weatherTip(w.weather)}`, 'Weather', 'sky');
+                                }
+                                if (w.weather === 'storm' && typeof audio !== 'undefined' && audio.playThunder) {
+                                    try { audio.playThunder(); } catch (e2) {}
+                                }
+                            } catch (e2) {}
+                        }
+                    }
+                } catch (e) {}
+            }
+
             // Kill-credit awards from the host (acked, applied once)
             if (remoteState.awards && remoteState.awards[this.localClientId]) {
                 const a = remoteState.awards[this.localClientId];
@@ -1076,43 +1240,62 @@ const Multiplayer = {
                 }
             }
 
+            // Portal seal: adopt the room's unlock (never revoke mine).
+            if (remoteState.cave && remoteState.cave.unlocked && this.state.player && !this.state.player.caveUnlocked) {
+                this.state.player.caveUnlocked = true;
+            }
+
+            // Same-map gate: the host sim and I must be on the SAME map
+            // slice (mainland / same isle / cave) for world sync. Otherwise
+            // mainland coords would overwrite my cave/isle bodies, loot and
+            // shots every snapshot. Roster + clock + fx always apply.
+            let sameMap = true;
+            try {
+                const hostEntry = Array.isArray(remoteState.players) ? remoteState.players[0] : null;
+                const me = this.state.player || {};
+                const myIsle = me.onIsland || null, myCave = !!me.inCave;
+                const hIsle = (hostEntry && hostEntry.onIsland) || null;
+                const hCave = !!(hostEntry && hostEntry.inCave);
+                sameMap = (myIsle === hIsle) && (myCave === hCave);
+            } catch (e) { sameMap = true; }
+
             // Sync monsters
-            if (remoteState.monstersOnLand) {
+            if (sameMap && remoteState.monstersOnLand) {
                 this.syncMonsters(remoteState.monstersOnLand);
             }
 
             // Sync open-world enemies (host spawns them)
-            if (remoteState.enemies) {
+            if (sameMap && remoteState.enemies) {
                 this.syncEnemies(remoteState.enemies);
             }
 
             // Sync enemy skill shots (host simulates them)
-            if (remoteState.projectiles) {
+            if (sameMap && remoteState.projectiles) {
                 this.syncProjectiles(remoteState.projectiles);
             }
             
             // Sync bullets
-            if (remoteState.bullets) {
+            if (sameMap && remoteState.bullets) {
                 this.syncBullets(remoteState.bullets);
             }
 
             // Sync host monster skill shots
-            if (remoteState.enemyBullets) {
+            if (sameMap && remoteState.enemyBullets) {
                 this.syncEnemyBullets(remoteState.enemyBullets);
             }
             
             // Sync loot
-            if (remoteState.groundLoot) {
+            if (sameMap && remoteState.groundLoot) {
                 this.syncLoot(remoteState.groundLoot);
             }
             
             // Sync hazards
-            if (remoteState.groundHazards) {
+            if (sameMap && remoteState.groundHazards) {
                 this.syncHazards(remoteState.groundHazards);
             }
             
             // Sync delayed blasts
-            if (remoteState.delayedBlasts) {
+            if (sameMap && remoteState.delayedBlasts) {
                 this.syncDelayedBlasts(remoteState.delayedBlasts);
             }
 
@@ -1132,12 +1315,15 @@ const Multiplayer = {
             // Helper hits on MY hooked fish (applied once per bullet id)
             if (Array.isArray(remoteState.fishHits)) {
                 for (const fh of remoteState.fishHits) {
-                    if (fh && fh.to === this.localClientId) this._applyFishHit(fh);
+                    if (!fh || !fh.bid) continue;
+                    const to = this._normPid(fh.to, 'snapshot.fishHit');
+                    if (!to || to !== this.localClientId) continue;
+                    this._applyFishHit(fh);
                 }
             }
             
             // Sync boss
-            if (remoteState.activeBoss) {
+            if (sameMap && remoteState.activeBoss) {
                 this.syncBoss(remoteState.activeBoss);
             }
             
@@ -1148,12 +1334,13 @@ const Multiplayer = {
         }
     },
     
-    // Sync monsters from host
+    // Sync monsters from host — instance overlays (shiny/size/pattern/
+    // mutation/name) survive so clients render the catcher's exact fish.
     syncMonsters(remoteMonsters) {
         // Simple sync - replace with interpolation for smoother results
         this.state.monstersOnLand = remoteMonsters.map(m => ({
             ...m,
-            species: this.findSpecies(m.species.id) || m.species
+            species: this._instanceSpecies(m.species) || m.species
         }));
     },
     
@@ -1201,42 +1388,97 @@ const Multiplayer = {
     
     // Sync loot (ids preserved for first-come delete messages).
     // Summon-item loot has no species — pass it through untouched.
+    // Fish loot keeps its instance overlays (see _instanceSpecies).
     syncLoot(remoteLoot) {
         this.state.groundLoot = (remoteLoot || []).map(l => {
-            if (!l) return l;
+            if (!l) return null;
             if (l.item) return { ...l };
-            const sp = (l.species && this.findSpecies) ? this.findSpecies(l.species.id) : null;
-            return { ...l, species: sp || l.species };
-        });
+            if (!l.species) return null; // malformed — never render-crash
+            return { ...l, species: this._slimSpecies(this._instanceSpecies(l.species) || l.species) };
+        }).filter(Boolean);
     },
 
-    // Sync enemies from host
+    // Sync enemies from host (jumping fish keep instance overlays too).
     syncEnemies(remoteEnemies) {
         this.state.enemies = remoteEnemies.map(e => {
             const out = { ...e, hitFlash: e.hitFlash || 0, vx: e.vx || 0, vy: e.vy || 0, leapH: e.leapH || 0 };
-            if (e.enemyType === 'jumpingFish' && e.speciesId) {
-                out.species = this.findSpecies(e.speciesId) || { id: e.speciesId, name: 'Fish', color: '#38bdf8', size: 16 };
+            if (e.enemyType === 'jumpingFish' && (e.speciesId || e.inst)) {
+                out.species = this._instanceSpecies(e.inst || { id: e.speciesId })
+                    || { id: e.speciesId, name: 'Fish', color: '#38bdf8', size: 16 };
             }
             return out;
         });
     },
 
     // Sync enemy skill shots from host (host simulates them).
-    // Client's own hooked-fish shots (local:true) are preserved.
+    // Client's own hooked-fish shots (local:true) are preserved, and the
+    // host's relayed echo of those same shots (matched by owner+id) is
+    // dropped so the catcher never renders duplicates of their own fire.
     syncProjectiles(remoteBullets) {
         const mine = (this.state.projectiles || []).filter(b => b.local);
-        this.state.projectiles = (remoteBullets || []).map(b => ({ ...b, trail: [] }));
+        const myIds = new Set();
+        try {
+            const me = this.localClientId || null;
+            for (const b of mine) {
+                if (b && b.id !== undefined) myIds.add((me || '?') + ':' + b.id);
+            }
+        } catch (e) {}
+        const me2 = (this.localClientId || null);
+        const incoming = (remoteBullets || [])
+            .filter(b => !(b && b.id !== undefined && b.owner === me2 && myIds.has(b.owner + ':' + b.id)));
+        // Foreign skill shots materialize audibly: one soft zap per batch
+        // (deduped by id — snapshots resend the same shots every 80ms).
+        try {
+            if (!this._heardProj) this._heardProj = {};
+            let fresh = false;
+            for (const b of incoming) {
+                if (!b || b.id === undefined || b.local) continue;
+                const k = (b.owner || '?') + ':' + b.id;
+                if (!this._heardProj[k]) { this._heardProj[k] = 1; fresh = true; }
+            }
+            const hkeys = Object.keys(this._heardProj);
+            if (hkeys.length > 300) hkeys.slice(0, hkeys.length - 300).forEach(k => delete this._heardProj[k]);
+            if (fresh && typeof audio !== 'undefined' && audio.playSkillZap) {
+                const nowS = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+                if (!this._lastSkillSfx || nowS - this._lastSkillSfx > 600) {
+                    this._lastSkillSfx = nowS;
+                    audio.playSkillZap();
+                }
+            }
+        } catch (e) {}
+        this.state.projectiles = incoming.map(b => ({ ...b, trail: [] }));
         for (const b of mine) this.state.projectiles.push(b);
     },
 
-    // Sync hazards
+    // Sync hazards. Relayed echoes of MY OWN forwarded skill zones
+    // (matched by _mpid) are dropped — my local copies already run.
     syncHazards(remoteHazards) {
-        this.state.groundHazards = remoteHazards;
+        try {
+            const mine = new Set();
+            for (const h of (this.state.groundHazards || [])) {
+                if (h && h._mpid) mine.add(h._mpid);
+            }
+            const keepLocal = (this.state.groundHazards || []).filter(h => h && h._mpid);
+            const fresh = (remoteHazards || []).filter(h => !(h && h.id && mine.has(h.id)));
+            this.state.groundHazards = fresh.concat(keepLocal);
+        } catch (e) {
+            this.state.groundHazards = remoteHazards;
+        }
     },
     
-    // Sync delayed blasts
+    // Sync delayed blasts (same echo rule as hazards).
     syncDelayedBlasts(remoteBlasts) {
-        this.state.delayedBlasts = remoteBlasts;
+        try {
+            const mine = new Set();
+            for (const b of (this.state.delayedBlasts || [])) {
+                if (b && b._mpid) mine.add(b._mpid);
+            }
+            const keepLocal = (this.state.delayedBlasts || []).filter(b => b && b._mpid);
+            const fresh = (remoteBlasts || []).filter(b => !(b && b.id && mine.has(b.id)));
+            this.state.delayedBlasts = fresh.concat(keepLocal);
+        } catch (e) {
+            this.state.delayedBlasts = remoteBlasts;
+        }
     },
     
     // Sync fishing
@@ -1321,21 +1563,24 @@ const Multiplayer = {
             input.fishHits = this._fishHitClaims.slice(0, 10);
             this._fishHitClaims = [];
         }
+        // My hooked fish's skill side-effects (shots + zones) for the host
+        // to merge and share with the room (see mirrorSkill).
+        if (this._skillShotOutbox && this._skillShotOutbox.length) {
+            input.skillShots = this._skillShotOutbox.slice(0, 12);
+            this._skillShotOutbox = [];
+        }
+        if (this._skillZoneOutbox && this._skillZoneOutbox.length) {
+            input.skillZones = this._skillZoneOutbox.slice(0, 12);
+            this._skillZoneOutbox = [];
+        }
         // Kill-credit award ack
         if (this._awardAckPending) {
             input.awardAck = this._awardAckPending;
             this._awardAckPending = null;
         }
-        if (this.dataChannel && this.dataChannel.readyState === 'open') {
-            try { this.dataChannel.send(JSON.stringify({ type: 'playerInput', input })); } catch (e) {}
-        } else if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
-            // Signaling fallback — throttled to ~10Hz
-            const now = Date.now();
-            if (now - (this._lastInputFallback || 0) > 100) {
-                this._lastInputFallback = now;
-                try { this.signalingWs.send(JSON.stringify({ type: 'playerInput', input })); } catch (e) {}
-            }
-        }
+        try {
+            if (typeof PeerLink !== 'undefined') PeerLink.sendToHost({ type: 'playerInput', input });
+        } catch (e) {}
     },
 
     // Queue a locally-fired bullet for the host sim (client only)
@@ -1343,6 +1588,64 @@ const Multiplayer = {
         if (!this._outboxBullets) this._outboxBullets = [];
         this._outboxBullets.push(bullet);
         if (this._outboxBullets.length > 40) this._outboxBullets.splice(0, this._outboxBullets.length - 40);
+    },
+
+    // My hooked fish fired a skill: mirror its side-effects (projectile
+    // spawns + hazard/blast zones) to the room so every peer sees the
+    // SAME fight. Called with pre-handler array lengths (see triggerSkill).
+    // Damage authority stays with the catcher — viewers render visual-only
+    // copies that home toward the CATCHER, never toward themselves.
+    mirrorSkill(state, beforeP, beforeH, beforeB) {
+        try {
+            if (!this.isClient() || !state) return;
+            const me = this.localClientId || null;
+            if (!me) return;
+            const R1 = (v) => Math.round((v || 0) * 10) / 10;
+            if (!this._skillShotOutbox) this._skillShotOutbox = [];
+            if (!this._skillZoneOutbox) this._skillZoneOutbox = [];
+            if (state.projectiles && beforeP >= 0) {
+                for (let i = beforeP; i < state.projectiles.length && this._skillShotOutbox.length < 12; i++) {
+                    const pr = state.projectiles[i];
+                    if (!pr || pr.id === undefined) continue;
+                    this._skillShotOutbox.push({
+                        id: pr.id, x: R1(pr.x), y: R1(pr.y),
+                        vx: R1(pr.vx), vy: R1(pr.vy),
+                        damage: pr.damage || 0, color: pr.color || '#fff',
+                        radius: pr.radius || 8, life: R1(pr.life || 3),
+                        isHoming: !!pr.isHoming, homingForce: pr.homingForce || 0,
+                        isSpiral: !!pr.isSpiral, spiralRadius: pr.spiralRadius || 0,
+                        owner: me,
+                    });
+                }
+            }
+            const pushZone = (arr, from, kind) => {
+                if (!arr || from < 0) return;
+                for (let i = from; i < arr.length && this._skillZoneOutbox.length < 12; i++) {
+                    const z = arr[i];
+                    if (!z) continue;
+                    if (!z._mpid) z._mpid = me + ':z' + (state._skillSeq = (state._skillSeq || 0) + 1);
+                    const out = { zid: z._mpid, kind, owner: me,
+                        x: R1(z.x), y: R1(z.y), radius: z.radius || 40,
+                        color: z.color || '#fff' };
+                    if (kind === 'hazard') {
+                        out.duration = R1(z.duration || 3);
+                        out.type = z.type || 'fire';
+                        out.damagePerSec = z.damagePerSec || 8;
+                    } else {
+                        out.damage = z.damage || 10;
+                        out.timer = R1(z.timer === undefined ? 0.6 : z.timer);
+                        if (z.leaveHazard !== undefined) out.leaveHazard = !!z.leaveHazard;
+                        if (z.hazardType !== undefined) out.hazardType = z.hazardType;
+                        if (z.hazardDps !== undefined) out.hazardDps = z.hazardDps;
+                        if (z.hazardDuration !== undefined) out.hazardDuration = z.hazardDuration;
+                        if (z.shake !== undefined) out.shake = z.shake;
+                    }
+                    this._skillZoneOutbox.push(out);
+                }
+            };
+            pushZone(state.groundHazards, beforeH, 'hazard');
+            pushZone(state.delayedBlasts, beforeB, 'blast');
+        } catch (e) {}
     },
 
     // My bullet visually overlapped ANOTHER player's hooked fish. The
@@ -1367,13 +1670,32 @@ const Multiplayer = {
         if (!this.hostPeers) this.hostPeers = {};
         if (!Array.isArray(this.hostPeerOrder)) this.hostPeerOrder = [];
         // Prefer the sender-stamped id (DC messages carry no envelope).
-        const pid = (input && input._from) || playerId;
-        if (!pid) return; // never file under a 'peer' key — that's the ghost bug
+        // BOTH are validated: a stale/missing transport id or a junk
+        // placeholder can never create a ghost copy that trails the player.
+        let pid = this._normPid(input && input._from, 'input._from');
+        if (!pid) pid = this._normPid(playerId, 'transport');
+        if (!pid) return; // logged inside _normPid — drop the snapshot
+        // Id-overwrite guard: the host's own id can never be a client —
+        // a forged or echoed snapshot must not file over the host entry
+        // and make the host "become" a client.
+        if (pid === this.localClientId) return;
         if (!this.hostPeers[pid]) {
             this.hostPeerOrder.push(pid);
+            try { this.mpLog('info', `${this.shortId(pid)} checked in`); } catch (e) {}
         }
         const rp = this.hostPeers[pid] || {};
         rp._lastUpdate = Date.now();
+        // Identity: the sender's chosen name rides every snapshot so the
+        // host (and through the roster, everyone) always shows it.
+        if (input.playerName && typeof input.playerName === 'string') {
+            rp.playerName = input.playerName.slice(0, 12);
+        }
+        // Map flags: which world slice this peer is on (mainland / isle /
+        // cave). Remote bodies on another map are culled at render.
+        if (input.player && (typeof input.player.onIsland !== 'undefined' || typeof input.player.inCave !== 'undefined')) {
+            rp.onIsland = input.player.onIsland || null;
+            rp.inCave = !!input.player.inCave;
+        }
         if (input.player && typeof input.player.x === 'number') {
             rp.x = input.player.x;
             rp.y = input.player.y;
@@ -1397,11 +1719,17 @@ const Multiplayer = {
         if (Array.isArray(input.fishHits) && input.fishHits.length) {
             if (!this._fishHitOutbox) this._fishHitOutbox = {};
             for (const fh of input.fishHits.slice(0, 10)) {
-                if (!fh || !fh.to || !fh.bid) continue;
+                if (!fh || !fh.bid) continue;
+                const to = this._normPid(fh.to, 'fishHit.to');
+                if (!to) continue; // logged — never route damage nowhere
                 // Hits on the HOST's own hooked fish apply right here —
                 // the host never reads its own gameState snapshots.
-                if (fh.to === this.localClientId) { this._applyFishHit(fh); continue; }
-                const arr = this._fishHitOutbox[fh.to] || (this._fishHitOutbox[fh.to] = []);
+                if (to === this.localClientId) { this._applyFishHit(fh); continue; }
+                if (!this.hostPeers[to] && !this._knownPeer(to)) {
+                    this.mpLog('bad-pid', `fishHit to unknown ${this.shortId(to)} — dropped`);
+                    continue;
+                }
+                const arr = this._fishHitOutbox[to] || (this._fishHitOutbox[to] = []);
                 if (arr.some(x => x.bid === fh.bid)) continue;
                 if (arr.length < 20) arr.push(fh);
             }
@@ -1410,6 +1738,89 @@ const Multiplayer = {
             this._suppressFxEmit = true;
             try { this._applyFx(input.fx); }
             finally { this._suppressFxEmit = false; }
+            // Re-emit the TEXT banners room-wide (skill names, damage
+            // numbers): the sender + host already saw them, every OTHER
+            // peer still needs them. Particle spam is NOT re-emitted.
+            try {
+                if (!this._fxOutbox) this._fxOutbox = [];
+                for (const e of input.fx) {
+                    if (e && e.fn === 'showFloatingText' && this._fxOutbox.length < 60) {
+                        this._fxOutbox.push(e);
+                    }
+                }
+            } catch (e) {}
+        }
+        // Catcher's hooked-fish skill side-effects: merge mirrored shots
+        // into the sim (relayed, visual for everyone but the catcher) and
+        // plant mirrored zones (they threaten whoever stands in them).
+        if (Array.isArray(input.skillShots) && input.skillShots.length && this.state) {
+            try {
+                if (!this.state.projectiles) this.state.projectiles = [];
+                if (!this._projIds) this._projIds = {};
+                const keys = Object.keys(this._projIds);
+                if (keys.length > 400) {
+                    keys.slice(0, keys.length - 400).forEach(k => delete this._projIds[k]);
+                }
+                for (const s of input.skillShots.slice(0, 12)) {
+                    if (!s || s.id === undefined) continue;
+                    const owner = this._normPid(s.owner, 'skillShot.owner') || pid;
+                    const key = owner + ':' + s.id;
+                    if (this._projIds[key]) continue;
+                    this._projIds[key] = Date.now();
+                    if (this.state.projectiles.length > 80) break;
+                    this.state.projectiles.push({
+                        id: s.id, ownerPid: owner, remote: true,
+                        // Foreign-catcher shots threaten their CATCHER
+                        // only — viewers render them, never take the hit
+                        // (see applyClientIntake).
+                        catcherOnly: true,
+                        x: s.x || 0, y: s.y || 0, vx: s.vx || 0, vy: s.vy || 0,
+                        damage: s.damage || 0, color: s.color || '#fff',
+                        radius: s.radius || 8, life: s.life || 3,
+                        isHoming: !!s.isHoming, homingForce: s.homingForce || 0,
+                        isSpiral: !!s.isSpiral, spiralRadius: s.spiralRadius || 0,
+                        trail: [],
+                    });
+                }
+            } catch (e) {}
+        }
+        if (Array.isArray(input.skillZones) && input.skillZones.length && this.state) {
+            try {
+                if (!this._zoneIds) this._zoneIds = {};
+                const zkeys = Object.keys(this._zoneIds);
+                if (zkeys.length > 400) {
+                    zkeys.slice(0, zkeys.length - 400).forEach(k => delete this._zoneIds[k]);
+                }
+                for (const z of input.skillZones.slice(0, 12)) {
+                    if (!z || !z.zid || this._zoneIds[z.zid]) continue;
+                    this._zoneIds[z.zid] = Date.now();
+                    if (z.kind === 'hazard') {
+                        if (!this.state.groundHazards) this.state.groundHazards = [];
+                        if (this.state.groundHazards.length > 40) break;
+                        this.state.groundHazards.push({
+                            id: z.zid, remote: true,
+                            x: z.x, y: z.y, radius: z.radius || 40,
+                            duration: z.duration || 3, type: z.type || 'fire',
+                            damagePerSec: z.damagePerSec || 8, color: z.color || '#fff',
+                        });
+                    } else {
+                        if (!this.state.delayedBlasts) this.state.delayedBlasts = [];
+                        if (this.state.delayedBlasts.length > 30) break;
+                        const b = {
+                            id: z.zid, remote: true,
+                            x: z.x, y: z.y, radius: z.radius || 40,
+                            damage: z.damage || 10, timer: (z.timer === undefined ? 0.6 : z.timer),
+                            color: z.color || '#fff',
+                        };
+                        if (z.leaveHazard !== undefined) b.leaveHazard = z.leaveHazard;
+                        if (z.hazardType !== undefined) b.hazardType = z.hazardType;
+                        if (z.hazardDps !== undefined) b.hazardDps = z.hazardDps;
+                        if (z.hazardDuration !== undefined) b.hazardDuration = z.hazardDuration;
+                        if (z.shake !== undefined) b.shake = z.shake;
+                        this.state.delayedBlasts.push(b);
+                    }
+                }
+            } catch (e) {}
         }
         // Award ack: client confirms kill-credit receipt
         if (input.awardAck && this._pendingAwards) {
@@ -1443,9 +1854,9 @@ const Multiplayer = {
                 });
             }
         }
-        // Player 2/3/4 by join order (host is Player 1)
+        // Player 2/3/4 by join order (host is Player 1) — named when known.
         const idx = this.hostPeerOrder.indexOf(pid);
-        rp.label = idx >= 0 ? `Player ${idx + 2}` : 'Player ?';
+        rp.label = rp.playerName || (idx >= 0 ? `Player ${idx + 2}` : 'Player ?');
         this.hostPeers[pid] = rp;
         // Legacy single-remote view + new map
         if (this.state) {
@@ -1475,9 +1886,11 @@ const Multiplayer = {
                     color: sp.color || '#38bdf8',
                     shape: sp.shape || 'oval',
                     rarity: sp.rarity || 'common',
+                    isBoss: !!sp.isBoss,
                     size: sp.size || 16,
                     shiny: !!sp.shiny,
                     pattern: sp.pattern || null,
+                    mutation: sp.mutation || null,
                     skillName: sp.skillName || '',
                     x: Math.round(f.hookedFish.x),
                     y: Math.round(f.hookedFish.y),
@@ -1496,6 +1909,11 @@ const Multiplayer = {
         return {
             id,
             label,
+            // Identity + map slice: name tags show who is who, and bodies
+            // on another island/cave are culled instead of misrendered.
+            name: (p && p.playerName) || label || 'Player ?',
+            onIsland: (p && p.onIsland) || null,
+            inCave: !!(p && p.inCave),
             x: Math.round(p.x || 0),
             y: Math.round(p.y || 0),
             hp: Math.round(p.hp || 0),
@@ -1526,17 +1944,15 @@ const Multiplayer = {
     // deletes the shared drop so it can't be grabbed twice.
     sendLootDelete(lootId) {
         if (!this.isClient() || !lootId) return;
-        const msg = JSON.stringify({ type: 'lootDelete', lootId });
-        if (this.dataChannel && this.dataChannel.readyState === 'open') {
-            try { this.dataChannel.send(msg); } catch (e) {}
-        }
-        if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
-            try { this.signalingWs.send(msg); } catch (e) {}
-        }
+        try {
+            if (typeof PeerLink !== 'undefined') PeerLink.sendToHost({ type: 'lootDelete', lootId });
+        } catch (e) {}
     },
 
     handleLootDelete(fromId, lootId) {
         if (!this.isHost || !lootId) return;
+        fromId = this._normPid(fromId, 'lootDelete');
+        if (!fromId) return;
         if (this.state.groundLoot) {
             this.state.groundLoot = this.state.groundLoot.filter(l => l.id !== lootId);
         }
@@ -1547,36 +1963,70 @@ const Multiplayer = {
     sendBeachClaim(fish) {
         if (!this.isClient() || !fish || !fish.species) return false;
         const sp = fish.species;
-        const msg = JSON.stringify({
+        // Per-catch instance fields ride along (pattern/mutation/name) so
+        // the shared monster renders EXACTLY like the catcher's fish.
+        const msg = {
             type: 'beachClaim',
             fish: {
-                species: { id: sp.id, name: sp.name, value: sp.value, size: sp.size, shiny: !!sp.shiny, color: sp.color, rarity: sp.rarity, maxHp: sp.maxHp, attack: sp.attack, staminaMax: sp.staminaMax },
+                species: {
+                    id: sp.id, name: sp.name, value: sp.value, size: sp.size,
+                    shiny: !!sp.shiny, color: sp.color, rarity: sp.rarity,
+                    maxHp: sp.maxHp, attack: sp.attack, staminaMax: sp.staminaMax,
+                    pattern: sp.pattern || null, mutation: sp.mutation || null
+                },
                 x: Math.round(fish.x), y: Math.round(fish.y),
                 hp: Math.round(fish.hp), isDead: !!fish.isDead
             }
-        });
+        };
         let sent = false;
-        if (this.dataChannel && this.dataChannel.readyState === 'open') {
-            try { this.dataChannel.send(msg); sent = true; } catch (e) {}
-        }
-        if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
-            try { this.signalingWs.send(msg); sent = true; } catch (e) {}
-        }
+        try {
+            if (typeof PeerLink !== 'undefined' && PeerLink.sendToHost(msg)) sent = true;
+        } catch (e) {}
         return sent;
+    },
+
+    // Merge a per-catch instance over the same-version base species so the
+    // render matches the catcher's screen pixel-for-pixel (base data is
+    // identical on same-version peers; instance overlays must survive).
+    _instanceSpecies(dataSpecies) {
+        if (!dataSpecies) return null;
+        let species = null;
+        if (typeof FISH_SPECIES !== 'undefined' && dataSpecies.id) {
+            const base = FISH_SPECIES.find(s => s.id === dataSpecies.id);
+            if (base) species = Object.assign({}, base);
+        }
+        if (!species) {
+            // Unknown id (shouldn't happen same-version): use wire copy as-is.
+            species = Object.assign({}, dataSpecies);
+            return species;
+        }
+        for (const k of ['name', 'color', 'size', 'shiny', 'pattern', 'mutation', 'value']) {
+            if (dataSpecies[k] !== undefined) species[k] = dataSpecies[k];
+        }
+        return species;
+    },
+
+    // Slim species for the WIRE: render/fight-only fields. Full base
+    // objects carry desc/skills/tables that balloon a snapshot past what
+    // a DataChannel delivers in one send — oversized sends fail SILENTLY
+    // (the classic "host sees client, client never sees host": tiny
+    // inputs flow fine, the big snapshot never lands).
+    _slimSpecies(sp) {
+        if (!sp) return null;
+        return {
+            id: sp.id, name: sp.name, color: sp.color, size: sp.size,
+            shiny: !!sp.shiny, rarity: sp.rarity, shape: sp.shape || 'oval',
+            pattern: sp.pattern || null, mutation: sp.mutation || null,
+            skillName: sp.skillName || '', isBoss: !!sp.isBoss,
+            value: sp.value, attack: sp.attack,
+        };
     },
 
     handleBeachClaim(fromId, data) {
         if (!this.isHost || !data) return;
-        let species = null;
-        if (typeof FISH_SPECIES !== 'undefined' && data.species) {
-            const base = FISH_SPECIES.find(s => s.id === data.species.id);
-            if (base) {
-                species = Object.assign({}, base);
-                if (data.species.shiny) { species.shiny = true; species.name = data.species.name || species.name; species.value = data.species.value || species.value; }
-                if (typeof data.species.size === 'number') species.size = data.species.size;
-            }
-        }
-        if (!species && data.species) species = data.species;
+        fromId = this._normPid(fromId, 'beachClaim');
+        if (!fromId) return;
+        const species = this._instanceSpecies(data.species);
         if (!species) return;
         const fish = {
             species,
@@ -1598,6 +2048,7 @@ const Multiplayer = {
     // Kill credit: a client's killing blow pays THEM (coins + xp).
     // Queued per-player, acked, applied once.
     queueAward(pid, coins, xp) {
+        pid = this._normPid(pid, 'queueAward');
         if (!pid) return;
         this._awardSeq = (this._awardSeq || 0) + 1;
         if (!this._pendingAwards) this._pendingAwards = {};
@@ -1609,18 +2060,21 @@ const Multiplayer = {
         };
     },
 
-    // Send game start signal (host only) — both channels so the client
-    // gets it even when the WebRTC data channel isn't open yet.
+    // Host-side peer lookup: transport members OR already-known snapshots.
+    _knownPeer(pid) {
+        try {
+            if (typeof PeerLink !== 'undefined' && PeerLink.conns && PeerLink.conns[pid]) return true;
+            if (this.hostPeers && this.hostPeers[pid]) return true;
+        } catch (e) {}
+        return false;
+    },
+
+    // Send game start signal (host only) — reliable PeerJS broadcast.
     sendGameStart() {
         if (!this.isHost) return;
-        const startData = JSON.stringify({ type: 'gameStart' });
-
-        if (this.dataChannel && this.dataChannel.readyState === 'open') {
-            try { this.dataChannel.send(startData); } catch (e) {}
-        }
-        if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
-            try { this.signalingWs.send(startData); } catch (e) {}
-        }
+        try {
+            if (typeof PeerLink !== 'undefined') PeerLink.broadcast({ type: 'gameStart' });
+        } catch (e) {}
     },
 
     // Host: send gameStart a few times until the client acks (or timeout).
@@ -1664,9 +2118,29 @@ const Multiplayer = {
         }
     },
     
-    // Per-frame tick (cooldown-free since heal removal)
+    // Per-frame tick: client snapshot watchdog (host pushes at ~12Hz).
+    // If snapshots stop arriving mid-game, the player gets a quotable
+    // `no-snapshot` event instead of a silent frozen world, plus an
+    // automatic re-ask (syncRequest -> host unicast reply).
     update(delta) {
         void delta;
+        try {
+            if (this.isClient() && this.isConnected && this._hasEverSynced) {
+                const last = this._lastSyncAt || 0;
+                if (last && Date.now() - last > 6000) {
+                    this.mpLog('no-snapshot', `no host snapshot for ${Math.round((Date.now() - last) / 1000)}s — host lag or disconnect?`);
+                    // Re-ask (throttled): a busy-but-alive host answers a
+                    // syncRequest with a fresh unicast snapshot.
+                    try {
+                        if (!this._lastSyncReq || Date.now() - this._lastSyncReq > 2500) {
+                            this._lastSyncReq = Date.now();
+                            this.sendSyncRequest();
+                        }
+                    } catch (e) {}
+                    this._lastSyncAt = Date.now(); // re-arm (mpLog throttles anyway)
+                }
+            }
+        } catch (e) {}
     },
     
     // Update status display
@@ -1691,49 +2165,32 @@ const Multiplayer = {
         }
     },
     
-    // Handle disconnect
+    // Handle disconnect (PeerJS cloud link; P2P data may survive)
     handleDisconnect() {
         this.isConnected = false;
         this.stopStateSync();
-        
-        if (this.peerConnection) {
-            this.peerConnection.close();
-            this.peerConnection = null;
-        }
-        
-        if (this.dataChannel) {
-            this.dataChannel = null;
-        }
-        
-        this.updateStatus('Disconnected from server');
+        this.updateStatus('Disconnected from PeerJS cloud');
     },
-    
-    // Leave room
+
+    // Leave room (closing the connection tells the other side via onclose)
     leaveRoom() {
-        if (this.signalingWs && this.signalingWs.readyState === WebSocket.OPEN) {
-            this.signalingWs.send(JSON.stringify({ type: 'leaveRoom' }));
-        }
+        try {
+            if (typeof PeerLink !== 'undefined') PeerLink.destroy();
+        } catch (e) {}
         this.cleanup();
     },
-    
+
     // Full cleanup
     cleanup() {
         this.stopStateSync();
-        
-        if (this.peerConnection) {
-            this.peerConnection.close();
-            this.peerConnection = null;
-        }
-        
-        if (this.dataChannel) {
-            this.dataChannel = null;
-        }
-        
-        if (this.signalingWs) {
-            this.signalingWs.close();
-            this.signalingWs = null;
-        }
-        
+
+        try {
+            if (typeof PeerLink !== 'undefined') PeerLink.destroy();
+        } catch (e) {}
+        try {
+            if (typeof PeerSkins !== 'undefined') PeerSkins.resetProgress();
+        } catch (e) {}
+
         this.isHost = false;
         this.isConnected = false;
         this.roomCode = null;
@@ -1743,7 +2200,14 @@ const Multiplayer = {
         this._lobbyCount = 1;
         this.hostPeers = {};
         this.hostPeerOrder = [];
+        this._roomRoster = null;
+        this._hostName = 'Host';
+           this._hostPilot = null;
+        this.hostPid = null;
+        try { if (typeof SaveSystem !== 'undefined' && SaveSystem.setMPScope) SaveSystem.setMPScope(null); } catch (e) {}
         this._lastGameStateTs = 0;
+        this._hasEverSynced = false;
+        this._lastSyncAt = 0;
         this._fxOutbox = [];
         this._fishHitClaims = [];
         this._fishHitOutbox = {};
@@ -1753,17 +2217,27 @@ const Multiplayer = {
             this.state.remotePlayer = null;
             this.state.remotePlayers = {};
         }
-        
+
         this.updateStatus('Left multiplayer session');
     },
-    
+
     // Get connection info for UI
     getConnectionInfo() {
+        let skins = '';
+        try {
+            if (typeof PeerSkins !== 'undefined') skins = PeerSkins.progressText();
+        } catch (e) {}
+        let cloud = 'idle';
+        try {
+            if (typeof PeerLink !== 'undefined') cloud = PeerLink.cloud || 'idle';
+        } catch (e) {}
         return {
             isHost: this.isHost,
             isConnected: this.isConnected,
             roomCode: this.roomCode,
-            playerCount: this._lobbyCount || 1
+            playerCount: this._lobbyCount || 1,
+            cloud,
+            skins
         };
     },
     
@@ -1782,6 +2256,14 @@ const Multiplayer = {
 
     _drawRemotePlayer(ctx, rp) {
         if (!rp || typeof rp.x !== 'number') return;
+        // Per-player travel: a mate on another island/cave stays there —
+        // never render their body (or bobber) on the wrong map.
+        try {
+            const me = this.state.player || {};
+            const myIsle = me.onIsland || null, myCave = !!me.inCave;
+            const rpIsle = rp.onIsland || null, rpCave = !!rp.inCave;
+            if (myIsle !== rpIsle || myCave !== rpCave) return;
+        } catch (e) {}
 
         const canvas = ctx.canvas;
         const cam = this.state.camera;
@@ -1818,8 +2300,11 @@ const Multiplayer = {
         }
         if (!aimKnown) aimAngle = (rp.facing === -1 ? Math.PI : 0);
 
-        // Muzzle edge -> local puff so shots look the same everywhere
-        // (the heavier smoke/sound already arrives via the shared FX tap).
+        // Muzzle edge -> local puff + remote gunshot sound so shots look
+        // AND sound the same everywhere. (Heavier smoke arrives via the
+        // shared FX tap; audio never rides the wire — each peer plays its
+        // own sounds locally. Off-screen peers are culled above, so this
+        // only fires for visible shooters. Throttled per pid for SMGs.)
         const flash = rp.muzzleFlash || 0;
         if (flash > 0.4 && !rp._wasFlashing && typeof Particles !== 'undefined' && this.state) {
             try {
@@ -1827,6 +2312,21 @@ const Multiplayer = {
                 Particles.spawnParticles(this.state, rp.rx + Math.cos(aimAngle) * 26, rp.ry + Math.sin(aimAngle) * 26, '#fbbf24', 3, { size: 3 });
             } catch (e) {}
             finally { this._suppressFxEmit = false; }
+            try {
+                const nowSfx = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+                if (!rp._lastShotSfx || nowSfx - rp._lastShotSfx > 120) {
+                    rp._lastShotSfx = nowSfx;
+                    const wid = rp.equippedWeapons && rp.equippedWeapons[rp.activeSlot];
+                    let snd = null;
+                    try {
+                        if (wid && typeof WEAPONS !== 'undefined') {
+                            const def = WEAPONS.find(x => x.id === wid);
+                            if (def) snd = def.sound || def.type;
+                        }
+                    } catch (e) {}
+                    if (typeof audio !== 'undefined' && audio.playGunshot) audio.playGunshot(snd || 'pistol');
+                }
+            } catch (e) {}
         }
         rp._wasFlashing = flash > 0.4;
 
@@ -1875,7 +2375,15 @@ const Multiplayer = {
         const w = rp.equippedWeapons && rp.equippedWeapons[rp.activeSlot];
         if (w && typeof WEAPONS !== 'undefined' && typeof Render !== 'undefined' && Render.drawGun) {
             const def = WEAPONS.find(x => x.id === w);
-            if (def) Render.drawGun(ctx, { muzzleFlash: rp.muzzleFlash || 0, weaponRecoil: rp.weaponRecoil || 0, gunSkins: rp.gunSkins || {} }, def);
+            // Foreign body: holder = THEM → their art on them (global hold,
+            // per-holder skins). Shop/hotbar/previews always use own art.
+            let holder = null;
+            try {
+                if (typeof Multiplayer !== 'undefined' && Multiplayer.localClientId) {
+                    holder = { pid: rp._pid || rp.id, me: Multiplayer.localClientId };
+                }
+            } catch (e) {}
+            if (def) Render.drawGun(ctx, { muzzleFlash: rp.muzzleFlash || 0, weaponRecoil: rp.weaponRecoil || 0, gunSkins: rp.gunSkins || {} }, def, holder);
             if (rp.reloading) {
                 ctx.fillStyle = '#fbbf24';
                 ctx.font = 'bold 11px Work Sans';
@@ -1891,14 +2399,14 @@ const Multiplayer = {
             this._drawRemoteFishing(ctx, rp, sx, sy, sc);
         }
 
-        // Name tag + HP bar (screen space)
+        // Name tag + HP bar (screen space) — the player's chosen name.
         ctx.save();
         ctx.font = 'bold 12px Work Sans';
         ctx.textAlign = 'center';
         ctx.fillStyle = '#f472b6';
         ctx.strokeStyle = 'rgba(0,0,0,0.8)';
         ctx.lineWidth = 3;
-        const name = rp.label || (this.isHost ? 'Player 2' : 'Host');
+        const name = rp.playerName || rp.label || 'Player ?';
         ctx.strokeText(name, sx, sy - 35 * sc);
         ctx.fillText(name, sx, sy - 35 * sc);
 
@@ -2007,11 +2515,12 @@ const Multiplayer = {
                     color: h.color || species.color,
                     size: h.size || species.size,
                     shiny: !!h.shiny,
-                    pattern: (h.pattern !== undefined ? h.pattern : species.pattern) || null
+                    pattern: (h.pattern !== undefined ? h.pattern : species.pattern) || null,
+                    mutation: (h.mutation !== undefined ? h.mutation : species.mutation) || null
                 });
             }
             if (!species) {
-                species = { id: h.id || 'remote', name: h.name || 'Fish', color: h.color || '#38bdf8', accent: h.color || '#38bdf8', shape: h.shape || 'oval', size: h.size || 16, rarity: h.rarity || 'common', shiny: !!h.shiny, pattern: h.pattern || null };
+                species = { id: h.id || 'remote', name: h.name || 'Fish', color: h.color || '#38bdf8', accent: h.color || '#38bdf8', shape: h.shape || 'oval', size: h.size || 16, rarity: h.rarity || 'common', shiny: !!h.shiny, pattern: h.pattern || null, mutation: h.mutation || null };
             }
             if (typeof Render !== 'undefined' && Render.drawFishModel) {
                 try {

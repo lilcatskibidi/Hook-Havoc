@@ -12,6 +12,8 @@ const GunSkinLoader = {
     loading: new Map(),
     failed: new Set(),
     available: {},
+    shipped: new Set(), // ids that came from assets/guns/*.png (neutral,
+    // shared by everyone — as opposed to per-PC uploads in localStorage)
     onReady: null, // Shop hooks this to refresh the skin buttons
 
     load(id) {
@@ -23,6 +25,7 @@ const GunSkinLoader = {
             img.src = `assets/guns/${id}.png`;
             img.onload = () => {
                 this.cache.set(id, img);
+                this.shipped.add(id);
                 this.loading.delete(id);
                 this.available[id] = true;
                 try { if (typeof this.onReady === 'function') this.onReady(id); } catch (e) {}
@@ -50,6 +53,15 @@ const GunSkinLoader = {
     // Downscaled to <=256px so a skin survives localStorage quotas.
     storageKey(id) {
         return 'ah_gunskin_' + id;
+    },
+
+    // Neutral shipped art only (never a per-PC upload): safe to show on
+    // FOREIGN bodies in a room — it looks identical for everyone.
+    getShipped(id) {
+        try {
+            if (!this.shipped.has(id)) return null;
+            return this.cache.get(id) || null;
+        } catch (e) { return null; }
     },
 
     saveUpload(id, file) {
@@ -315,11 +327,20 @@ const Render = {
         // beach/sea/border/foam while inside. Entities draw on top as usual.
         // NOTE: the flag lives on the PLAYER (p.inCave), not on state.
         const inCave = !!(state.player && state.player.inCave);
+        const onIsland = !!((typeof WorldSystem !== 'undefined' && WorldSystem.islandOf)
+            ? WorldSystem.islandOf(state) : (state.player && state.player.onIsland));
         if (inCave && typeof Ritual !== 'undefined' && Ritual.drawCaveInterior) {
             Ritual.drawCaveInterior(state, ctx);
+        } else if (onIsland && typeof WorldSystem !== 'undefined' && WorldSystem.drawIslandBase) {
+            // 1.2.1: detached isle — its own sand + lakes + pier, not the beach.
+            WorldSystem.drawIslandBase(state, ctx);
         } else {
             this.drawLand(state, ctx);
             this.drawWater(state, ctx);
+            // 1.2.1: pier deck + ferry boat over the surf (tiers read from water color).
+            try {
+                if (typeof WorldSystem !== 'undefined' && WorldSystem.drawUnder) WorldSystem.drawUnder(state, ctx);
+            } catch (e) {}
             this.drawWorldBorder(state, ctx);
             this.drawShoreFoam(state, ctx);
         }
@@ -329,10 +350,14 @@ const Render = {
         this.drawHookedFish(state, ctx);
         this.drawLandMonsters(state, ctx);
         this.drawEnemies(state, ctx);
-        if (!inCave) this.drawShopZones(state, ctx);
-        if (!inCave && typeof NPC !== 'undefined' && NPC.drawWorld) NPC.drawWorld(state, ctx);
-        if (typeof Ritual !== 'undefined' && Ritual.drawWorld) Ritual.drawWorld(state, ctx);
+        if (!inCave && !onIsland) this.drawShopZones(state, ctx);
+        if (!inCave && !onIsland && typeof NPC !== 'undefined' && NPC.drawWorld) NPC.drawWorld(state, ctx);
+        if (!onIsland && typeof Ritual !== 'undefined' && Ritual.drawWorld) Ritual.drawWorld(state, ctx);
         this.drawBullets(state, ctx);
+        // Ferry hull under the sailing player (boat rides only).
+        try {
+            if (typeof WorldSystem !== 'undefined' && WorldSystem.drawBoatRide) WorldSystem.drawBoatRide(state, ctx);
+        } catch (e) {}
         this.drawPlayer(state, ctx);
         this.drawParticles(state, ctx);
         // Cave darkness + player lantern: after the world + player so the
@@ -342,6 +367,10 @@ const Render = {
 
         ctx.restore();
 
+        // 1.1.5 WORLD: day/night lighting + rain/storm/fog (screen-space).
+        try {
+            if (typeof WorldSystem !== 'undefined' && WorldSystem.drawScreenFx) WorldSystem.drawScreenFx(state, ctx);
+        } catch (e) {}
         this.drawBossArrow(state, ctx);
         this.drawCrosshair(state, ctx);
         const zoomEl = document.getElementById('zoom-level');
@@ -477,10 +506,19 @@ const Render = {
         const B = CONFIG.WORLD;
         const t = state.time;
 
+        // Tier-tinted water: light shallow near the surf, dark deep far
+        // out. The COLOR is the zone map now (no more label orbs).
+        // Edges come from WorldSystem.ZONE_EDGES — the same detector
+        // that decides spawn rates (see seaCellAt), so tint == rules.
+        const ZE = (typeof WorldSystem !== 'undefined' && WorldSystem.ZONE_EDGES) || { SHORE: 250, SHALLOW: 650 };
+        const span = Math.max(1, (B.MAX_X + 2000) - w);
+        const fShore = Math.min(0.5, ZE.SHORE / span);
+        const fDeep = Math.min(0.9, ZE.SHALLOW / span);
         const grad = ctx.createLinearGradient(w, 0, B.MAX_X + 2000, 0);
-        grad.addColorStop(0, '#0c4a6e');
-        grad.addColorStop(0.3, '#075985');
-        grad.addColorStop(1, '#082f49');
+        grad.addColorStop(0, '#1093b8');
+        grad.addColorStop(fShore, '#0c6e94');
+        grad.addColorStop(fDeep, '#075985');
+        grad.addColorStop(1, '#041f33');
         ctx.fillStyle = grad;
         ctx.fillRect(w, B.MIN_Y - 500, (B.MAX_X - w) + 2000, (B.MAX_Y - B.MIN_Y) + 1000);
 
@@ -777,6 +815,9 @@ const Render = {
                 ctx.stroke();
                 ctx.globalAlpha = alpha;
             } else {
+            // Fish loot without species data can never render — skip it
+            // instead of crashing the whole loot pass.
+            if (!item.species) { ctx.restore(); return; }
             ctx.shadowColor = item.species.color;
             ctx.shadowBlur = 15;
             this.drawFishModel(ctx, item.x, item.y + bob + sinkY, item.species.size * 0.6 * sinkScale, item.species, {});
@@ -1506,12 +1547,21 @@ const Render = {
 
         const weaponId = p.equippedWeapons && p.equippedWeapons[p.activeSlot];
         const w = weaponId ? WEAPONS.find(x => x.id === weaponId) : null;
-        if (w) this.drawGun(ctx, p, w);
+        if (w) {
+            // Own body: my holder id == me → my art (see drawGun).
+            let holder = null;
+            try {
+                if (typeof Multiplayer !== 'undefined' && Multiplayer.roomCode && Multiplayer.localClientId) {
+                    holder = { pid: Multiplayer.localClientId, me: Multiplayer.localClientId };
+                }
+            } catch (e) {}
+            this.drawGun(ctx, p, w, holder);
+        }
 
         ctx.restore();
     },
 
-    drawGun(ctx, p, w) {
+    drawGun(ctx, p, w, holder) {
         if (!w) return;
 
         const recoil = p.weaponRecoil || 0;
@@ -1556,7 +1606,17 @@ const Render = {
         const skinPref = (p.gunSkins && p.gunSkins[w.id]) || 'auto';
         let skinImg = null;
         if (w.skin !== false && skinPref !== 'classic' && typeof GunSkinLoader !== 'undefined') {
-            skinImg = GunSkinLoader.get(w.skin || w.id);
+            // holder = { pid, me } or pid string: a FOREIGN body in a room
+            // wears ONLY that holder's own custom art (else neutral shipped
+            // art — never YOUR upload). Own body/shop/hotbar: your art.
+            const skinId = w.skin || w.id;
+            const holderPid = (typeof holder === 'string') ? holder : (holder && holder.pid);
+            const myPid = (holder && typeof holder === 'object') ? holder.me : null;
+            if (holderPid && myPid && holderPid !== myPid && typeof PeerSkins !== 'undefined' && PeerSkins.resolveGun) {
+                skinImg = PeerSkins.resolveGun(skinId, holderPid) || GunSkinLoader.getShipped(skinId);
+            } else {
+                skinImg = GunSkinLoader.get(skinId);
+            }
         }
         if (skinImg && skinImg.complete && skinImg.naturalWidth > 0) {
             const iw = skinImg.naturalWidth, ih = skinImg.naturalHeight;
@@ -1924,7 +1984,7 @@ const Render = {
     // dead-center at maximum size instead of rattling in a corner.
     _gunPreviewRev: 0,
     _gunPreviewCache: {},
-    gunPreview(w, gunSkins) {
+    gunPreview(w, gunSkins, holder) {
         if (!w) return null;
         const skinId = w.skin || w.id;
         const custom = !!(typeof GunSkinLoader !== 'undefined' &&
@@ -1940,7 +2000,7 @@ const Render = {
             const t = tmp.getContext('2d');
             t.save();
             t.translate(40, 48);
-            this.drawGun(t, { weaponRecoil: 0, gunSkins: gunSkins || {}, muzzleFlash: 0 }, w);
+            this.drawGun(t, { weaponRecoil: 0, gunSkins: gunSkins || {}, muzzleFlash: 0 }, w, holder);
             t.restore();
             // 2. Trim to opaque bbox.
             const px = t.getImageData(0, 0, tmp.width, tmp.height).data;

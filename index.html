@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Aquatic Havoc — Deep Sea Hunter</title>
     <link rel="icon" href="data:,">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -71,7 +71,7 @@
         </div>
         
         <!-- Top HUD -->
-        <div class="absolute top-0 left-0 right-0 p-3 sm:p-4 pointer-events-none flex justify-between items-start z-10 gap-3 flex-wrap">
+        <div id="top-hud" class="absolute top-0 left-0 right-0 p-3 sm:p-4 pointer-events-none flex justify-between items-start z-10 gap-3 flex-wrap">
             <div class="flex flex-col gap-2 pointer-events-auto">
                 <div class="glass-panel px-4 py-2.5 rounded-2xl flex items-center gap-3 w-72 hud-shadow border-l-4 border-l-rose-500">
                     <div class="w-9 h-9 rounded-xl bg-rose-500/20 flex items-center justify-center">
@@ -107,6 +107,11 @@
                     <div class="stat-chip glass-panel px-3 py-1.5 rounded-xl flex items-center gap-2 text-sm font-bold hud-shadow">
                         <i class="fa-solid fa-worm text-amber-600"></i>
                         <span id="bait-display" class="text-slate-500">No bait</span>
+                    </div>
+                    <div id="world-clock-chip" class="stat-chip glass-panel px-3 py-1.5 rounded-xl flex items-center gap-2 text-sm font-bold hud-shadow" title="Time · weather · water tier. Fish bite more when conditions match!">
+                        <span id="world-clock-icon">☀</span>
+                        <span id="world-clock-text" class="text-sky-300">09:00</span>
+                        <span id="world-weather-text" class="text-slate-300 text-xs">Clear · Shore</span>
                     </div>
                 </div>
             </div>
@@ -174,7 +179,7 @@
         <div id="weapon-toolbar" class="absolute bottom-6 left-6 glass-panel p-2 rounded-2xl flex gap-1.5 shadow-xl border border-slate-700/60 pointer-events-auto z-10 hud-shadow"></div>
 
         <!-- Active weapon -->
-        <div class="absolute bottom-6 right-6 glass-panel p-3.5 rounded-2xl flex items-center gap-4 shadow-xl border border-slate-700/60 pointer-events-none z-10 hud-shadow">
+        <div id="active-weapon" class="absolute bottom-6 right-6 glass-panel p-3.5 rounded-2xl flex items-center gap-4 shadow-xl border border-slate-700/60 pointer-events-none z-10 hud-shadow">
             <div id="weapon-icon-box" class="w-12 h-12 rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-600/60 flex items-center justify-center text-2xl text-amber-400 shadow-inner">
                 <i class="fa-solid fa-crosshair"></i>
             </div>
@@ -185,14 +190,18 @@
             </div>
         </div>
 
-        <div class="absolute bottom-6 left-1/2 -translate-x-1/2 glass-panel px-3 py-1.5 rounded-xl text-[10px] font-bold text-slate-400 pointer-events-none z-10 hud-shadow">
+        <div id="zoom-chip" class="absolute bottom-6 left-1/2 -translate-x-1/2 glass-panel px-3 py-1.5 rounded-xl text-[10px] font-bold text-slate-400 pointer-events-none z-10 hud-shadow">
             <i class="fa-solid fa-magnifying-glass mr-1"></i> ZOOM <span id="zoom-level" class="text-sky-300">1.0x</span>
+        </div>
+
+        <div id="pad-chip" class="absolute bottom-12 left-1/2 -translate-x-1/2 glass-panel px-3 py-1 rounded-xl text-[10px] font-bold text-emerald-300 pointer-events-none z-10 hud-shadow hidden">
+            <i class="fa-solid fa-gamepad mr-1"></i><span id="pad-chip-label">Gamepad</span>
         </div>
 
         <div id="catch-popup-container" class="absolute top-1/3 left-1/2 -translate-x-1/2 pointer-events-none z-20 flex flex-col items-center gap-2"></div>
 
         <!-- ================= MULTIPLAYER LOADING OVERLAY ================= -->
-        <div id="mp-loading-overlay" class="absolute inset-0 bg-slate-950/95 backdrop-blur-xl hidden items-center justify-center z-50 pointer-events-auto">
+        <div id="mp-loading-overlay" class="absolute inset-0 bg-slate-950 hidden items-center justify-center z-50 pointer-events-auto">
             <div class="flex flex-col items-center gap-4 p-8">
                 <div class="w-16 h-16 rounded-full border-4 border-slate-700 border-t-sky-400 animate-spin"></div>
                 <div id="mp-loading-text" class="font-header text-2xl text-white font-bold tracking-wide">LOADING...</div>
@@ -201,19 +210,15 @@
         </div>
 
         <!-- ================= MULTIPLAYER HUD (In-Game) ================= -->
-        <div id="mp-hud" class="absolute top-4 left-4 glass-panel p-3 rounded-2xl shadow-xl border border-sky-500/30 hidden z-40 hud-shadow neon-glow w-72">
-            <div class="flex items-center justify-between mb-2">
-                <div class="flex items-center gap-2">
-                    <i class="fa-solid fa-users text-sky-400"></i>
-                    <span id="mp-status" class="text-xs font-bold text-sky-300">Disconnected</span>
-                    <span class="px-1.5 py-0.5 bg-amber-500/20 border border-amber-500/30 rounded text-[8px] font-bold text-amber-300">EARLY BETA</span>
-                </div>
-                <div class="flex items-center gap-1">
-                    <button id="mp-exit-btn" class="text-rose-400 hover:text-rose-300 text-xs p-1" title="Leave Game">
-                        <i class="fa-solid fa-door-open"></i>
-                    </button>
-                </div>
+        <!-- Slim status bar only. Report-bug / Leave-server live in the
+             TAB-hold player list (Minecraft-style), not here. -->
+        <div id="mp-hud" class="absolute top-4 left-4 glass-panel px-3 py-2 rounded-2xl shadow-xl border border-sky-500/30 hidden z-40 hud-shadow w-72">
+            <div class="flex items-center gap-2">
+                <i class="fa-solid fa-users text-sky-400"></i>
+                <span id="mp-status" class="text-xs font-bold text-sky-300">Disconnected</span>
+                <span class="px-1.5 py-0.5 bg-amber-500/20 border border-amber-500/30 rounded text-[8px] font-bold text-amber-300">EARLY BETA</span>
             </div>
+            <div id="mp-hud-log" class="text-[9px] text-slate-500 font-bold truncate" title="Last multiplayer event — hold TAB for players & bug report">—</div>
             <div class="text-[9px] text-slate-500 font-bold tracking-wider">SHARED WORLD · PERSONAL COINS & GEAR</div>
         </div>
 
@@ -371,9 +376,6 @@
                         <button id="casino-buy-tokens-100" class="px-3 py-2 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 text-xs font-black rounded-xl transition-all">
                             +100T (10k)
                         </button>
-                        <button id="casino-free-tokens" class="px-3 py-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 text-xs font-black rounded-xl transition-all">
-                            +3 FREE (120s)
-                        </button>
                         <button id="casino-cashout" class="px-3 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-black rounded-xl transition-all">
                             <i class="fa-solid fa-sack-dollar mr-1"></i> Cashout <span id="casino-cashout-label">0T → 0c</span>
                         </button>
@@ -452,6 +454,112 @@
             </div>
         </div>
 
+        <!-- ================= TOUCH CONTROLS (mobile) ================= -->
+        <div id="touch-ui" class="hidden">
+            <div id="touch-joy"><div id="touch-joy-knob"></div></div>
+            <div id="touch-btns">
+                <div class="touch-row-big">
+                    <button id="touch-fire" class="touch-btn touch-big touch-fire">FIRE</button>
+                    <button id="touch-cast" class="touch-btn touch-big touch-cast">CAST</button>
+                </div>
+                <div class="touch-row-small">
+                    <button id="touch-act" class="touch-btn touch-small" title="Interact">E</button>
+                    <button id="touch-reload" class="touch-btn touch-small" title="Reload">R</button>
+                    <button id="touch-weapon" class="touch-btn touch-small" title="Weapon"><i class="fa-solid fa-gun"></i></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= FEEDBACK MODAL (Discord webhook) ================= -->
+        <div id="feedback-modal" class="absolute inset-0 bg-slate-950 flex items-center justify-center z-50 hidden pointer-events-auto p-3 sm:p-4">
+            <div class="glass-panel w-full max-w-lg rounded-3xl flex flex-col overflow-hidden border border-rose-500/30 shadow-2xl max-h-[92%]">
+                <div class="p-4 border-b border-slate-800/80 flex justify-between items-center bg-gradient-to-r from-rose-900/40 to-slate-900/40">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500/30 to-pink-600/20 text-rose-400 flex items-center justify-center text-xl border border-rose-500/30">
+                            <i class="fa-solid fa-bug"></i>
+                        </div>
+                        <div>
+                            <h2 class="font-header text-xl text-white font-bold leading-none">FEEDBACK</h2>
+                            <p class="text-xs text-slate-400 mt-0.5">Bug reports go to Discord — the MP log rides along</p>
+                        </div>
+                    </div>
+                    <button id="feedback-close" class="text-slate-400 hover:text-white p-2 text-2xl transition-all hover:rotate-90 duration-200">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                <div class="p-4 flex flex-col gap-3 overflow-y-auto">
+                    <div>
+                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-1.5">REPORT TYPE</div>
+                        <select id="feedback-kind"
+                            class="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-2 text-sm font-bold text-white focus:outline-none focus:border-rose-500">
+                            <option value="bug-mp">🐟 Multiplayer bug (desync, join, lag, skins)</option>
+                            <option value="bug-data">💾 Data bug (save, coins, items lost, shop)</option>
+                            <option value="bug-other">🐞 Other bug (crash, visual, audio, map)</option>
+                            <option value="request">💡 Feature request</option>
+                            <option value="other">💬 Other</option>
+                        </select>
+                    </div>
+                    <div>
+                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-1.5">WHAT HAPPENED? (1 LINE IS ENOUGH)</div>
+                        <textarea id="feedback-text" rows="3" maxlength="1000" placeholder="e.g. joined room AB7K, saw host for 2s then froze — log says no-snapshot"
+                            class="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-rose-500"></textarea>
+                    </div>
+                    <div>
+                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-1.5">MP LOG (AUTO-ATTACHED)</div>
+                        <textarea id="feedback-log" rows="5" readonly
+                            class="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2 text-[10px] font-mono text-slate-400"></textarea>
+                    </div>
+                    <div id="feedback-status" class="text-[11px] font-bold text-slate-400 min-h-[1rem]"></div>
+                </div>
+                <div class="p-4 border-t border-slate-800/80 bg-slate-900/80 flex gap-2">
+                    <button id="btn-feedback-copy" class="flex-1 px-4 py-2.5 bg-slate-700/70 hover:bg-slate-600/70 text-slate-200 font-bold rounded-xl transition-all border border-slate-600 text-sm">
+                        <i class="fa-solid fa-copy mr-1"></i> Copy
+                    </button>
+                    <button id="btn-feedback-send" class="flex-1 px-4 py-2.5 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-400 hover:to-pink-500 text-white font-black rounded-xl transition-all shadow-lg active:scale-95 text-sm">
+                        <i class="fa-solid fa-paper-plane mr-1"></i> Send to Discord
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= PAUSE MENU (In-Game, ESC) ================= -->
+        <div id="pause-menu" class="absolute inset-0 hidden items-center justify-center z-40 pointer-events-auto p-4" style="background: rgba(2,6,23,0.72);">
+            <div class="glass-panel w-full max-w-xs rounded-3xl overflow-hidden border border-sky-500/30 shadow-2xl p-5 flex flex-col gap-2">
+                <h2 class="font-header text-2xl text-white font-bold text-center tracking-wide">PAUSED</h2>
+                <p id="pause-sub" class="text-center text-[10px] text-slate-400 font-bold tracking-widest mb-1">GAME MENU</p>
+                <button id="btn-pause-resume" class="menu-btn bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950">
+                    <i class="fa-solid fa-play mr-2"></i> <span>Resume</span>
+                </button>
+                <button id="btn-pause-save" class="menu-btn bg-slate-700/50 hover:bg-slate-600/50">
+                    <i class="fa-solid fa-floppy-disk mr-2"></i> <span>Save Game</span>
+                </button>
+                <button id="btn-pause-quit" class="menu-btn bg-slate-700/50 hover:bg-slate-600/50">
+                    <i class="fa-solid fa-house mr-2"></i> <span>Leave to Main Menu</span>
+                </button>
+                <div id="pause-save-msg" class="text-center text-[11px] font-bold text-emerald-300 min-h-[1rem]"></div>
+            </div>
+        </div>
+
+        <!-- ================= TAB PLAYER LIST (Minecraft-style, hold TAB) ================= -->
+        <div id="tablist-overlay" class="absolute inset-0 hidden items-start justify-center z-40 pointer-events-none p-4 pt-16">
+            <div class="glass-panel rounded-2xl border border-sky-500/30 shadow-2xl px-5 py-4 w-full max-w-md pointer-events-auto">
+                <div class="text-center text-xs font-black tracking-widest text-slate-300 mb-2">
+                    PLAYERS — <span id="tablist-count" class="text-sky-300">1/4</span>
+                    <span id="tablist-room" class="text-amber-300 ml-1"></span>
+                </div>
+                <div id="tablist-rows" class="flex flex-col gap-1.5"></div>
+                <div class="flex gap-2 mt-3">
+                    <button id="btn-feedback-hud" class="flex-1 px-3 py-2 rounded-xl text-xs font-black bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30">
+                        <i class="fa-solid fa-bug mr-1"></i> Report bug
+                    </button>
+                    <button id="mp-exit-btn" class="flex-1 px-3 py-2 rounded-xl text-xs font-black bg-slate-700/60 text-slate-200 border border-slate-600 hover:bg-slate-600/60">
+                        <i class="fa-solid fa-door-open mr-1"></i> Leave server
+                    </button>
+                </div>
+                <div class="text-center text-[10px] text-slate-500 font-bold mt-2">HOLD TAB TO KEEP OPEN · RELEASE TO HIDE</div>
+            </div>
+        </div>
+
         <!-- ================= MAIN MENU ================= -->
         <div id="main-menu" class="absolute inset-0 bg-slate-950/60 backdrop-blur-[2px] flex items-center justify-center z-40 pointer-events-auto p-4">
             <!-- Animated Background Canvas -->
@@ -514,22 +622,27 @@
                             <button id="btn-changelog" class="menu-btn menu-mini border-l-4 border-l-amber-500">
                                 <i class="fa-solid fa-scroll"></i> <span>Updates <span id="menu-ver-chip" class="ml-1 text-[9px] font-black px-1.5 py-px rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">v1.1.0</span></span>
                             </button>
+                            <button id="btn-feedback" class="menu-btn menu-mini border-l-4 border-l-rose-500">
+                                <i class="fa-solid fa-bug"></i> <span>Feedback</span>
+                            </button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Multiplayer Panel -->
                 <div id="mp-panel-multiplayer" class="mp-panel p-4 flex flex-col gap-3 hidden">
-                    <h3 class="text-center text-lg font-bold text-sky-300 mb-2">MULTIPLAYER (LAN)</h3>
-                    <p class="text-center text-xs text-slate-400 mb-4">Host a game or join a friend on the same network. Make sure the signaling server is running!</p>
+                    <h3 class="text-center text-lg font-bold text-sky-300 mb-2">MULTIPLAYER (ONLINE · P2P)</h3>
+                    <p class="text-center text-xs text-slate-400 mb-4">Host a room and share the code — friends join from anywhere, itch.io included. No server to run. Everyone must be on the <span id="mp-version-tag" class="text-amber-300 font-bold">same version</span>.</p>
 
                     <div class="glass-panel-light p-3 rounded-xl">
-                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-1.5">SIGNALING SERVER (for itch.io: paste your public server URL)</div>
-                        <div class="flex gap-1.5">
-                            <input type="text" id="mp-server-url" class="flex-1 bg-slate-900/80 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 font-mono" placeholder="wss://your-server.onrender.com" spellcheck="false">
-                            <button id="btn-mp-server-save" class="px-3 py-1.5 bg-sky-500 hover:bg-sky-400 text-slate-950 text-[11px] font-black rounded-lg whitespace-nowrap">Save</button>
-                        </div>
-                        <div id="mp-server-status" class="text-[10px] text-slate-500 mt-1">Default: auto (same network, port 8080)</div>
+                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-1.5">PEERJS CLOUD (FREE BROKER — GAME DATA STAYS PEER-TO-PEER)</div>
+                        <div id="mp-peer-status" class="text-[10px] text-slate-500 mt-1">● checking…</div>
+                    </div>
+
+                    <div class="glass-panel-light p-3 rounded-xl">
+                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-1.5">PILOT NAME (SHOWN TO THE ROOM · REMEMBERED)</div>
+                        <input type="text" id="mp-player-name" maxlength="12" placeholder="e.g. LilCat" autocomplete="off" spellcheck="false"
+                            class="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-2 text-sm font-black tracking-wider text-white placeholder-slate-500 focus:outline-none focus:border-sky-500">
                     </div>
                     
                     <button id="btn-host" class="menu-btn bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950">
@@ -546,8 +659,14 @@
                 <!-- Join Room Panel -->
                 <div id="mp-panel-join" class="mp-panel p-4 flex flex-col gap-3 hidden">
                     <h3 class="text-center text-lg font-bold text-sky-300 mb-2">JOIN ROOM</h3>
-                    <p class="text-center text-xs text-slate-400 mb-2">Enter the 4-character room code from the host</p>
-                    
+                    <p class="text-center text-xs text-slate-400 mb-2">Enter the 4-character room code from the host (same game version required)</p>
+
+                    <div class="glass-panel-light p-3 rounded-xl">
+                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-1.5">PILOT NAME (SHOWN TO THE ROOM · REMEMBERED)</div>
+                        <input type="text" id="mp-player-name-join" maxlength="12" placeholder="e.g. LilCat" autocomplete="off" spellcheck="false"
+                            class="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-2 text-sm font-black tracking-wider text-white placeholder-slate-500 focus:outline-none focus:border-sky-500">
+                    </div>
+
                     <div class="flex gap-2">
                         <input type="text" id="join-room-code" class="flex-1 bg-slate-900/80 border border-slate-700 rounded-xl px-4 py-3 text-center text-xl font-black tracking-widest text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 uppercase" placeholder="ABCD" maxlength="4" style="letter-spacing: 0.5em;">
                         <button id="btn-join-submit" class="menu-btn bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-400 hover:to-sky-500 text-white whitespace-nowrap">
@@ -588,8 +707,18 @@
                         <div id="mp-lobby-players" class="flex flex-col gap-1.5"></div>
                     </div>
 
+                    <div class="glass-panel-light p-3 rounded-xl" id="mp-slot-box">
+                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-1.5">MY MULTIPLAYER FILE (SLOTS SEPARATE FROM SINGLE PLAYER)</div>
+                        <div class="flex gap-1.5" id="mp-slots-row">
+                            <button class="mp-slot-btn flex-1 px-2 py-1.5 rounded-lg text-xs font-black bg-slate-800/60 border border-slate-700 text-slate-300" data-slot="1">Slot 1</button>
+                            <button class="mp-slot-btn flex-1 px-2 py-1.5 rounded-lg text-xs font-black bg-slate-800/60 border border-slate-700 text-slate-300" data-slot="2">Slot 2</button>
+                            <button class="mp-slot-btn flex-1 px-2 py-1.5 rounded-lg text-xs font-black bg-slate-800/60 border border-slate-700 text-slate-300" data-slot="3">Slot 3</button>
+                        </div>
+                        <div id="mp-slot-meta" class="text-[10px] text-slate-500 mt-1">Pick a multiplayer slot</div>
+                    </div>
+
                     <div class="glass-panel-light p-3 rounded-xl" id="mp-expedition-box">
-                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-1.5">EXPEDITION SAVE (HOST'S FILE)</div>
+                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-1.5" id="mp-expedition-title">EXPEDITION SAVE (HOST'S FILE)</div>
                         <div class="flex gap-1.5">
                             <button id="btn-mp-new" class="flex-1 px-2 py-2 rounded-xl text-xs font-black bg-slate-800/60 border border-slate-600 text-slate-200">NEW</button>
                             <button id="btn-mp-continue" class="flex-1 px-2 py-2 rounded-xl text-xs font-black bg-emerald-500/20 border border-emerald-500/40 text-emerald-300">CONTINUE</button>
@@ -602,10 +731,22 @@
                             <i class="fa-solid fa-rocket mr-2"></i> <span>Start Game</span>
                         </button>
                     </div>
+
+                    <div class="glass-panel-light p-3 rounded-xl">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <div class="text-[10px] font-black tracking-widest text-slate-400">MP LOG — QUOTE THIS WHEN REPORTING</div>
+                            <button id="btn-feedback-lobby" class="text-[10px] font-black px-2 py-1 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30">
+                                <i class="fa-solid fa-bug mr-1"></i> Report bug
+                            </button>
+                        </div>
+                        <div id="mp-log-list" class="font-mono text-[10px] text-slate-400 max-h-24 overflow-y-auto flex flex-col gap-0.5">
+                            <div class="text-slate-600">— no events yet —</div>
+                        </div>
+                    </div>
                     
                     <div class="text-center text-[10px] text-slate-500 pt-2 border-t border-slate-800">
-                        <p>Host shares the room code · Max 4 players · LAN only</p>
-                        <p class="mt-1">Both computers must be on the same network</p>
+                        <p>Host shares the room code · Max 4 players · Online P2P — same version required</p>
+                        <p class="mt-1">Works on itch.io · No server to run · Custom skins sync so everyone sees the same art</p>
                     </div>
                 </div>
 
@@ -724,12 +865,33 @@
                             <div><span class="key">ESC</span> Menu</div>
                         </div>
                     </div>
+                    <div class="glass-panel-light p-3 rounded-xl mb-3">
+                        <div class="text-[10px] font-black tracking-widest text-emerald-400 mb-2">🎮 GAMEPAD (XBOX / PLAYSTATION)</div>
+                        <div class="grid grid-cols-2 gap-1.5 text-xs font-bold text-emerald-200">
+                            <div><span class="key">L-stick</span> Move</div>
+                            <div><span class="key">R-stick</span> Aim</div>
+                            <div><span class="key">RT</span> Shoot</div>
+                            <div><span class="key">A</span> Cast / Reel</div>
+                            <div><span class="key">B</span> Talk / Shop</div>
+                            <div><span class="key">X</span> Reload</div>
+                            <div><span class="key">Y</span> Fish Index</div>
+                            <div><span class="key">LB/RB</span> Weapons</div>
+                            <div><span class="key">D-pad</span> Slots 1-4</div>
+                            <div><span class="key">Start</span> Menu</div>
+                        </div>
+                    </div>
+                    <div class="glass-panel-light p-3 rounded-xl mb-3">
+                        <div class="text-[10px] font-black tracking-widest text-fuchsia-400 mb-2">📱 TOUCH (MOBILE)</div>
+                        <p class="text-xs text-slate-300 leading-relaxed">Left stick moves. <b>CAST</b> throws / reels / pulls the bobber back. <b>FIRE</b> auto-aims the nearest threat and shoots. Weak phones auto-drop to low perf mode.</p>
+                    </div>
                     <div class="glass-panel-light p-3 rounded-xl mb-3 text-xs text-slate-300 leading-relaxed space-y-1.5 max-h-[30vh] overflow-y-auto">
                         <p><b class="text-amber-300">1.</b> Stand near the water, hold <span class="key">SPACE</span> to charge, release to cast.</p>
                         <p><b class="text-amber-300">2.</b> When a fish bites, <b>shoot it</b> to drain stamina, then hold <span class="key">SPACE</span> to reel. Watch the red tension bar — ease off before it snaps!</p>
                         <p><b class="text-amber-300">3.</b> Drag it onto the sand, finish it, walk over the loot to collect.</p>
                         <p><b class="text-amber-300">4.</b> Sell catches, buy guns, rods, armor. Talk to <b class="text-amber-300">OLD MARLIN</b> (press <span class="key">E</span>) for fish-catching quests.</p>
                         <p><b class="text-amber-300">5.</b> Slay 20 seagulls and their mother, the <b class="text-rose-400">STORMCALLER</b>, will come. No fishing during her storm.</p>
+                        <p><b class="text-amber-300">6.</b> Time, weather and water tier matter: the <b>clock chip</b> (top-left) shows all three. Fish bite far more when conditions match — night hunters at night, storm fish in storms, giants in the <b class="text-fuchsia-300">DEEP</b>.</p>
+                        <p><b class="text-amber-300">7.</b> Walk the long <b>pier</b> (middle of the beach) to reach SHALLOW then DEEP water — shallow glows light, deep runs dark. Ride the <b>⛵ ferry</b> (real sailing trip) to 3 wild isles, each with its own pier, surrounding sea and special lake (epic / legendary / mythic bonuses). Day/Night lighting can be toggled in Settings — time keeps running.</p>
                     </div>
                 </div>
 
@@ -765,6 +927,8 @@
                         </div>
                         <button id="set-fx" class="menu-btn justify-between"><span><i class="fa-solid fa-sparkles mr-2"></i> Particles</span><span id="set-fx-val" class="text-emerald-300 font-black">MED</span></button>
                         <button id="set-shake" class="menu-btn justify-between"><span><i class="fa-solid fa-house-crack mr-2"></i> Screen Shake</span><span id="set-shake-val" class="text-emerald-300 font-black">ON</span></button>
+                        <button id="set-daynight" class="menu-btn justify-between"><span><i class="fa-solid fa-moon mr-2"></i> Day/Night FX</span><span id="set-daynight-val" class="text-emerald-300 font-black">ON</span></button>
+                        <button id="set-touch" class="menu-btn justify-between"><span><i class="fa-solid fa-mobile-screen mr-2"></i> Touch UI</span><span id="set-touch-val" class="text-emerald-300 font-black">AUTO</span></button>
                         <button id="set-tutorial" class="menu-btn justify-between"><span><i class="fa-solid fa-graduation-cap mr-2"></i> Replay Tutorial</span><span class="text-sky-300 font-black">GO</span></button>
                     </div>
                     <div class="flex flex-col gap-2 mt-2" id="assetpack-box">
@@ -803,13 +967,21 @@
     <script src="js/player.js"></script>
     <script src="js/shop.js"></script>
     <script src="js/anticheat.js"></script>
+    <!-- PeerJS P2P transport (free cloud broker, works on itch.io, no localhost server) -->
+    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script src="js/peerlink.js"></script>
     <script src="js/multiplayer.js"></script>
     <script src="js/casino.js"></script>
     <script src="js/enemies.js"></script>
     <script src="js/achievements.js"></script>
     <script src="js/npc.js"></script>
     <script src="js/ritual.js"></script>
+    <script src="js/world.js"></script>
     <script src="js/assetpack.js"></script>
+    <script src="js/gamepad.js"></script>
+    <script src="js/touch.js"></script>
+    <script src="js/bgtick.js"></script>
+    <script src="js/feedback.js"></script>
     <script src="js/main.js"></script>
 </body>
 </html>

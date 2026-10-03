@@ -53,7 +53,7 @@ const SKIP_DIRS = new Set([
   'coverage',
   '.cache',
 ]);
-const SKIP_FILES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini', '.gitkeep', '.gitignore']);
+const SKIP_FILES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini', '.gitkeep', '.gitignore', 'secret.js']);
 const SKIP_EXT = new Set(['.map', '.log', '.md', '.psd', '.zip']);
 
 // itch.io free hosting is fine with small games; warn early if something is off.
