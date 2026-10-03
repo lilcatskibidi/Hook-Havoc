@@ -1947,16 +1947,28 @@ const Projectiles = {
             const proj = state.projectiles[i];
 
             // Ownership: my own hooked-fish shots fully simulate (and can
-            // hurt ME, the catcher). Everyone else's shots are dead-reckoned
-            // visual-only — they home toward the CATCHER, never toward me,
-            // so a crewmate's fight is visible but can't kill me by proxy.
+            // hurt ME, the catcher). Another catcher's shots ALSO fully
+            // simulate here (shared threat — homing picks the nearest of
+            // me/catcher, damage is personal per machine). Echoes of MY
+            // own shots (owner===me, non-local) and ownerless boss shots
+            // stay visual-only (echoes were already resolved by my sim;
+            // boss hits arrive via damage intake).
             let mine = true;
             try {
                 if (typeof Multiplayer !== 'undefined' && Multiplayer.roomCode) {
                     mine = Multiplayer.isHost ? !proj.remote : !!proj.local;
                 }
             } catch (e) {}
+            let visualOnly = false;
             if (!mine) {
+                try {
+                    const owner = proj.ownerPid || proj.owner;
+                    const me = (typeof Multiplayer !== 'undefined' && Multiplayer.localClientId) || null;
+                    if (owner && me && owner === me && !proj.local) visualOnly = true;
+                    else if (!owner) visualOnly = true;
+                } catch (e) { visualOnly = true; }
+            }
+            if (!mine && visualOnly) {
                 this._moveRemote(state, proj, delta);
                 if (proj.life <= 0) state.projectiles.splice(i, 1);
                 continue;
@@ -1974,9 +1986,13 @@ const Projectiles = {
                 proj.y += Math.sin(proj.spiralAngle) * (proj.spiralRadius || 3);
             }
 
-            // Homing logic with improved turn speed
+            // Homing logic with improved turn speed. Shared-fight
+            // retarget: catcher-owned shots hunt the NEAREST of {me,
+            // catcher}, so hooked fish threaten helpers too — not just
+            // whoever cast the line.
             if (proj.isHoming && proj.life > 0.3) {
-                const angle = Math.atan2(p.y - proj.y, p.x - proj.x);
+                const tgt = this._homingTarget(state, proj);
+                const angle = Math.atan2(tgt.y - proj.y, tgt.x - proj.x);
                 proj.vx += Math.cos(angle) * (proj.homingForce || 350) * delta;
                 proj.vy += Math.sin(angle) * (proj.homingForce || 350) * delta;
             }
@@ -2061,6 +2077,35 @@ const Projectiles = {
                 state.projectiles.splice(i, 1);
             }
         }
+    },
+
+    // Shared-fight homing target: nearest of {my body, catcher body}.
+    // Solo / ownerless shots always hunt me (unchanged base behavior).
+    _homingTarget(state, proj) {
+        const p = state.player;
+        let tx = p.x, ty = p.y;
+        try {
+            if (typeof Multiplayer === 'undefined' || !Multiplayer.roomCode) return { x: tx, y: ty };
+            const owner = proj.ownerPid || proj.owner;
+            if (!owner) return { x: tx, y: ty };
+            let cx = null, cy = null;
+            if (state.remotePlayers && state.remotePlayers[owner]) {
+                const rp = state.remotePlayers[owner];
+                cx = (typeof rp.rx === 'number') ? rp.rx : rp.x;
+                cy = (typeof rp.ry === 'number') ? rp.ry : rp.y;
+            } else if (Multiplayer.hostPeers && Multiplayer.hostPeers[owner]) {
+                cx = Multiplayer.hostPeers[owner].x;
+                cy = Multiplayer.hostPeers[owner].y;
+            }
+            if (typeof cx !== 'number' || typeof cy !== 'number') return { x: tx, y: ty };
+            // Owner IS me (my own shots): target me, exactly like solo.
+            const me = Multiplayer.localClientId || null;
+            if (me && owner === me) return { x: tx, y: ty };
+            const dMe = Math.hypot(p.x - proj.x, p.y - proj.y);
+            const dC = Math.hypot(cx - proj.x, cy - proj.y);
+            if (dC < dMe) { tx = cx; ty = cy; }
+        } catch (e) {}
+        return { x: tx, y: ty };
     },
 
     // Dead-reckoning for another catcher's skill shots (shared fight

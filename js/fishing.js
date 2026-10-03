@@ -321,6 +321,10 @@ const Fishing = {
             'Step 3', 'amber'
         );
 
+        // MP aggro: mark nearby hunters — the fish must kill them or watch
+        // them flee before it may vanish (see buildAggro/aggroTick).
+        try { this.buildAggro(state); } catch (e) {}
+
         // BOSSES are never reeled: the line snaps on the spot and the
         // boss stays under the sea, swimming and shooting back. Guns out.
         if (species.isBoss && f.hookedFish) {
@@ -344,6 +348,128 @@ const Fishing = {
         if (species.mutation === 'void' && f.hookedFish) {
             Particles.showFloatingText(state, '🌀 VOID-TAINTED! Kill it for its shard...', f.bobber.x, f.bobber.y - 80, '#c084fc');
         }
+    },
+
+    // MP aggro list: whoever is NEAR when the fish is hooked is marked —
+    // the fish must kill them (or watch them flee) before it may vanish.
+    // Solo rooms / bosses: no aggro, legacy behavior untouched.
+    AGGRO_RADIUS: 700,
+    FLEE_RADIUS: 1400,
+
+    buildAggro(state) {
+        try {
+            const fish = state.fishing && state.fishing.hookedFish;
+            if (!fish || !fish.species || fish.species.isBoss) return;
+            if (typeof Multiplayer === 'undefined' || !Multiplayer.roomCode) return;
+            const me = Multiplayer.localClientId || 'self';
+            const list = [{ pid: me, self: true }];
+            const R = this.AGGRO_RADIUS;
+            const add = (pid, x, y) => {
+                if (!pid || pid === me) return;
+                if (typeof x !== 'number' || typeof y !== 'number') return;
+                if (Math.hypot(x - fish.x, y - fish.y) > R) return;
+                list.push({ pid });
+            };
+            if (Multiplayer.isHost) {
+                const peers = Multiplayer.hostPeers || {};
+                for (const pid of Object.keys(peers)) {
+                    const rp = peers[pid];
+                    if (rp) add(pid, rp.x, rp.y);
+                }
+            } else if (state.remotePlayers) {
+                for (const pid of Object.keys(state.remotePlayers)) {
+                    const rp = state.remotePlayers[pid];
+                    if (!rp) continue;
+                    add(pid, (typeof rp.rx === 'number') ? rp.rx : rp.x,
+                        (typeof rp.ry === 'number') ? rp.ry : rp.y);
+                }
+            }
+            // A lone catcher fights the legacy fight (no raid announce).
+            if (list.length > 1) {
+                fish.aggro = list;
+                const others = list.length - 1;
+                Particles.showFloatingText(state,
+                    `⚔ RAID HOOKED! ${others} hunter${others > 1 ? 's' : ''} marked — it must kill or outrun!`,
+                    fish.x, fish.y - 70, '#f87171');
+            }
+        } catch (e) {}
+    },
+
+    // Resolve one aggro entry to a live body (pos / death / map slice).
+    _aggroBody(state, entry) {
+        try {
+            const p = state.player;
+            if (entry.self) {
+                return {
+                    x: p.x, y: p.y, dead: !(p.hp > 0) || !!p.isDead,
+                    map: ((p.onIsland || null) + '|' + (!!p.inCave)),
+                    name: 'you',
+                };
+            }
+            const pid = entry.pid;
+            let rp = null;
+            try {
+                if (typeof Multiplayer !== 'undefined' && Multiplayer.isHost) {
+                    rp = (Multiplayer.hostPeers || {})[pid] || null;
+                } else if (state.remotePlayers) {
+                    rp = state.remotePlayers[pid] || null;
+                }
+            } catch (e) { rp = null; }
+            if (!rp) return { gone: true };
+            const x = (typeof rp.rx === 'number') ? rp.rx : rp.x;
+            const y = (typeof rp.ry === 'number') ? rp.ry : rp.y;
+            return {
+                x, y,
+                dead: !(rp.hp > 0),
+                map: (((rp.onIsland || null)) + '|' + (!!rp.inCave)),
+                name: rp.playerName || rp.label || 'crewmate',
+            };
+        } catch (e) { return { gone: true }; }
+    },
+
+    _catcherMap(state) {
+        try {
+            const p = state.player;
+            return ((p.onIsland || null) + '|' + (!!p.inCave));
+        } catch (e) { return '|false'; }
+    },
+
+    // Per-frame aggro: 'escaped' (caller must return), 'hold', or null.
+    // Dead/gone/fled entries resolve; fled = too far (>1400px) or on
+    // another map slice (other island / portal / cave) — the fish then
+    // runs back to the sea.
+    aggroTick(state, fish) {
+        try {
+            if (!fish.aggro || !fish.aggro.length) return null;
+            if (fish.isDead || !fish.species || fish.species.isBoss) { fish.aggro = null; return null; }
+            if (fish.dragState !== 'IN_WATER') { fish.aggro = null; return null; }
+            const myMap = this._catcherMap(state);
+            let engaged = 0;
+            const fledNames = [];
+            for (const entry of fish.aggro) {
+                if (!entry) continue;
+                const b = this._aggroBody(state, entry);
+                if (b.gone) { entry.done = 'gone'; continue; }
+                if (b.dead) { entry.done = 'dead'; continue; }
+                const far = Math.hypot((b.x || 0) - fish.x, (b.y || 0) - fish.y) > this.FLEE_RADIUS;
+                if (far || b.map !== myMap) {
+                    if (!entry.done) fledNames.push(b.name);
+                    entry.done = 'fled';
+                    continue;
+                }
+                entry.done = null;
+                engaged++;
+            }
+            if (engaged > 0) return 'hold';
+            // Nobody left to fight: the fish slips back to the sea.
+            fish.aggro = null;
+            try { audio.stopReelLoop(); } catch (e) {}
+            this.escapeFish(state, fledNames.length
+                ? `FISH FLED! (${fledNames.slice(0, 2).join(', ')} ran)`
+                : 'FISH VANISHED!');
+            UI.updateStatusBanner('Everyone left the fight — the fish returned to the sea.', 'Escaped', 'rose');
+            return 'escaped';
+        } catch (e) { return null; }
     },
 
     killHookedFish(state) {
@@ -480,6 +606,13 @@ const Fishing = {
             return;
         }
 
+        // MP aggro: while marked hunters stand their ground the fish may
+        // not vanish; when none remain it slips back to the sea.
+        if (fish.aggro && fish.aggro.length) {
+            const ag = this.aggroTick(state, fish);
+            if (ag === 'escaped') return;
+        }
+
         const isReeling = !!state.keys[' '];
         const inWater = !fish.isDead && fish.dragState === 'IN_WATER';
         const isFighting = inWater && (isReeling || fish.hp < fish.maxHp);
@@ -514,6 +647,14 @@ const Fishing = {
                     Particles.showFloatingText(state,
                         `${fish.species.name.toUpperCase()} REFUSES TO FLEE!`,
                         fish.x, fish.y - 50, '#ef4444');
+                // MP aggro hold: marked hunters still engaged → no vanishing.
+                // Kill it or outrun it (1400px / other island / portal).
+                } else if (fish.aggro && fish.aggro.length && fish.aggro.some(e => e && !e.done)) {
+                    fish.seaTimer = fish.seaEscapeLimit * 0.7;
+                    state.screenShake = Math.max(state.screenShake || 0, 6);
+                    Particles.showFloatingText(state,
+                        'THE FISH WANTS BLOOD! (kill it or outrun it)',
+                        fish.x, fish.y - 55, '#ef4444');
                 } else {
                 try { audio.playSnap(); } catch (e) {}
                 state.screenShake = 10;

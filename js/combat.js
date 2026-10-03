@@ -415,21 +415,13 @@ const Combat = {
             }
         }
 
-        // Host fish-skill projectiles — same one-hit-per-id rule.
-        // Skipped when the shot belongs to ANOTHER catcher (catcherOnly):
-        // you SEE crewmates' fights, but their fish can't hurt you by
-        // proxy. Your own echoed shots are skipped too (your sim already
-        // resolved them). Ownerless shots (bosses) threaten everyone.
+        // Host fish-skill projectiles WITHOUT a catcher owner (bosses) —
+        // same one-hit-per-id rule. Catcher-owned shots are fully
+        // simulated in Projectiles.update now (shared threat, personal
+        // damage), so intake skips them — no double hits.
         for (const b of (state.projectiles || [])) {
             if (!b.id || cd['p:' + b.id]) continue;
-            if (b.catcherOnly) {
-                let mine2 = false;
-                try {
-                    const me = (typeof Multiplayer !== 'undefined' && Multiplayer.localClientId) || null;
-                    mine2 = !!(me && b.owner && b.owner === me);
-                } catch (e) {}
-                if (!mine2) continue;
-            }
+            if (b.owner || b.ownerPid) continue;
             const dist = Math.hypot(p.x - b.x, p.y - b.y);
             if (dist < (p.radius || 15) + (b.radius || 8)) {
                 cd['p:' + b.id] = 1;

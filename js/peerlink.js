@@ -119,19 +119,32 @@ const PeerLink = {
 
     peerOptions(idOrUndefined) {
         const iceServers = this.DEFAULT_STUN.map(u => ({ urls: u }));
+        let opt = { debug: 0, config: { iceServers } };
+        // HTTPS pages (GitHub Pages, itch.io) MUST signal over WSS or the
+        // browser blocks it as mixed content and the cloud never connects
+        // (the classic "works on localhost http, dead on github"). Pin the
+        // cloud endpoint explicitly instead of trusting library defaults.
+        // Localhost http keeps library defaults (don't fix what's working).
+        try {
+            if (typeof location !== 'undefined' && location.protocol === 'https:') {
+                opt.secure = true;
+                opt.host = '0.peerjs.com';
+                opt.port = 443;
+                opt.path = '/';
+            }
+        } catch (e) {}
+        try {
+            if (typeof window !== 'undefined' && window.PEER_CONFIG && typeof window.PEER_CONFIG === 'object') {
+                opt = Object.assign({}, opt, window.PEER_CONFIG);
+            }
+        } catch (e) {}
         try {
             const raw = localStorage.getItem('ah_peer_ice');
             if (raw) {
                 const arr = JSON.parse(raw);
                 if (Array.isArray(arr) && arr.length) {
-                    return { debug: 0, config: { iceServers: arr.slice(0, 8) } };
+                    opt.config = { iceServers: arr.slice(0, 8) };
                 }
-            }
-        } catch (e) {}
-        let opt = { debug: 0, config: { iceServers } };
-        try {
-            if (typeof window !== 'undefined' && window.PEER_CONFIG && typeof window.PEER_CONFIG === 'object') {
-                opt = Object.assign({}, opt, window.PEER_CONFIG);
             }
         } catch (e) {}
         return opt;

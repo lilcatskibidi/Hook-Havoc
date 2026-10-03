@@ -1080,6 +1080,9 @@ const Multiplayer = {
             // gate in applyRemoteState).
             cave: { unlocked: !!(this.state.player && this.state.player.caveUnlocked) },
             screenShake: RI(this.state.screenShake),
+            // Shared boss chances: ONE room counter (10). Host deaths bump
+            // it locally (Player.die); client deaths arrive as notices.
+            bossDeaths: this.state.bossDeaths || 0,
             activeBoss: this.state.activeBoss ? {
                 id: this.state.activeBoss.id,
                 species: this._slimSpecies(this.state.activeBoss.species),
@@ -1326,6 +1329,11 @@ const Multiplayer = {
             // Sync boss
             if (sameMap && remoteState.activeBoss) {
                 this.syncBoss(remoteState.activeBoss);
+            }
+
+            // Shared boss chances (ONE room counter — any death counts).
+            if (typeof remoteState.bossDeaths === 'number') {
+                this.state.bossDeaths = Math.max(0, Math.min(99, remoteState.bossDeaths | 0));
             }
             
             // Screen shake
@@ -1827,6 +1835,33 @@ const Multiplayer = {
         if (input.awardAck && this._pendingAwards) {
             for (const [apid, a] of Object.entries(this._pendingAwards)) {
                 if (apid === pid && a && a.aid === input.awardAck) delete this._pendingAwards[apid];
+            }
+        }
+        // Shared boss lives: a client's death during the HOST's boss fight
+        // consumes one of the room's 10 chances — A, B or C, every death
+        // counts the same. Detected via the death counter (once per death).
+        if (typeof input._deathSeq === 'number') {
+            if (rp._lastDeathSeq === undefined) {
+                rp._lastDeathSeq = input._deathSeq; // baseline, don't count history
+            } else if (input._deathSeq > rp._lastDeathSeq) {
+                rp._lastDeathSeq = input._deathSeq;
+                try {
+                    if (typeof Ritual !== 'undefined' && Ritual.bossFightActive && Ritual.bossFightActive(this.state)) {
+                        this.state.bossDeaths = (this.state.bossDeaths || 0) + 1;
+                        const left = Math.max(0, 10 - this.state.bossDeaths);
+                        const nm = rp.playerName || rp.label || 'A crewmate';
+                        if (typeof Particles !== 'undefined') {
+                            Particles.showFloatingText(this.state, `💀 ${nm} FELL! ${left} CHANCES LEFT`, rp.x || 0, (rp.y || 0) - 60, '#f87171');
+                        }
+                        if (typeof UI !== 'undefined' && UI.updateStatusBanner) {
+                            UI.updateStatusBanner(`💀 <b>${nm}</b> died in the boss fight! <b>${left}</b> ${left === 1 ? 'chance' : 'chances'} left.`, 'Boss', 'rose');
+                        }
+                        try { if (typeof audio !== 'undefined' && audio.playRoar) audio.playRoar(); } catch (e) {}
+                        if (this.state.bossDeaths >= 10 && typeof Player !== 'undefined' && Player.fleeBoss) {
+                            try { Player.fleeBoss(this.state); } catch (e) {}
+                        }
+                    }
+                } catch (e) {}
             }
         }
         // Merge this client's fresh bullets into the host sim (dedupe by id)
@@ -2401,15 +2436,23 @@ const Multiplayer = {
         }
 
         // Name tag + HP bar (screen space) — the player's chosen name.
+        // Corpses render gray with a skull + DIED tag (world keeps running).
+        const rpDead = !(rp.hp > 0);
         ctx.save();
         ctx.font = 'bold 12px Work Sans';
         ctx.textAlign = 'center';
-        ctx.fillStyle = '#f472b6';
+        ctx.fillStyle = rpDead ? '#64748b' : '#f472b6';
         ctx.strokeStyle = 'rgba(0,0,0,0.8)';
         ctx.lineWidth = 3;
         const name = rp.playerName || rp.label || 'Player ?';
         ctx.strokeText(name, sx, sy - 35 * sc);
         ctx.fillText(name, sx, sy - 35 * sc);
+        if (rpDead) {
+            ctx.font = 'bold 11px Work Sans';
+            ctx.fillStyle = '#f87171';
+            ctx.strokeText('💀 DIED', sx, sy + 22 * sc);
+            ctx.fillText('💀 DIED', sx, sy + 22 * sc);
+        }
 
         const barW = 50 * sc;
         const hpRatio = Math.max(0, Math.min(1, (rp.hp || 1) / (rp.maxHp || 100)));
@@ -2557,17 +2600,30 @@ const Multiplayer = {
                     ctx.roundRect(hp.x - barW / 2, barY + 7 * sc, Math.max(0, (h.stamina || 0) / h.staminaMax) * barW, 5 * sc, 2);
                     ctx.fill();
                 }
-                // Same labels as single player: always the catch name, plus
-                // the red skill warning right before it fires.
+                // Labels: catch name (+rarity + who hooked it) or the red
+                // skill warning right before it fires. HP/stamina bars above
+                // already show the blood — same as single player.
                 ctx.textAlign = 'center';
                 if ((h.skillCooldown || 99) < 0.5 && !h.isDead) {
                     ctx.fillStyle = '#ef4444';
                     ctx.font = `bold ${11 * sc}px Work Sans`;
                     ctx.fillText(`⚠ ${h.skillName || 'SKILL'}`, hp.x, barY - 8);
                 } else {
+                    let who = '';
+                    try { who = rp.playerName || rp.label || ''; } catch (e) {}
+                    const rar = String(h.rarity || species.rarity || 'common').toUpperCase();
+                    let rarCol = '#cbd5e1';
+                    try {
+                        if (typeof CONFIG !== 'undefined' && CONFIG.RARITY_COLORS) {
+                            rarCol = CONFIG.RARITY_COLORS[String(h.rarity || species.rarity || 'common').toLowerCase()] || rarCol;
+                        }
+                    } catch (e) {}
                     ctx.fillStyle = '#f472b6';
                     ctx.font = `bold ${10 * sc}px Work Sans`;
                     ctx.fillText(`🎣 ${h.name || species.name || ''}`, hp.x, barY - 6);
+                    ctx.font = `bold ${9 * sc}px Work Sans`;
+                    ctx.fillStyle = rarCol;
+                    ctx.fillText(`${rar}${who ? ' · hooked by ' + who : ''}`, hp.x, barY - 19);
                 }
             }
         }

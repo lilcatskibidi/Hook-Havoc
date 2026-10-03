@@ -10,6 +10,11 @@ const Player = {
             return;
         }
 
+        // Corpses don't act: no walking, no casting, no drift. The WORLD
+        // keeps simulating around the body (see mainLoop) — only the
+        // body's own update stops here.
+        if (p.isDead) return;
+
         if (p.stunTimer > 0) {
             p.stunTimer = Math.max(0, p.stunTimer - delta);
         } else if (state.fishing && state.fishing.mode === 'CASTING') {

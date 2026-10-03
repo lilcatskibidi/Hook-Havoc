@@ -287,7 +287,7 @@ const Feedback = {
         // Missing file = one quiet network 404, nothing breaks.
         try {
             const s = document.createElement('script');
-            s.src = 'js/secret.js';
+            s.src = 'js/secret.js?v=125';
             s.async = true;
             s.onerror = () => { try { s.remove(); } catch (e) {} };
             document.head.appendChild(s);

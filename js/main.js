@@ -2857,6 +2857,9 @@ function mpClientInput() {
             isDown: state.mouse.isDown
         },
         aim: Math.atan2(state.mouse.worldY - state.player.y, state.mouse.worldX - state.player.x),
+        // Death counter: the host watches it edge-trigger a shared boss
+        // life loss (ONE room counter — any player's death counts).
+        _deathSeq: state._deathSeq || 0,
         player: {
             x: state.player.x,
             y: state.player.y,
@@ -2877,9 +2880,11 @@ function mainLoop(time) {
     const delta = Math.min(0.05, (time - lastTime) / 1000);
     lastTime = time;
 
-    // If paused (menu open) or dead (respawn menu open), skip simulation
-    // but still render — the world freezes while you choose.
-    if (state.paused || (state.player && state.player.isDead)) {
+    // If paused (menu open), skip simulation but still render.
+    // Death NO LONGER freezes anything: the world, enemies and MP keep
+    // running while the corpse waits (MP rooms survive anyone's death) —
+    // the death menu takes over input, the body renders a skull marker.
+    if (state.paused) {
         if (typeof Render !== 'undefined' && Render.drawWorld && ctx) {
             Render.drawWorld(state, ctx);
         }

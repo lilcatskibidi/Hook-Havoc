@@ -1558,6 +1558,26 @@ const Render = {
             this.drawGun(ctx, p, w, holder);
         }
 
+        // Corpse marker: dark shroud + skull + DIED tag (unrotated text).
+        if (p.isDead) {
+            ctx.fillStyle = 'rgba(0,0,0,0.55)';
+            ctx.beginPath();
+            ctx.arc(0, 0, (p.radius || 16) + 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.save();
+            ctx.rotate(-aimAngle);
+            ctx.textAlign = 'center';
+            ctx.font = '22px serif';
+            ctx.fillText('💀', 0, 8);
+            ctx.font = 'bold 12px Work Sans';
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+            ctx.strokeText('DIED', 0, -24);
+            ctx.fillStyle = '#f87171';
+            ctx.fillText('DIED', 0, -24);
+            ctx.restore();
+        }
+
         ctx.restore();
     },
 
