@@ -224,9 +224,15 @@ const PeerLink = {
             let settled = false;
             let peer = null;
             let conn = null;
+            // Timer guards, declared FIRST: every fail path (including the
+            // synchronous `new Peer` throw below) touches them, so a later
+            // declaration would throw a TDZ ReferenceError.
+            let openTimer = null;
+            const clearOpen = () => { try { if (openTimer) clearTimeout(openTimer); openTimer = null; } catch (e) {} };
             const fail = (err) => {
                 if (settled) return;
                 settled = true;
+                clearOpen();
                 // Null FIRST: conn.close() can fire 'close' synchronously,
                 // and the handler must not mistake our own teardown for
                 // "Host left the game".
@@ -285,13 +291,12 @@ const PeerLink = {
                 // peer-unavailable) but the DataChannel never opens in
                 // 10s = NAT/firewall in the way, NOT a wrong code. Without
                 // this the 20s overall timeout misreports "Room not found".
-                const openTimer = setTimeout(() => {
+                openTimer = setTimeout(() => {
                     if (!settled) {
                         clearOverall();
                         fail(new Error('P2P channel blocked — the room exists, but your networks cannot connect directly (NAT/firewall). Same WiFi usually works; otherwise the host needs a TURN server (see Feedback panel).'));
                     }
                 }, 10000);
-                const clearOpen = () => { try { clearTimeout(openTimer); } catch (e) {} };
                 conn.once('open', () => {
                     // Identity rides the hello: this TAB's transport id +
                     // this TAB's pilot name (session-scoped, never another

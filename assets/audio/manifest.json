@@ -1,5 +1,5 @@
 {
-    "_note": "Which extensions actually exist per sound key. The audio loader reads this first so it never 404-probes missing formats (mp3/ogg/wav fallback only runs when this file is unreachable, e.g. file://). Regenerate by listing assets/audio/.",
+    "_note": "Keys MUST match SoundEngine.ASSETS keys in js/audio.js (e.g. `ui`, not `ui_click`; aliases like thunder/splash/cast need their own entries even when they share a file). The audio loader reads this first so it never 404-probes missing formats (mp3/ogg/wav fallback only runs when this file is unreachable, e.g. file://). Regenerate by listing assets/audio/.",
     "roar": ["mp3"],
     "boss_roar": ["mp3"],
     "skill_cast": ["wav"],
@@ -8,9 +8,13 @@
     "throw": ["mp3"],
     "water_touch": ["mp3"],
     "reload": ["mp3"],
+    "thunder": ["wav"],
+    "explosion": ["wav"],
+    "splash": ["mp3"],
+    "cast": ["mp3"],
     "coin": ["mp3"],
     "hit": ["mp3"],
-    "ui_click": ["wav"],
+    "ui": ["wav"],
     "portal": ["mp3"],
     "music": ["mp3"],
     "boss_theme": ["mp3"]

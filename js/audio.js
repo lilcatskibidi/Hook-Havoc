@@ -137,18 +137,33 @@ class SoundEngine {
         // Extension manifest: fetch the exact formats that exist so the
         // loader never 404-probes missing ones (those browser console
         // errors are harmless but noisy). Unreachable manifest (file://,
-        // offline) falls back to mp3 -> ogg -> wav probing per asset.
+        // offline, stale deploy) falls back to mp3 -> ogg -> wav probing.
+        // _loadAsset waits for this (capped) before picking extensions, so
+        // an early sound can never probe the wrong formats first.
         try {
-            this._fetchUrl('assets/audio/manifest.json', 5000).then(ab => {
+            this._manifestPromise = this._fetchUrl('assets/audio/manifest.json', 5000).then(ab => {
                 try {
                     const txt = new TextDecoder().decode(ab);
                     const m = JSON.parse(txt);
                     if (m && typeof m === 'object') this._manifest = m;
                 } catch (e) {}
-                this._preloadAll();
-            }).catch(() => this._preloadAll());
+                this._manifestDone = true;
+            }).catch(() => { this._manifestDone = true; });
+            const cap = new Promise(res => setTimeout(res, 2500));
+            this._manifestWait = Promise.race([this._manifestPromise, cap]).then(() => { this._manifestDone = true; });
         } catch (e) {
-            this._preloadAll();
+            this._manifestDone = true;
+        }
+        // Bulk preload AFTER the manifest settles (capped 2.5s) so every
+        // asset picks exact formats on the first try — no 404 spray.
+        try {
+            if (this._manifestWait && typeof this._manifestWait.then === 'function') {
+                this._manifestWait.then(() => this._preloadAll(), () => this._preloadAll());
+            } else {
+                this._preloadAll();
+            }
+        } catch (e) {
+            try { this._preloadAll(); } catch (ee) {}
         }
     }
 
@@ -186,6 +201,7 @@ class SoundEngine {
         const base = SoundEngine.ASSETS[name];
         if (!base) { this._missing[name] = true; return; }
         this._inflight[name] = true;
+        const start = () => {
         // Manifest hit: only fetch formats that exist (no 404 probes).
         // Otherwise: legacy mp3 -> ogg -> wav probing.
         let exts = SoundEngine.ASSET_EXTS.slice();
@@ -218,7 +234,17 @@ class SoundEngine {
                 }
             }).catch(() => tryNext()); // 404/offline/abort: next extension
         };
-        tryNext();
+        tryNext(); // first attempt (recurses on failure)
+        };
+        // Wait for the manifest (capped) so early sounds never probe the
+        // wrong extensions first; _inflight is already set, so no dupes.
+        try {
+            if (!this._manifestDone && this._manifestWait && typeof this._manifestWait.then === 'function') {
+                this._manifestWait.then(start, start);
+                return;
+            }
+        } catch (e) {}
+        start();
     }
 
     _decode(ab) {
