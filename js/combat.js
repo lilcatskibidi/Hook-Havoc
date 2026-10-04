@@ -3,6 +3,16 @@ const Combat = {
     damagePlayer(state, raw, opts = {}) {
         const p = state.player;
         if (p.isDead) return 0;
+        // Dash i-frames: a clean dodge eats the hit entirely (no chip).
+        if ((p.iframes || 0) > 0) {
+            try {
+                if (!p._dodgeT || state.time - p._dodgeT > 0.4) {
+                    p._dodgeT = state.time;
+                    Particles.showFloatingText(state, 'DODGED!', p.x, p.y - 30, '#67e8f9');
+                }
+            } catch (e) {}
+            return 0;
+        }
         let dmg = Math.max(1, Math.round(raw));
         let dr = 0;
         if (typeof Shop !== 'undefined' && Shop.getDamageReduction) {
@@ -70,6 +80,7 @@ const Combat = {
         if (!isMPClient) this.updateBullets(state, delta);
         this.updateDelayedBlasts(state, delta);
         this.updateGroundHazards(state, delta);
+        this.updateVoidPits(state, delta);
         this.updatePlayerStatus(state, delta);
 
         if (p.isDead || p.hp <= 0) return;
@@ -97,7 +108,8 @@ const Combat = {
                 m._announced = true;
                 state.activeBoss = m;
                 // Full cinematic (pad summons already played it in spawnBoss,
-                // beached/hooked bosses arrive here).
+                // beached/hooked bosses arrive here) + standard 3-2-1 AFTER
+                // the default 10s intro reveal.
                 try {
                     if (typeof Ritual !== 'undefined' && Ritual.bossIntro) Ritual.bossIntro(state, m.species, m.x, m.y, m);
                     else {
@@ -107,6 +119,7 @@ const Combat = {
                             m.x, m.y - 90, '#f59e0b');
                         state.screenShake = 20;
                     }
+                    if (typeof Ritual !== 'undefined' && Ritual.fightCountdown) Ritual.fightCountdown(state, m, { delaySec: 10 });
                 } catch (e) {}
             }
 
@@ -126,6 +139,14 @@ const Combat = {
 
                 if (isBoss) {
                     Particles.spawnParticles(state, m.x, m.y, '#f59e0b', 35);
+                    try {
+                        if (typeof Combat !== 'undefined' && Combat.sonicBoom) {
+                            Combat.sonicBoom(state, m.x, m.y, {
+                                color: (m.species && m.species.color) || '#f59e0b',
+                                rings: 4, maxR: 300, shake: 0, lines: 18,
+                            });
+                        }
+                    } catch (e) {}
                     state.delayedBlasts.push({
                         x: m.x, y: m.y, radius: 120,
                         damage: 0, timer: 0.35, color: '#f59e0b',
@@ -138,6 +159,13 @@ const Combat = {
                 if (m.species.isBoss) {
                     state.activeBoss = null;
                     state.bossDeaths = 0; // won — chances reset
+                    // Boss down: release its grips (tether, QTE, apocalypse).
+                    try {
+                        state.player.tether = null;
+                        state.player.voidDrag = null;
+                        state.player.voidDrain = null;
+                        document.getElementById('tension-hud').classList.add('hidden');
+                    } catch (e) {}
                     // Boss index: kill counts even if the loot is never picked up
                     try {
                         if (!Array.isArray(state.player.slainBosses)) state.player.slainBosses = [];
@@ -154,7 +182,22 @@ const Combat = {
                     UI.updateStatusBanner(`${m.species.name} has fallen!`, 'Victory', 'emerald');
                 }
 
-                state.groundLoot.push({ id: 'l' + (state._lootSeq = (state._lootSeq || 0) + 1), species: m.species, x: m.x, y: m.y });
+                // Personal carcass on clients: tagged _local with a unique
+                // id so the host snapshot merge keeps it (see syncLoot).
+                let lid = 'l' + (state._lootSeq = (state._lootSeq || 0) + 1);
+                let lilocal = false;
+                try {
+                    if (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient()) {
+                        lilocal = true;
+                        lid = 'lc' + Date.now().toString(36) + ((state._lootSeq % 1296).toString(36));
+                    }
+                } catch (e) {}
+                const ldrop = { id: lid, species: m.species, x: m.x, y: m.y };
+                if (lilocal) ldrop._local = true;
+                state.groundLoot.push(ldrop);
+                // Tombstone so a lagged host snapshot can't resurrect this
+                // kill into a second carcass (see Multiplayer.noteClaimed).
+                try { if (typeof Multiplayer !== 'undefined' && Multiplayer.noteClaimed) Multiplayer.noteClaimed(m.id); } catch (e) {}
                 state.monstersOnLand.splice(i, 1);
                 continue;
             }
@@ -171,8 +214,65 @@ const Combat = {
 
             // --- Intro dormancy: a freshly arrived boss stands down (no
             // movement, no skills, no contact) until its cinematic releases.
+            // Swim-in arrivals still GLIDE to the arena while dormant.
             if (m.dormantUntil && state.time < m.dormantUntil) {
                 if (m.invulnerableTimer > 0) m.invulnerableTimer -= delta;
+                if (m._swimIn) {
+                    const sx = m._swimIn.x - m.x, sy = m._swimIn.y - m.y;
+                    const sd = Math.hypot(sx, sy) || 1;
+                    const step = (m._swimIn.spd || 260) * delta;
+                    if (sd <= Math.max(24, step)) {
+                        m.x = m._swimIn.x; m.y = m._swimIn.y;
+                        delete m._swimIn;
+                        // Sky-drop impact: ring + dust + thud on touchdown.
+                        if (m._introImpact) {
+                            delete m._introImpact;
+                            try {
+                                state.delayedBlasts.push({
+                                    x: m.x, y: m.y, radius: 220, damage: 0,
+                                    timer: 0.3, color: '#fbbf24', shake: 22,
+                                });
+                                Particles.spawnParticles(state, m.x, m.y, '#e2e8f0', 40, { size: 6 });
+                                try { audio.playExplosion(); } catch (e) {}
+                            } catch (e) {}
+                            state.screenShake = Math.max(state.screenShake || 0, 22);
+                        }
+                    } else {
+                        m.x += (sx / sd) * step;
+                        m.y += (sy / sd) * step;
+                    }
+                }
+                // Per-tick arrival FX by intro mode (theatre only).
+                // Portal-grow: bosses that step out of portals scale from
+                // 25% to full across the cinematic (see drawBossMonster).
+                try {
+                    if (typeof m._sizeMult === 'number' && m._sizeMult < 1) {
+                        const total = Math.max(1, m._introDur || 6);
+                        const left = Math.max(0, (m.dormantUntil || 0) - state.time);
+                        m._sizeMult = Math.min(1, Math.max(0.25, 1 - left / total) * 0.75 + 0.25);
+                    }
+                } catch (e) {}
+                try {
+                    m._introFxT = (m._introFxT || 0) - delta;
+                    if (m._introFxT <= 0) {
+                        const how = m._introMode || 'swim';
+                        if (how === 'rise' && typeof Particles !== 'undefined' && Particles.spawnWaterSplashes) {
+                            Particles.spawnWaterSplashes(state, m.x + (Math.random() - 0.5) * 90, m.y + 24, 5);
+                            m._introFxT = 0.14;
+                        } else if (how === 'fall') {
+                            Particles.spawnParticles(state, m.x + (Math.random() - 0.5) * 60, m.y - 120, '#e2e8f0', 3, { size: 4 });
+                            m._introFxT = 0.1;
+                        } else if (m._swimIn && typeof Particles !== 'undefined' && Particles.spawnWaterSplashes) {
+                            Particles.spawnWaterSplashes(state, m.x, m.y + 16, 2);
+                            m._introFxT = 0.3;
+                        } else {
+                            m._introFxT = 0.5;
+                        }
+                        if ((how === 'rise' || how === 'fall') && Math.random() < 0.3) {
+                            state.screenShake = Math.max(state.screenShake || 0, 6);
+                        }
+                    }
+                } catch (e) {}
                 continue;
             }
 
@@ -188,8 +288,13 @@ const Combat = {
             }
 
             // --- Phase 2: enrage at < 40% HP ---
+            // (Crimson Emperor runs its own 3-phase script below instead.)
             const hpRatio = m.hp / (m.maxHp || m.species.maxHp || 100);
-            if (m.phase === 1 && hpRatio < 0.4) {
+            if (m.species.id === 'crimson_emperor') {
+                this.updateEmperorPhases(state, m, hpRatio);
+            } else if (m.species.id === 'void_shepherd') {
+                this.updateVoidPhases(state, m, hpRatio);
+            } else if (m.phase === 1 && hpRatio < 0.4) {
                 m.phase = 2;
                 m.isEnraged = true;
                 m.enrageTimer = 999;
@@ -197,12 +302,23 @@ const Combat = {
                 Particles.spawnParticles(state, m.x, m.y, '#dc2626', 40, { size: 6 });
                 Particles.showFloatingText(state, "⚠ ENRAGED! ⚠", m.x, m.y - 60, '#dc2626');
                 try { audio.playRoar(); } catch (e) {}
+                // Enrage roar: red shockwaves out of the mouth (theatre).
+                try {
+                    const mouth = this.mouthXY(m);
+                    this.roarShockwave(state, mouth.x, mouth.y, { color: '#ef4444', rings: 3, maxR: 200, shake: 14 });
+                } catch (e) {}
             }
 
             const dx = p.x - m.x;
             const dy = p.y - m.y;
             const dist = Math.hypot(dx, dy) || 1;
             m.angle = Math.atan2(dy, dx);
+            // Void self-destruct fuse lit (see updateVoidPhases).
+            if (m.species.id === 'void_shepherd' && m._selfDestructAt && state.time >= m._selfDestructAt && m.hp > 0) {
+                try { this.detonateVoidBoss(state, m); } catch (e) {}
+                state.monstersOnLand.splice(i, 1);
+                continue;
+            }
 
             this.updateMonsterAI(state, m, p, dist, dx, dy, delta);
 
@@ -240,8 +356,14 @@ const Combat = {
             }
 
             const size = m.species.size || 20;
+            // Map-aware: the old mainland-only clamp teleported every isle
+            // catch to x=wb (invisible + gone from the island).
+            if (typeof WorldSystem !== 'undefined' && WorldSystem.clampEntity) {
+                try { WorldSystem.clampEntity(state, m, size); } catch (e) {}
+            } else {
             m.x = Utils.clamp(m.x, B.MIN_X + size, state.waterBoundaryX - size);
             m.y = Utils.clamp(m.y, B.MIN_Y + size, B.MAX_Y - size);
+            }
 
             // --- Contact damage (with opener telegraph) ---
             // First touch after closing in is a WARNING, not damage: red
@@ -273,9 +395,290 @@ const Combat = {
     // ============================================================
     //  DELAYED BLASTS
     // ============================================================
+    // Mouth position of a monster/fish (for roar shockwaves that erupt
+    // FROM the mouth, not the body center). Falls back to center.
+    mouthXY(m) {        try {
+            const size = (m.species && m.species.size) || 40;
+            const a = (typeof m.angle === 'number') ? m.angle : 0;
+            return { x: m.x + Math.cos(a) * size * 0.7, y: m.y + Math.sin(a) * size * 0.7 };
+        } catch (e) { return { x: (m && m.x) || 0, y: (m && m.y) || 0 }; }
+    },
+
+    // SONIC BOOM — pure anime roar VFX (no damage, no telegraphs):
+    // impact flash + expanding ripple rings + radiating speed lines +
+    // a rotating dashed "air distortion" ring, all from one epicenter.
+    // MP-safe: every boom carries a globally-unique id + full params so
+    // snapshots and mirrors can merge by id (see syncSonicFx).
+    _sonicSeq: 0,
+    sonicBoom(state, x, y, opts) {
+        try {
+            const o = opts || {};
+            const dur = Math.max(0.3, Math.min(2.5, o.dur || 0.8));
+            const rings = Math.max(1, Math.min(8, o.rings || 3));
+            const lines = Math.max(0, Math.min(40, o.lines === undefined ? 14 : o.lines));
+            const seeds = [];
+            for (let i = 0; i < lines; i++) seeds.push(((i / Math.max(1, lines)) * Math.PI * 2) + Math.random() * 0.2);
+            state.sonicBooms = state.sonicBooms || [];
+            if (state.sonicBooms.length > 24) state.sonicBooms.splice(0, state.sonicBooms.length - 24);
+            this._sonicSeq = (this._sonicSeq + 1) % 46656;
+            state.sonicBooms.push({
+                id: 'sb' + Date.now().toString(36) + this._sonicSeq.toString(36) + Math.floor(Math.random() * 1296).toString(36),
+                x, y, t0: state.time || 0, dur,
+                rings, maxR: o.maxR || 220,
+                color: o.color || '#f87171',
+                lines, seeds,
+                flash: o.flash === undefined ? true : !!o.flash,
+            });
+            state.screenShake = Math.max(state.screenShake || 0, o.shake || 14);
+        } catch (e) {}
+    },
+
+    // Roar shockwave: mouth-origin sonic boom (visual) + optional single
+    // gameplay ring when damage > 0 (kept for compat — all live roars
+    // pass damage 0 and get pure theatre).
+    roarShockwave(state, x, y, opts) {
+        try {
+            const o = opts || {};
+            this.sonicBoom(state, x, y, {
+                color: o.color, rings: o.rings, maxR: o.maxR,
+                shake: o.shake, dur: 0.5 + (o.rings || 3) * 0.09,
+                lines: 10 + (o.rings || 3) * 3,
+            });
+            if ((o.damage || 0) > 0) {
+                state.delayedBlasts = state.delayedBlasts || [];
+                state.delayedBlasts.push({
+                    x, y, radius: o.maxR || 220, damage: o.damage,
+                    timer: 0.5, color: o.color || '#f87171', shake: o.shake || 14,
+                    stunOnBlast: o.stun || 0,
+                });
+            }
+        } catch (e) {}
+    },
+
+    // Crimson Emperor's 3-phase script (70% Blood Moon, 30% mutation).
+    // Called instead of the generic 40% enrage for this boss.
+    updateEmperorPhases(state, m, hpRatio) {
+        try {
+            if (m.phase === 1 && hpRatio < 0.7) {
+                m.phase = 2;
+                m.isEnraged = true;
+                m.enrageTimer = 999;
+                state.bloodMoonUntil = (state.time || 0) + 90;
+                state.screenShake = Math.max(state.screenShake || 0, 18);
+                Particles.spawnParticles(state, m.x, m.y, '#dc2626', 60, { size: 6 });
+                Particles.showFloatingText(state, '🌕 BLOOD MOON — THE EMPEROR RAGES!', m.x, m.y - 80, '#ef4444');
+                try { audio.playBossRoar(); } catch (e) {}
+                const mouth = this.mouthXY(m);
+                this.roarShockwave(state, mouth.x, mouth.y, { color: '#ef4444', rings: 4, maxR: 280, shake: 18 });
+            } else if (m.phase === 2 && hpRatio < 0.3) {
+                m.phase = 3;
+                state.screenShake = Math.max(state.screenShake || 0, 22);
+                // Mutation: tendrils burst from the belly (particles).
+                for (let i = 0; i < 4; i++) {
+                    const a = (Math.PI * 2 / 4) * i + 0.4;
+                    Particles.spawnParticles(state, m.x + Math.cos(a) * 40, m.y + Math.sin(a) * 40, '#7f1d1d', 25, { size: 5 });
+                }
+                Particles.showFloatingText(state, '☠️ ABYSSAL MUTATION — IT CRAWLS ASHORE!', m.x, m.y - 80, '#f87171');                try { audio.playBossRoar(); } catch (e) {}
+                const mouth2 = this.mouthXY(m);
+                this.roarShockwave(state, mouth2.x, mouth2.y, { color: '#991b1b', rings: 5, maxR: 320, shake: 20 });
+            }
+        } catch (e) {}
+    },
+
+    // Void Leviathan's script: P1 unstable star, BEACH-BREACH tug QTE
+    // at 65% (then P2 cosmic rift), mutation at 30% (P3 star-eater),
+    // Void Apocalypse final enrage below 10%.
+    updateVoidPhases(state, m, hpRatio) {
+        try {
+            const p = state.player;
+            if (m.phase === 1 && hpRatio < 0.65 && !m._breach) {
+                m._breach = true;
+                // LAND PULL: the line burns red — mash SPACE to break free
+                // while it drags you. (Sea/hooked instances skip the QTE
+                // and roll on; the shared land body runs it.)
+                p.voidDrag = { boss: m, timer: 6, mash: 0, need: 14, slammed: false };
+                try {
+                    const hud = document.getElementById('tension-hud');
+                    if (hud) hud.classList.remove('hidden');
+                } catch (e) {}
+                Particles.showFloatingText(state, '🪢 LAND PULL — MASH SPACE TO BREAK FREE!', p.x, p.y - 70, '#a855f7');
+                try { audio.playRoar(); } catch (e) {}
+                // Tail slams chase the drag (dodgeable telegraphs).
+                for (let i = 0; i < 3; i++) {
+                    state.delayedBlasts.push({
+                        x: p.x + (Math.random() - 0.5) * 160,
+                        y: p.y + (Math.random() - 0.5) * 160,
+                        radius: 100, damage: Math.round(120 + (m.species.attack || 400) * 0.15),
+                        timer: 1.2 + i * 1.4, color: '#6d28d9', shake: 16, stunOnBlast: 0.4,
+                    });
+                }
+            } else if (m.phase === 1 && m._breach && !p.voidDrag) {
+                // QTE resolved (see Player.update): enter P2 crawling.
+                m.phase = 2;
+                m.isEnraged = true;
+                m.enrageTimer = 999;
+                state.screenShake = Math.max(state.screenShake || 0, 18);
+                Particles.spawnParticles(state, m.x, m.y, '#a855f7', 50, { size: 6 });
+                Particles.showFloatingText(state, '🌌 COSMIC RIFT — IT CRAWLS!', m.x, m.y - 80, '#a855f7');
+                try { audio.playBossRoar(); } catch (e) {}
+                const mouth = this.mouthXY(m);
+                this.roarShockwave(state, mouth.x, mouth.y, { color: '#7c3aed', rings: 4, maxR: 280, shake: 18 });
+            } else if (m.phase === 2 && hpRatio < 0.3) {
+                m.phase = 3;
+                // Star-Eater's clock: 60s to kill it or it eats itself
+                // (no loot — see detonateVoidBoss).
+                m._selfDestructAt = (state.time || 0) + 60;
+                state.screenShake = Math.max(state.screenShake || 0, 22);
+                Particles.spawnParticles(state, m.x, m.y, '#ef4444', 40, { size: 5 });
+                Particles.spawnParticles(state, m.x, m.y, '#a855f7', 40, { size: 5 });
+                Particles.showFloatingText(state, '☠️ STAR-EATER — ITS EYES OPEN! 💥60s💥', m.x, m.y - 80, '#ef4444');
+                try { audio.playBossRoar(); } catch (e) {}
+                const mouth2 = this.mouthXY(m);
+                this.roarShockwave(state, mouth2.x, mouth2.y, { color: '#991b1b', rings: 5, maxR: 320, shake: 20 });
+            } else if (hpRatio < 0.1 && !m._apocalypse) {
+                // VOID APOCALYPSE: root + bleed until it dies. Burn it down.
+                m._apocalypse = true;
+                p.stunTimer = Math.max(p.stunTimer || 0, 2.0);
+                p.voidDrain = { dps: 6 };
+                state.screenShake = Math.max(state.screenShake || 0, 24);
+                Particles.showFloatingText(state, '🕳 VOID APOCALYPSE — BURN IT DOWN!', p.x, p.y - 70, '#a855f7');
+                try { UI.triggerDamageFlash(); } catch (e) {}
+                try { audio.playBossRoar(); } catch (e) {}
+            }
+        } catch (e) {}
+    },
+
+    // Struck lightning: a rendered jagged bolt from the sky + ground
+    // flash. Visual-only unless damage > 0 (then a matching telegraph
+    // ring pops with it). Bolts render from state.lightnings (see
+    // drawLightning) — MP peers see rings, the bolt itself is local
+    // theatre like all custom intro FX.
+    _boltSeq: 0,
+    strikeLightning(state, x, y, opts) {
+        try {
+            const o = opts || {};
+            state.lightnings = state.lightnings || [];
+            if (state.lightnings.length > 16) state.lightnings.splice(0, state.lightnings.length - 16);
+            this._boltSeq = (this._boltSeq + 1) % 46656;
+            // Jagged bolt path, deterministic per strike.
+            const segs = [];
+            let bx = x + (Math.random() - 0.5) * 60;
+            const top = y - 420;
+            const steps = 7;
+            for (let i = 0; i <= steps; i++) {
+                const t = i / steps;
+                segs.push([bx + (Math.random() - 0.5) * (1 - t) * 90, top + (y - top) * t]);
+            }
+            segs.push([x, y]);
+            state.lightnings.push({
+                id: 'lt' + Date.now().toString(36) + this._boltSeq.toString(36),
+                segs, x, y, t0: state.time || 0, dur: o.dur || 0.35,
+                color: o.color || '#fef08a', width: o.width || 5,
+            });
+            Particles.spawnParticles(state, x, y, o.color || '#fef08a', 14, { size: 4 });
+            state.screenShake = Math.max(state.screenShake || 0, o.shake || 10);
+            try { audio.playThunder(); } catch (e) {}
+            if ((o.damage || 0) > 0) {
+                state.delayedBlasts = state.delayedBlasts || [];
+                state.delayedBlasts.push({
+                    x, y, radius: o.radius || 85, damage: o.damage,
+                    timer: o.timer === undefined ? 0.55 : o.timer,
+                    color: o.color || '#facc15', shake: o.shake || 16,
+                    stunOnBlast: o.stun || 0,
+                });
+            }
+        } catch (e) {}
+    },
+
+    // Void pits: black holes that drink the player. Standing in the
+    // maw (within ~48px of center) CONSUMES you outright — instant death,
+    // no mitigation. Tuned escapable: 0.8s forming grace, pull slightly
+    // above run speed (dash + angle out to live), pits die after 5s.
+    updateVoidPits(state, delta) {
+        try {
+            if (!state.groundHazards) return;
+            const p = state.player;
+            if (!p || p.isDead) return;
+            for (const h of state.groundHazards) {
+                if (!h || !h.voidPit || !(h.duration > 0)) continue;
+                if (h.duration > 4.2) continue; // forming — no pull yet
+                const dx = h.x - p.x, dy = h.y - p.y;
+                const d = Math.hypot(dx, dy) || 1;
+                const R = h.radius || 110;
+                if (d < 48) {
+                    // CONSUMED BY THE VOID.
+                    Particles.showFloatingText(state, '🕳 CONSUMED BY THE VOID', p.x, p.y - 60, '#000000');
+                    try { UI.triggerDamageFlash(); } catch (e) {}
+                    if (typeof Player !== 'undefined') Player.die(state);
+                    return;
+                }
+                if (d < R + 170) {
+                    const sp = 300;
+                    if (typeof Player !== 'undefined' && Player.addPull) {
+                        try { Player.addPull(state, (dx / d) * sp, (dy / d) * sp, 0.12); } catch (e) {}
+                    } else {
+                        p.x += (dx / d) * sp * delta;
+                        p.y += (dy / d) * sp * delta;
+                    }
+                }
+                // Keep a portal visual glued to each pit (clients conjure
+                // their own — no wire cost, self-healing on lag).
+                try {
+                    state.realmFx = state.realmFx || [];
+                    let vis = null;
+                    for (const g of state.realmFx) {
+                        if (g && g.pit && Math.hypot(g.x - h.x, g.y - h.y) < 60) { vis = g; break; }
+                    }
+                    if (!vis) {
+                        state.realmFx.push({ x: h.x, y: h.y, t0: state.time || 0, dur: Math.max(0.5, h.duration || 5), pit: true });
+                    }
+                } catch (e) {}
+            }
+        } catch (e) {}
+    },
+
+    // Void self-destruct: 60s into P3 the Star-Eater eats itself —
+    // black-hole bloom (wide, then tight, then gone), no loot, no
+    // tribute, no index. Kill it first if you want the spoils.
+    detonateVoidBoss(state, m) {
+        try {
+            state.realmFx = state.realmFx || [];
+            state.realmFx.push({ x: m.x, y: m.y, t0: state.time || 0, dur: 3 });
+            state.delayedBlasts = state.delayedBlasts || [];
+            [[0.3, 260], [0.8, 340], [1.3, 420]].forEach(([timer, radius]) => {
+                state.delayedBlasts.push({
+                    x: m.x, y: m.y, radius, damage: 0,
+                    timer, color: '#4c1d95', shake: 26,
+                });
+            });
+            Particles.spawnParticles(state, m.x, m.y, '#a855f7', 60, { size: 6 });
+            state.screenShake = Math.max(state.screenShake || 0, 30);
+            try { audio.playBossRoar(); } catch (e) {}
+            Particles.showFloatingText(state, '🕳 THE VOID CONSUMES ITSELF — NOTHING REMAINS', m.x, m.y - 100, '#c084fc');
+            if (state.activeBoss === m) state.activeBoss = null;
+            try { if (typeof SaveSystem !== 'undefined') SaveSystem.save(state); } catch (e) {}
+        } catch (e) {}
+    },
+
     updateDelayedBlasts(state, delta) {
         if (!state.delayedBlasts) state.delayedBlasts = [];
         const p = state.player;
+        // Expired sonic booms leave the FX list (rendered by time).
+        // Same for void realm portals and lightning bolts.
+        try {
+            if (state.sonicBooms && state.sonicBooms.length) {
+                const t = state.time || 0;
+                state.sonicBooms = state.sonicBooms.filter(b => b && (t - (b.t0 || 0)) < (b.dur || 0.8));
+            }
+            if (state.realmFx && state.realmFx.length) {
+                const t2 = state.time || 0;
+                state.realmFx = state.realmFx.filter(g => g && (t2 - (g.t0 || 0)) < (g.dur || 6));
+            }
+            if (state.lightnings && state.lightnings.length) {
+                const t3 = state.time || 0;
+                state.lightnings = state.lightnings.filter(l => l && (t3 - (l.t0 || 0)) < (l.dur || 0.35));
+            }
+        } catch (e) {}
 
         for (let i = state.delayedBlasts.length - 1; i >= 0; i--) {
             const b = state.delayedBlasts[i];
@@ -494,8 +897,17 @@ const Combat = {
                 continue;
             }
 
-            if (b.life <= 0 || b.x < B.MIN_X || b.x > B.MAX_X ||
-                b.y < B.MIN_Y || b.y > B.MAX_Y) {
+            if (b.life <= 0 || (function () {
+                // Map-aware cull: island shots used to die instantly past
+                // B.MAX_X (x≈10000), so isle fights shot blanks.
+                try {
+                    if (typeof WorldSystem !== 'undefined' && WorldSystem.bulletBounds) {
+                        const bb = WorldSystem.bulletBounds(state);
+                        return b.x < bb.x0 || b.x > bb.x1 || b.y < bb.y0 || b.y > bb.y1;
+                    }
+                } catch (e) {}
+                return b.x < B.MIN_X || b.x > B.MAX_X || b.y < B.MIN_Y || b.y > B.MAX_Y;
+            })()) {
                 state.bullets.splice(i, 1);
             }
         }
@@ -525,15 +937,25 @@ const Combat = {
         // Status effect modifiers
         const isStunned = m.stunTimer > 0;
         const isSlowed = m.slowed === true;
-        
+
         if (isStunned) return; // Stunned monsters don't move or act
-        
+
+        // Fight countdown cinematic: no NEW skill casts from anyone (the
+        // boss is dormant anyway; this covers wild bystanders) — movement
+        // and already-flying shots continue.
+        const frozen = typeof state._fightFreezeUntil === 'number' && state.time < state._fightFreezeUntil;
+        // Blood Moon ambience (Emperor phase 2+): red motes drift while it lasts.
+        try {
+            if (typeof state.bloodMoonUntil === 'number' && state.time < state.bloodMoonUntil && Math.random() < 0.12) {
+                Particles.spawnParticles(state, p.x + (Math.random() - 0.5) * 700, p.y + (Math.random() - 0.5) * 500, '#7f1d1d', 1, { size: 4 });
+            }
+        } catch (e) {}
         const slowMult = isSlowed ? 0.3 : 1.0;
         const baseSpeed = (m.species.speed || 4) * 22;
         const speedMult =
             (m.isEnraged ? 1.45 : 1.0) *
             (m.stealthTimer > 0 ? 1.25 : 1.0) *
-            (m.phase === 2 ? 1.15 : 1.0) *
+            (m.phase >= 2 ? 1.15 : 1.0) *
             slowMult;
         const spd = baseSpeed * speedMult;
 
@@ -563,7 +985,7 @@ const Combat = {
                     m.strafeSign = Math.random() < 0.5 ? -1 : 1;
                 }
 
-                if (m.skillCooldown <= 0 && this.pickSkill(m)) {
+                if (!frozen && m.skillCooldown <= 0 && this.pickSkill(m)) {
                     m.aiState = 'TELEGRAPH';
                     m.actionTimer = 0.4 - aggressionTier * 0.04;
                     Particles.showFloatingText(state, "⚠️", m.x, m.y - sizeOffset(m), '#f59e0b');
@@ -585,7 +1007,7 @@ const Combat = {
 
                 m.actionTimer -= delta;
 
-                if (m.skillCooldown <= 0 && this.pickSkill(m)) {
+                if (!frozen && m.skillCooldown <= 0 && this.pickSkill(m)) {
                     m.aiState = 'TELEGRAPH';
                     m.actionTimer = 0.4 - aggressionTier * 0.04;
                     Particles.showFloatingText(state, "⚠️", m.x, m.y - sizeOffset(m), '#f59e0b');
@@ -693,7 +1115,7 @@ const Combat = {
                         boss: 0.8
                     };
                     let cd = cooldowns[rarity] || 2.5;
-                    if (m.phase === 2) cd *= 0.65;
+                    if (m.phase >= 2) cd *= 0.65;
                     m.skillCooldown = cd;
 
                     m.aiState = dist > prefDist + rangeTolerance ? 'APPROACH' : 'STRAFE';
@@ -710,6 +1132,49 @@ const Combat = {
     },
 
     pickSkill(m) {
+        // Hydra phase 2 (ashore): a different, meaner shore moveset.
+        try {
+            if (m && m.species && m.species.id === 'stormlord_hydra' && m.phase === 2) {
+                const shore = ['hydraLightning', 'hydraRoar', 'hydraBiteShore', 'hydraTether', 'hydraVenom', 'danmakuRing', 'danmakuFan'];
+                return shore[Math.floor(Math.random() * shore.length)];
+            }
+        } catch (e) {}
+        // Crimson Emperor: 3-phase movesets, plus a death-throe below 10%
+        // HP that spams the Last Bite.
+        try {
+            if (m && m.species && m.species.id === 'crimson_emperor') {
+                const r = m.hp / (m.maxHp || 1);
+                if (r < 0.1 && Math.random() < 0.5) return 'sovereignBite';
+                if (m.phase >= 3) {
+                    const p3 = ['tentacleSlam', 'bloodBeam', 'bloodBeam', 'sovereignBite', 'goreBarbs', 'abyssalCharge'];
+                    return p3[Math.floor(Math.random() * p3.length)];
+                }
+                if (m.phase === 2) {
+                    const p2 = ['abyssalCharge', 'crimsonMaelstrom', 'goreBarbs', 'tentacleSlam', 'bloodBeam'];
+                    return p2[Math.floor(Math.random() * p2.length)];
+                }
+                const p1 = ['crimsonBreach', 'tailSlapWave', 'homingBubbles'];
+                return p1[Math.floor(Math.random() * p1.length)];
+            }
+        } catch (e) {}
+        // Void Leviathan: breach QTE splits P1/P2 at 65%, mutation at 30%,
+        // frenzy barrage below 10%.
+        try {
+            if (m && m.species && m.species.id === 'void_shepherd') {
+                const r = m.hp / (m.maxHp || 1);
+                if (r < 0.1 && Math.random() < 0.5) return 'phaseBarrage';
+                if (m.phase >= 3) {
+                    const p3 = ['cosmicBlast', 'cosmicBlast', 'phaseBarrage', 'starRain', 'realityShear', 'voidBarrage', 'danmakuSpiral'];
+                    return p3[Math.floor(Math.random() * p3.length)];
+                }
+                if (m.phase === 2) {
+                    const p2 = ['realityShear', 'voidPit', 'starRain', 'cosmicBlast', 'voidBarrage', 'danmakuRing'];
+                    return p2[Math.floor(Math.random() * p2.length)];
+                }
+                const p1 = ['voidSpitting', 'voidBarrage', 'abyssalGeyser', 'voidTentacle', 'danmakuFan'];
+                return p1[Math.floor(Math.random() * p1.length)];
+            }
+        } catch (e) {}
         const list = m.species.skills ||
                      (m.species.skill ? [m.species.skill] :
                      (m.species.skillName ? [m.species.skillName] : []));
@@ -879,9 +1344,15 @@ const Combat = {
             case 'tsunami':
             case 'voidPull':
             case 'tidalWave': {
-                const pullForce = 150;
-                p.x -= localDirX * pullForce;
-                p.y -= localDirY * pullForce;
+                // Real drag toward/away (0.3s velocity), never a teleport —
+                // clampPlayer keeps the slide legal on every map.
+                if (typeof Player !== 'undefined' && Player.addPull) {
+                    try { Player.addPull(state, -localDirX * 600, -localDirY * 600, 0.3); } catch (e) {}
+                } else {
+                    const pullForce = 150;
+                    p.x -= localDirX * pullForce;
+                    p.y -= localDirY * pullForce;
+                }
 
                 const dmg = Math.round(atk * 0.85);
                 const dealt = this.damagePlayer(state, dmg, { attacker: m, knockback: 0 });
@@ -890,8 +1361,15 @@ const Combat = {
                 state.screenShake = 10;
 
                 const B = CONFIG.WORLD;
+                // Map-aware knockback (same teleport family as the monster
+                // clamp): clampPlayer already handles the map next frame,
+                // this just avoids a one-frame yank to the mainland surf.
+                if (typeof WorldSystem !== 'undefined' && WorldSystem.clampEntity) {
+                    try { WorldSystem.clampEntity(state, p, p.radius); } catch (e) {}
+                } else {
                 p.x = Utils.clamp(p.x, B.MIN_X + p.radius, state.waterBoundaryX - p.radius);
                 p.y = Utils.clamp(p.y, B.MIN_Y + p.radius, B.MAX_Y - p.radius);
+                }
 
                 const spread = (skill === 'tidalWave' || skill === 'tsunami') ? 5 : 3;
                 for (let i = -Math.floor(spread / 2); i <= Math.floor(spread / 2); i++) {
@@ -922,8 +1400,13 @@ const Combat = {
                 p.slowTimer = Math.max(p.slowTimer || 0, 2.5);
                 const dmg = Math.round(atk * 0.8);
                 const dealt = this.damagePlayer(state, dmg, { attacker: m, knockback: 0 });
-                p.x += localDirX * 60;
-                p.y += localDirY * 60;
+                // Shove as velocity, never a teleport (see Player.addPull).
+                if (typeof Player !== 'undefined' && Player.addPull) {
+                    try { Player.addPull(state, localDirX * 240, localDirY * 240, 0.25); } catch (e) {}
+                } else {
+                    p.x += localDirX * 60;
+                    p.y += localDirY * 60;
+                }
                 Particles.showFloatingText(state, `❄️ -${dealt}`,
                     p.x, p.y - 30, '#38bdf8');
                 state.screenShake = 8;
@@ -948,10 +1431,17 @@ const Combat = {
                 const backAngle = Math.atan2(dy, dx) + Math.PI;
                 const B = CONFIG.WORLD;
                 Particles.spawnParticles(state, m.x, m.y, '#fde047', 15);
+                // Map-aware blink landing (same teleport family).
+                if (typeof WorldSystem !== 'undefined' && WorldSystem.clampEntity) {
+                    m.x = p.x + Math.cos(backAngle) * 60;
+                    m.y = p.y + Math.sin(backAngle) * 60;
+                    try { WorldSystem.clampEntity(state, m, 20); } catch (e) {}
+                } else {
                 m.x = Utils.clamp(p.x + Math.cos(backAngle) * 60,
                     B.MIN_X + 20, state.waterBoundaryX - 20);
                 m.y = Utils.clamp(p.y + Math.sin(backAngle) * 60,
                     B.MIN_Y + 20, B.MAX_Y - 20);
+                }
                 Particles.spawnParticles(state, m.x, m.y, '#fde047', 20);
 
                 const dmg = Math.round(atk * 1.3);
@@ -1274,7 +1764,7 @@ const Combat = {
 
         if (m.isCharging) damage *= 1.8;
         if (m.isEnraged) damage *= 1.4;
-        if (m.phase === 2) damage *= 1.15;
+        if (m.phase >= 2) damage *= 1.15;
         if (m.stealthTimer > 0) {
             damage *= 2.0;
             m.stealthTimer = 0;
@@ -1304,8 +1794,13 @@ const Combat = {
         state.screenShake = 8;
 
         const knockback = (p.armorAnchor || p.umbrellaTimer > 0) ? 0 : 40;
-        p.x += (dx / dist) * knockback;
-        p.y += (dy / dist) * knockback;
+        // Melee shove rides the pull channel too (smooth + map-legal).
+        if (knockback > 0 && typeof Player !== 'undefined' && Player.addPull) {
+            try { Player.addPull(state, (dx / dist) * 160, (dy / dist) * 160, 0.25); } catch (e) {}
+        } else if (knockback > 0) {
+            p.x += (dx / dist) * knockback;
+            p.y += (dy / dist) * knockback;
+        }
 
         // Pier/isle-aware: a hit on the deck must NOT yank you back to the
         // beach (the old beach-only clamp teleported pier walkers ashore).
@@ -1340,6 +1835,28 @@ const Combat = {
                     p.x, p.y - 30, '#f97316');
                 Player.refreshHUD(state);
                 try { audio.playHurt(); } catch (e) {}
+                if (p.hp <= 0) Player.die(state);
+            }
+        }
+        // Void Apocalypse bleed: the Leviathan drinks you until it dies.
+        // Cleared on boss death / respawn (see death block + respawnAt).
+        if (p.voidDrain) {
+            const alive = state.activeBoss && (state.activeBoss.hp || 0) > 0;
+            if (!alive) {
+                p.voidDrain = null;
+            } else {
+                p.hp -= (p.voidDrain.dps || 6) * delta;
+                p._drainTick = (p._drainTick || 0) + delta;
+                if (p._drainTick >= 1) {
+                    p._drainTick = 0;
+                    Particles.showFloatingText(state, `🕳 -${Math.round((p.voidDrain.dps || 6))}/s`,
+                        p.x, p.y - 30, '#a855f7');
+                    Player.refreshHUD(state);
+                    try { UI.triggerDamageFlash(); } catch (e) {}
+                }
+                if (Math.random() < 0.3) {
+                    Particles.spawnParticles(state, p.x + (Math.random() - 0.5) * 40, p.y - 20, '#4c1d95', 1, { size: 4 });
+                }
                 if (p.hp <= 0) Player.die(state);
             }
         }
@@ -1443,18 +1960,38 @@ const Combat = {
             // Pier decks and isle sand/piers count as SAFE ground — only true
             // open water (and off-map) sinks loot now.
             if (!item.sinking) {
-                let lost = item.x < B.MIN_X - 20 || item.x > B.MAX_X + 20 ||
-                    item.y < B.MIN_Y - 20 || item.y > B.MAX_Y - 20;
-                if (!lost) {
-                    try {
-                        if (typeof WorldSystem !== 'undefined' && WorldSystem.lootSafe) {
+                // Island rooms live far past B.MAX_X: the mainland
+                // out-of-bounds pre-check must not condemn isle loot before
+                // lootSafe even runs (that sank EVERY island drop, even on
+                // dry sand).
+                let lost = false;
+                try {
+                    const isl = (typeof WorldSystem !== 'undefined' && WorldSystem.islandOf) ? WorldSystem.islandOf(state) : null;
+                    if (isl) {
+                        const r = isl.room;
+                        lost = item.x < r.x0 - 20 || item.x > r.x1 + 20 ||
+                            item.y < r.y0 - 20 || item.y > r.y1 + 20;
+                        if (!lost && typeof WorldSystem.lootSafe === 'function') {
                             lost = !WorldSystem.lootSafe(state, item.x, item.y);
-                        } else {
-                            lost = item.x > state.waterBoundaryX + 15;
                         }
-                    } catch (e) {
-                        lost = item.x > state.waterBoundaryX + 15;
+                    } else {
+                        lost = item.x < B.MIN_X - 20 || item.x > B.MAX_X + 20 ||
+                            item.y < B.MIN_Y - 20 || item.y > B.MAX_Y - 20;
+                        if (!lost) {
+                            try {
+                                if (typeof WorldSystem !== 'undefined' && WorldSystem.lootSafe) {
+                                    lost = !WorldSystem.lootSafe(state, item.x, item.y);
+                                } else {
+                                    lost = item.x > state.waterBoundaryX + 15;
+                                }
+                            } catch (e) {
+                                lost = item.x > state.waterBoundaryX + 15;
+                            }
+                        }
                     }
+                } catch (e) {
+                    lost = item.x < B.MIN_X - 20 || item.x > B.MAX_X + 20 ||
+                        item.y < B.MIN_Y - 20 || item.y > B.MAX_Y - 20;
                 }
                 if (lost) {
                     item.sinking = 1.2;
@@ -1480,6 +2017,24 @@ const Combat = {
             const dy = p.y - item.y;
             const dist = Math.hypot(dx, dy) || 1;
 
+            // Rot timer: unclaimed loot sinks away (key items linger
+            // longer). Stops full-bucket / far-flung drops piling up
+            // forever and softens the "catch and forget" clutter.
+            if (!item.sinking) {
+                item.age = (item.age || 0) + DT;
+                const ttl = (item.item && item.item.keyItem) ? 300 : 150;
+                const left = ttl - item.age;
+                if (left <= 0) {
+                    item.sinking = 0.8;
+                    item.sinkMax = 0.8;
+                } else if (left <= 15 && !item._rotWarned && dist < 600) {
+                    item._rotWarned = true;
+                    if (typeof Particles !== 'undefined') {
+                        Particles.showFloatingText(state, 'Fading away...', item.x, item.y - 20, '#94a3b8');
+                    }
+                }
+            }
+
             // Host owns loot physics — clients only pick up (then claim)
             const isMPClient = (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient());
             if (dist < magnetR && dist > 4 && !isMPClient) {
@@ -1500,11 +2055,14 @@ const Combat = {
                         Player.addXP(state, 15);
                         Player.refreshHUD(state);
                         state.groundLoot.splice(i, 1);
+                        try { if (typeof Multiplayer !== 'undefined' && Multiplayer.noteClaimed) Multiplayer.noteClaimed(item.id); } catch (e) {}
                         if (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient()) {
                             if (item.id && Multiplayer.sendLootDelete) Multiplayer.sendLootDelete(item.id);
                         }
                         if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
-                    } else {
+                    } else if (state.time - (item._fullT || 0) > 3) {
+                        // Bucket-full nag, throttled (was a new text EVERY frame).
+                        item._fullT = state.time;
                         Particles.showFloatingText(state, "BUCKET FULL!",
                             item.x, item.y - 20, '#f87171');
                     }
@@ -1535,6 +2093,7 @@ const Combat = {
                     }
                     Player.refreshHUD(state);
                     state.groundLoot.splice(i, 1);
+                    try { if (typeof Multiplayer !== 'undefined' && Multiplayer.noteClaimed) Multiplayer.noteClaimed(item.id); } catch (e) {}
                     if (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient()) {
                         if (item.id && Multiplayer.sendLootDelete) Multiplayer.sendLootDelete(item.id);
                     }
@@ -1558,7 +2117,8 @@ const Combat = {
                     
                     Player.addXP(state, Math.round((item.species.value || 10) / 10) + 5);
                     UI.updateStatusBanner('Loot Claimed! Return to shop.', 'Claimed!', 'emerald');
-                } else {
+                } else if (state.time - (item._fullT || 0) > 3) {
+                    item._fullT = state.time;
                     Particles.showFloatingText(state, "BUCKET FULL!",
                         item.x, item.y - 20, '#f87171');
                 }

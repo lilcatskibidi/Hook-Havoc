@@ -305,13 +305,20 @@ const UI = {
 
         const ratio = Math.min(1.0, f.lineTension / rod.tensionMax);
         const percent = Math.round(ratio * 100);
+        // DOM-write guard: 60 text/class writes per second keep the
+        // Tailwind Play CDN's MutationObserver + style recalc hot for
+        // nothing. Only touch the DOM when something actually changed.
+        const lvl = ratio > 0.8 ? 2 : ratio > 0.45 ? 1 : 0;
+        if (this._tPct === percent && this._tLvl === lvl) return;
+        this._tPct = percent;
+        this._tLvl = lvl;
         txt.innerText = `${percent}%`;
         bar.style.width = `${percent}%`;
 
-        if (ratio > 0.8) {
+        if (lvl === 2) {
             bar.className = 'h-full bg-gradient-to-r from-rose-600 to-rose-400 transition-all duration-75 pulse-danger';
             txt.className = 'text-rose-500 font-extrabold';
-        } else if (ratio > 0.45) {
+        } else if (lvl === 1) {
             bar.className = 'h-full bg-gradient-to-r from-amber-500 to-amber-400 transition-all duration-75';
             txt.className = 'text-amber-400 font-bold';
         } else {
@@ -363,6 +370,8 @@ const UI = {
 
         if (p.activeSlot === slotIdx && typeof Player !== 'undefined') Player.refreshWeaponHUD(state);
         this.renderWeaponToolbar(state);
+        // Live: loadout changes propagate to the room instantly.
+        try { if (typeof Multiplayer !== 'undefined' && Multiplayer.pushSkinPrefs) Multiplayer.pushSkinPrefs(); } catch (e) {}
         return true;
     },
 
@@ -372,6 +381,7 @@ const UI = {
         p.equippedWeapons[slotIdx] = null;
         if (p.activeSlot === slotIdx && typeof Player !== 'undefined') Player.refreshWeaponHUD(state);
         this.renderWeaponToolbar(state);
+        try { if (typeof Multiplayer !== 'undefined' && Multiplayer.pushSkinPrefs) Multiplayer.pushSkinPrefs(); } catch (e) {}
     },
 
     renderWeaponToolbar(state) {
@@ -455,6 +465,10 @@ const UI = {
         if (p.burnTimer > 0) {
             html += `<span class="px-2.5 py-1 bg-rose-500/20 border border-rose-400/60 rounded-lg text-rose-300 text-xs font-black animate-pulse">🔥 BURNING (${p.burnTimer.toFixed(1)}s)</span>`;
         }
+        // DOM-write guard (see updateTensionBar): skip the 60Hz innerHTML
+        // churn when nothing changed — empty-idle frames write nothing.
+        if (this._seHTML === html) return;
+        this._seHTML = html;
         hud.innerHTML = html;
     },
 
@@ -477,7 +491,11 @@ const UI = {
         let boss = null, bossKind = 'fish';
         const ab = state.activeBoss;
         if (ab && ab.hp > 0 && state.monstersOnLand.includes(ab)) {
-            boss = ab;
+            // Cinematic HP reveal: the bar stays hidden until the intro
+            // names the boss (Emperor 8s beat).
+            if (!(ab._hpHiddenUntil && (state.time || 0) < ab._hpHiddenUntil)) {
+                boss = ab;
+            }
         } else {
             const storm = (state.enemies || []).find(e => e && e.isBoss && (e.hp || 0) > 0);
             if (storm) { boss = storm; bossKind = 'storm'; }
@@ -488,6 +506,9 @@ const UI = {
         }
         if (!boss) {
             barWrap.classList.add('hidden');
+            this._bossSig = '';
+            this._bossMarksKey = '';
+            try { const me = $('boss-phase-marks'); if (me) me.innerHTML = ''; } catch (e) {}
             return;
         }
 
@@ -498,26 +519,46 @@ const UI = {
         const hpBarEl = $('boss-hp-bar');
         const phaseEl = $('boss-phase-text');
 
-        let name, hp, maxHp, phase1;
+        let name, hp, maxHp, phase1, bossId = null;
         if (bossKind === 'storm') {
             name = '⛈ ' + (boss.bossName || 'STORMCALLER');
             hp = boss.hp; maxHp = boss.maxHp || Math.max(1, hp);
             phase1 = true;
+            bossId = 'stormcaller';
         } else if (bossKind === 'hooked') {
             name = boss.species.name.toUpperCase();
             maxHp = boss.maxHp || boss.species.maxHp || 1;
             hp = boss.hp;
             phase1 = (hp / maxHp) > 0.4;
+            bossId = boss.species.id;
         } else {
             name = boss.species.name.toUpperCase();
             maxHp = boss.maxHp || (boss.species && boss.species.maxHp) || 1;
             hp = boss.hp;
             const ratio = hp / maxHp;
             phase1 = ratio > 0.4;
-            if (boss.phase === 2) phase1 = false;
+            if (boss.phase >= 2) phase1 = false;
+            bossId = boss.species.id;
         }
         const ratio = Math.max(0, Math.min(1, hp / maxHp));
         const pct = Math.round(ratio * 100);
+
+        // DOM-write guard (see updateTensionBar): signature covers every
+        // visible field; idle boss fights write nothing per frame.
+        let extra = phase1 ? 'PHASE 1' : 'PHASE 2 — ENRAGED';
+        const dist = Math.round(Math.hypot(boss.x - state.player.x, boss.y - state.player.y));
+        if (bossKind === 'storm') extra = 'MINIBOSS';
+        else if (bossKind === 'hooked') {
+            extra = (boss.lineBroken === false && boss.hp / (boss.maxHp || 1) <= 0.30)
+                ? 'WEAKENED — REEL!'
+                : 'LINE BROKEN — SHOOT IT!';
+        } else if (boss.phase >= 3) {
+            extra = 'PHASE 3 — MUTATION';
+        }
+        const left = Math.max(0, 10 - (state.bossDeaths || 0));
+        const sig = `${bossKind}|${name}|${Math.round(hp)}|${maxHp}|${extra}|${dist}|${left}`;
+        if (this._bossSig === sig) return;
+        this._bossSig = sig;
 
         if (nameEl) nameEl.innerText = name;
         if (hpTextEl) hpTextEl.innerText = `${Math.max(0, Math.round(hp)).toLocaleString()} / ${maxHp.toLocaleString()}`;
@@ -525,13 +566,6 @@ const UI = {
 
         const phase = phase1 ? 'PHASE 1' : 'PHASE 2 — ENRAGED';
         if (phaseEl) {
-            const dist = Math.round(Math.hypot(boss.x - state.player.x, boss.y - state.player.y));
-            let extra = bossKind === 'storm' ? 'MINIBOSS' : phase;
-            if (bossKind === 'hooked') {
-                extra = (boss.lineBroken === false && boss.hp / (boss.maxHp || 1) <= 0.30)
-                    ? 'WEAKENED — REEL!'
-                    : 'LINE BROKEN — SHOOT IT!';
-            }
             phaseEl.innerText = `${extra} · 📍 ${dist}m`;
             phaseEl.className = phase1
                 ? 'text-xs text-amber-300 font-bold mt-1 tracking-wider'
@@ -540,9 +574,29 @@ const UI = {
         // 10-death boss rule: chances left (see Player.die)
         try {
             const livesEl = $('boss-lives');
-            if (livesEl) {
-                const left = Math.max(0, 10 - (state.bossDeaths || 0));
-                livesEl.innerText = `❤ ×${left}`;
+            if (livesEl) livesEl.innerText = `❤ ×${left}`;
+        } catch (e) {}
+        // Phase gate ticks: one per threshold for this boss (dimmed once
+        // crossed) so P1/P2/P3 (+enrage marks) read at a glance.
+        try {
+            const marksEl = $('boss-phase-marks');
+            if (marksEl) {
+                let marks = [];
+                try {
+                    if (typeof Ritual !== 'undefined' && Ritual.PHASE_MARKS && bossId && Ritual.PHASE_MARKS[bossId]) {
+                        marks = Ritual.PHASE_MARKS[bossId];
+                    }
+                } catch (e) {}
+                if (!marks.length) marks = [0.4];
+                const passed = marks.filter(t => ratio < t).length;
+                const key = `${bossId}|${marks.join(',')}|${passed}`;
+                if (this._bossMarksKey !== key) {
+                    this._bossMarksKey = key;
+                    marksEl.innerHTML = marks.map(t => {
+                        const done = ratio < t;
+                        return `<div class="absolute top-0 bottom-0 w-0.5" style="left:${Math.round(t * 100)}%;background:${done ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.75)'};box-shadow:0 0 4px rgba(0,0,0,0.8);" title="Phase gate ${Math.round(t * 100)}%"></div>`;
+                    }).join('');
+                }
             }
         } catch (e) {}
     },
@@ -646,21 +700,31 @@ const UI = {
     },
 
     updateMultiplayerHUD(info) {
-        const statusEl = $('mp-status');
-        if (statusEl) {
-            const skins = (info && info.skins) ? ` · ${info.skins}` : '';
-            if (info.isConnected) {
-                const n = info.playerCount || 1;
-                statusEl.innerHTML = `<i class="fa-solid fa-circle text-emerald-400 animate-pulse mr-1"></i>${info.isHost ? 'Host' : 'Client'} · ${info.roomCode} · ${n}/4${skins}`;
-                statusEl.className = 'text-xs font-bold text-emerald-400';
-            } else if (info.roomCode) {
-                statusEl.innerHTML = `<i class="fa-solid fa-circle text-amber-400 mr-1"></i>Lobby: ${info.roomCode}${skins}`;
-                statusEl.className = 'text-xs font-bold text-amber-400';
-            } else {
-                statusEl.innerHTML = `<i class="fa-solid fa-circle text-rose-400 mr-1"></i>Disconnected`;
-                statusEl.className = 'text-xs font-bold text-rose-400';
+        // Room dot in the top-right controls: player count only.
+        // Ping (ms) lives in the TAB player list — never on the HUD,
+        // so it can never cover the HP bar again.
+        try {
+            const dot = $('btn-mp-dot');
+            if (!dot) return;
+            const inRoom = !!(typeof Multiplayer !== 'undefined' && Multiplayer.roomCode);
+            if (!inRoom) {
+                dot.classList.add('hidden');
+                dot.classList.remove('flex');
+                return;
             }
-        }
+            dot.classList.remove('hidden');
+            dot.classList.add('flex');
+            let n = 1;
+            try {
+                if (typeof Multiplayer !== 'undefined' && Multiplayer.getRoster) {
+                    n = Math.max(1, (Multiplayer.getRoster() || []).length);
+                } else if (info && info.playerCount) {
+                    n = info.playerCount;
+                }
+            } catch (e) {}
+            const cnt = $('mp-dot-count');
+            if (cnt) cnt.innerText = `${Math.min(4, n)}/4`;
+        } catch (e) {}
     }
 };
 
@@ -670,22 +734,78 @@ const UI = {
 const canvas = $('gameCanvas');
 const ctx = canvas ? canvas.getContext('2d') : null;
 
+function fixedWaterBoundaryX() {
+    try {
+        if (typeof CONFIG !== 'undefined' && typeof CONFIG.WATER_BOUNDARY_X === 'number') {
+            return CONFIG.WATER_BOUNDARY_X;
+        }
+    } catch (e) {}
+    return 830;
+}
+
 function resizeCanvas() {
     if (!canvas || !state) return;
-    const cssW = canvas.parentElement ? canvas.parentElement.clientWidth : window.innerWidth;
-    const cssH = canvas.parentElement ? canvas.parentElement.clientHeight : window.innerHeight;
+    // Container-aware sizing: works in a tab, in devtools docked mode,
+    // and inside the itch.io iframe (window.innerWidth can lie there).
+    // visualViewport tracks the mobile address-bar height; fall back to
+    // clientWidth/Height when it is unavailable.
+    let cssW = 0, cssH = 0;
+    try {
+        const parent = canvas.parentElement;
+        if (parent) {
+            const r = parent.getBoundingClientRect();
+            if (r && r.width > 2) cssW = r.width;
+            if (r && r.height > 2) cssH = r.height;
+        }
+    } catch (e) {}
+    if (!(cssW > 2)) {
+        try {
+            if (canvas.parentElement && canvas.parentElement.clientWidth > 2) cssW = canvas.parentElement.clientWidth;
+            else if (window.visualViewport && window.visualViewport.width > 2) cssW = window.visualViewport.width;
+            else cssW = window.innerWidth || 1280;
+        } catch (e) { cssW = 1280; }
+    }
+    if (!(cssH > 2)) {
+        try {
+            if (canvas.parentElement && canvas.parentElement.clientHeight > 2) cssH = canvas.parentElement.clientHeight;
+            else if (window.visualViewport && window.visualViewport.height > 2) cssH = window.visualViewport.height;
+            else cssH = window.innerHeight || 720;
+        } catch (e) { cssH = 720; }
+    }
     // Low-tier mobile renders fewer backing pixels (CSS stretches the
-    // result). Gameplay coordinates (water boundary) always use CSS size
-    // so the world never shrinks with the resolution.
+    // result). Backing scale NEVER affects gameplay coordinates.
     let scale = 1;
     try { if (typeof TouchControls !== 'undefined') scale = TouchControls.renderScale() || 1; } catch (e) {}
-    canvas.width = Math.max(2, Math.round(cssW * scale));
-    canvas.height = Math.max(2, Math.round(cssH * scale));
+    // Clamp DPR so 3x phones don't allocate a 4K backing store.
+    let dpr = 1;
+    try { dpr = Math.min(2, window.devicePixelRatio || 1); } catch (e) {}
+    const backingScale = Math.max(0.25, scale * dpr);
+    // Absolute backing-store cap: presenting 6MP+ frames melts weak iGPUs
+    // (4K CSS × DPR 2) into single-digit FPS that looks exactly like a
+    // "game logic" lag spike — while FPS meters blame nothing. Gameplay is
+    // resolution-independent; past the cap the image just gets softer.
+    let pxW = cssW * backingScale, pxH = cssH * backingScale;
+    try {
+        const MAX_PX = 2560 * 1440;
+        const area = pxW * pxH;
+        if (area > MAX_PX) {
+            const k = Math.sqrt(MAX_PX / area);
+            pxW *= k; pxH *= k;
+        }
+    } catch (e) {}
+    canvas.width = Math.max(2, Math.round(pxW));
+    canvas.height = Math.max(2, Math.round(pxH));
     state.canvasWidth = canvas.width;
     state.canvasHeight = canvas.height;
-    state.renderScale = scale;
-    state.waterBoundaryX = cssW * ((typeof CONFIG !== 'undefined' && CONFIG.WATER_BOUNDARY_RATIO) || 0.65);
+    state.cssWidth = Math.round(cssW);
+    state.cssHeight = Math.round(cssH);
+    state.renderScale = backingScale;
+    // AUTHORITATIVE shoreline: fixed world X, identical on every client
+    // and every aspect ratio. Never derive from cssW (that desyncs MP:
+    // a 16:9 tab and a 1:1 tab would disagree on water vs sand).
+    state.waterBoundaryX = fixedWaterBoundaryX();
 }
+window.__fixedWaterBoundaryX = fixedWaterBoundaryX;
 
 // ==========================================
 // GLOBAL ENGINE STATE
@@ -760,9 +880,12 @@ const state = {
     particles: [],
     floatingTexts: [],
     groundLoot: [],
-    waterBoundaryX: 0,
+    waterBoundaryX: (typeof CONFIG !== 'undefined' && typeof CONFIG.WATER_BOUNDARY_X === 'number') ? CONFIG.WATER_BOUNDARY_X : 830,
     canvasWidth: 0,
     canvasHeight: 0,
+    cssWidth: 0,
+    cssHeight: 0,
+    renderScale: 1,
     screenShake: 0,
     time: 0,
 
@@ -773,19 +896,55 @@ const state = {
     multiplayer: null
 };
 
-// Size the canvas now that `state` exists
-window.addEventListener('resize', resizeCanvas);
+// Size the canvas now that `state` exists.
+// Container-aware: works in a tab, in devtools docked mode, and inside
+// the itch.io iframe (window.innerWidth can lie there). visualViewport
+// tracks the mobile address-bar height; ResizeObserver catches container
+// resizes that never fire window resize.
+var __resizeScheduled = false;
+function requestResize() {
+    if (__resizeScheduled) return;
+    __resizeScheduled = true;
+    function run() {
+        __resizeScheduled = false;
+        try { resizeCanvas(); } catch (e) {}
+        // Mouse world coords depend on canvas size — refresh after every
+        // resize so the first click/aim isn't one frame stale.
+        try { if (typeof Input !== 'undefined' && Input.updateMouseWorld) Input.updateMouseWorld(state); } catch (e) {}
+    }
+    try {
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+        else setTimeout(run, 0);
+    } catch (e) { try { run(); } catch (ee) {} }
+}
+window.addEventListener('resize', requestResize);
+try {
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', requestResize);
+        window.visualViewport.addEventListener('scroll', requestResize);
+    }
+} catch (e) {}
 // Some mobile browsers don't fire resize reliably on rotation.
-window.addEventListener('orientationchange', () => {
-    setTimeout(() => { try { resizeCanvas(); } catch (e) {} }, 120);
-    setTimeout(() => { try { resizeCanvas(); } catch (e) {} }, 500);
+window.addEventListener('orientationchange', function () {
+    setTimeout(function () { try { resizeCanvas(); } catch (e) {} }, 120);
+    setTimeout(function () { try { resizeCanvas(); } catch (e) {} }, 500);
 });
+// itch.io iframe + devtools docking resize the CONTAINER without a
+// window resize: observe it directly.
+try {
+    if (typeof ResizeObserver !== 'undefined' && canvas && canvas.parentElement) {
+        window.__gameResizeObserver = new ResizeObserver(function () { requestResize(); });
+        window.__gameResizeObserver.observe(canvas.parentElement);
+    }
+} catch (e) {}
+window.__requestResize = requestResize;
 resizeCanvas();
 
 // Init subsystems
 if (typeof Input !== 'undefined' && canvas) Input.init(state, canvas);
 if (typeof TouchControls !== 'undefined') TouchControls.init(state);
 if (typeof Shop !== 'undefined') Shop.init(state);
+if (typeof Inventory !== 'undefined') Inventory.init(state);
 
 // Procedural art is the default everywhere. PNGs are opt-in:
 //  - fish: only species with explicit `image: 'name'` (see js/fishData.js)
@@ -842,6 +1001,9 @@ const MultiplayerUI = {
         on('btn-join',        () => this.showPanel('join'));
         on('btn-mp-back',     () => this.showPanel('main'));
         on('btn-join-back',   () => this.showPanel('multiplayer'));
+        on('btn-mp-diagnose', () => this.runDiagnose());
+        on('btn-skins-resync', () => this.resyncSkins());
+        on('btn-turn-save', () => this.saveTurnRelay());
         on('btn-copy-room',   () => this.copyRoomCode());
         on('btn-leave-lobby', () => this.leaveLobby());
         on('btn-start-mp',    () => this.startMultiplayerGame());
@@ -886,6 +1048,136 @@ const MultiplayerUI = {
                 if (e.key === 'Enter') this.joinGame(joinInput.value);
             });
         }
+    },
+
+    // TURN relay credentials (saved to localStorage `ah_peer_ice`, merged
+    // with default STUNs on the next Host/Join — never replaces them).
+    paintTurnInputs() {
+        try {
+            let cur = null;
+            try {
+                const raw = localStorage.getItem('ah_peer_ice');
+                const arr = raw ? JSON.parse(raw) : null;
+                if (Array.isArray(arr)) {
+                    cur = arr.find(e => e && typeof e.urls === 'string' && /^(turn|turns):/.test(e.urls)) || null;
+                }
+            } catch (e) {}
+            const set = (id, v) => { const el = $(id); if (el && document.activeElement !== el) el.value = v || ''; };
+            set('mp-turn-url', cur && cur.urls);
+            set('mp-turn-user', cur && cur.username);
+            // Credential (password) is never prefilled — retype to change.
+            try {
+                const rc = $('mp-relay-only');
+                if (rc) {
+                    let rv = false;
+                    try { rv = localStorage.getItem('ah_peer_relay_only') === '1'; } catch (e) {}
+                    if (document.activeElement !== rc) rc.checked = rv;
+                }
+            } catch (e) {}
+            const st = $('mp-turn-status');
+            if (st) {
+                st.innerText = cur
+                    ? `Relay saved (${cur.urls}) — applies to the next Host/Join.`
+                    : 'No relay saved — direct P2P only. Metered free tier works (paste its TURN url + user + credential).';
+                st.className = 'text-[10px] mt-1 ' + (cur ? 'text-emerald-300 font-bold' : 'text-slate-500');
+            }
+        } catch (e) {}
+    },
+
+    saveTurnRelay() {
+        const st = $('mp-turn-status');
+        const say = (msg, cls) => { if (st) { st.innerText = msg; st.className = 'text-[10px] mt-1 ' + cls; } };
+        try {
+            const url = ($('mp-turn-url') && $('mp-turn-url').value || '').trim();
+            const user = ($('mp-turn-user') && $('mp-turn-user').value || '').trim();
+            const pass = ($('mp-turn-pass') && $('mp-turn-pass').value || '');
+            if (!url) {
+                try { localStorage.removeItem('ah_peer_ice'); } catch (e) {}
+                try { localStorage.setItem('ah_peer_relay_only', '0'); } catch (e) {}
+                try { const rc0 = $('mp-relay-only'); if (rc0) rc0.checked = false; } catch (e) {}
+                say('Relay cleared — direct P2P only.', 'text-slate-500');
+                return;
+            }
+            if (!/^(turn|turns):[^:]+:\d+/.test(url)) {
+                say('URL must look like turn:host:3478 (or turns:host:443).', 'text-rose-300 font-bold');
+                return;
+            }
+            if (!user || !pass) {
+                say('Username + credential required (TURN needs auth).', 'text-rose-300 font-bold');
+                return;
+            }
+            try {
+                localStorage.setItem('ah_peer_ice', JSON.stringify([{ urls: url, username: user, credential: pass }]));
+            } catch (e) {
+                say('Could not save (storage blocked).', 'text-rose-300 font-bold');
+                return;
+            }
+            const pw = $('mp-turn-pass');
+            if (pw) pw.value = '';
+            try {
+                const rc = $('mp-relay-only');
+                try { localStorage.setItem('ah_peer_relay_only', rc && rc.checked ? '1' : '0'); } catch (e) {}
+            } catch (e) {}
+            say(`Relay saved (${url}) — Host/Join again to use it, then Run connection check.`, 'text-emerald-300 font-bold');
+            try { if (typeof Multiplayer !== 'undefined' && Multiplayer.mpLog) Multiplayer.mpLog('diag', 'TURN relay saved: ' + url); } catch (e) {}
+        } catch (e) {
+            say('Save failed.', 'text-rose-300 font-bold');
+        }
+    },
+
+    // Full API check (library + cloud + STUN + webhook): progressive
+    // render + MP LOG summary so blocked APIs are reported, never silent.
+    async runDiagnose() {
+        const box = $('mp-diag-list');
+        const btn = $('btn-mp-diagnose');
+        const paint = (list) => {
+            if (!box) return;
+            box.innerHTML = list.map(r => {
+                const cls = r.warn ? 'text-amber-300' : (r.ok ? 'text-emerald-300' : 'text-rose-300');
+                const mark = r.warn ? '!' : (r.ok ? '✓' : '✗');
+                return `<div class="${cls}">${mark} ${this.esc(r.text)}</div>`;
+            }).join('');
+        };
+        try {
+            if (typeof PeerLink === 'undefined' || !PeerLink.diagnose) {
+                if (box) box.innerHTML = '<div class="text-rose-300">✗ transport not loaded</div>';
+                return;
+            }
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Checking…'; }
+            if (box) box.innerHTML = '<div class="text-slate-500">probing…</div>';
+            const res = await PeerLink.diagnose((partial) => paint(partial));
+            paint(res);
+            try {
+                if (typeof Multiplayer !== 'undefined' && Multiplayer.mpLog) {
+                    const bad = res.filter(r => !r.ok);
+                    const warns = res.filter(r => r.warn);
+                    Multiplayer.mpLog('diag', bad.length
+                        ? `diagnose: ${bad.length} failing — ${bad.map(r => r.text).join(' / ').slice(0, 140)}`
+                        : (warns.length
+                            ? `diagnose: reachable with ${warns.length} warning${warns.length === 1 ? '' : 's'} — ${warns.map(r => r.text).join(' / ').slice(0, 140)}`
+                            : 'diagnose: all APIs reachable'));
+                }
+            } catch (e) {}
+        } finally {
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-stethoscope mr-1"></i> Run connection check'; }
+        }
+    },
+
+    // Re-publish my custom art to the room on demand (upload path also
+    // pushes automatically — this is the manual retry).
+    resyncSkins() {
+        try {
+            if (typeof PeerSkins !== 'undefined') PeerSkins.startSession();
+            if (typeof Multiplayer !== 'undefined' && Multiplayer.mpLog) {
+                Multiplayer.mpLog('skin', 'manual skin resync requested');
+            }
+            const btn = $('btn-skins-resync');
+            if (btn) {
+                const old = btn.innerHTML;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Syncing…';
+                setTimeout(() => { try { btn.innerHTML = old; } catch (e) {} }, 1500);
+            }
+        } catch (e) {}
     },
 
     // ---- Single-player save slots ----
@@ -1062,10 +1354,11 @@ const MultiplayerUI = {
         const panelEl = $(`mp-panel-${panel}`);
         if (panelEl) panelEl.classList.remove('hidden');
         this.currentPanel = panel;
-        if (panel === 'multiplayer') { this.refreshPeerRow(); this.paintNameInputs(); }
+        if (panel === 'multiplayer') { this.refreshPeerRow(); this.paintNameInputs(); this.paintTurnInputs(); this.paintSkinPicker(); }
         if (panel === 'join') this.paintNameInputs();
         if (panel === 'lobby') {
             this.paintNameInputs();
+            this.paintSkinPicker();
             this.refreshMPSlotRow();
             this.refreshExpeditionBox();
             this.refreshRoster();
@@ -1216,13 +1509,22 @@ const MultiplayerUI = {
         const count = Math.max(1, roster.length);
         if (countEl) countEl.innerText = `${count} / 4`;
         if (!list) return;
-        const row = (name, badge, badgeCls, dot) => `
+        const row = (name, badge, badgeCls, dotStyle) => `
             <div class="flex items-center gap-2 glass-panel px-3 py-2 rounded-xl">
-                <span class="w-2 h-2 rounded-full ${dot}"></span>
+                <span class="w-2 h-2 rounded-full animate-pulse" style="${dotStyle}"></span>
                 <i class="fa-solid fa-user text-slate-400 text-xs"></i>
                 <span class="text-xs font-bold text-white flex-1">${name}</span>
                 <span class="px-1.5 py-0.5 rounded text-[9px] font-black ${badgeCls}">${badge}</span>
             </div>`;
+        const dotFor = (m) => {
+            try {
+                if (m && m.skin && m.skin.color && typeof Multiplayer !== 'undefined') {
+                    const c = Multiplayer.skinColor(m.skin.color);
+                    if (c) return `background:${c.body}`;
+                }
+            } catch (e) {}
+            return 'background:#34d399';
+        };
         let html = '';
         roster.forEach((m, i) => {
             const nm = this.esc(m.name || ('Player ' + (i + 1)));
@@ -1238,7 +1540,7 @@ const MultiplayerUI = {
                     : (m.isHost
                         ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                         : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'),
-                'bg-emerald-400 animate-pulse'
+                dotFor(m)
             );
         });
         for (let i = roster.length; i < 4; i++) {
@@ -1246,7 +1548,7 @@ const MultiplayerUI = {
                 `Player ${i + 1}`,
                 'WAITING...',
                 'bg-slate-700/60 text-slate-400 border border-slate-600',
-                'bg-slate-500'
+                'background:#64748b'
             );
         }
         list.innerHTML = html;
@@ -1290,12 +1592,32 @@ const MultiplayerUI = {
         const codeEl = $('mp-room-code');
         if (!codeEl) return;
         const code = codeEl.innerText;
+        const doneOk = () => {
+            this.setLobbyStatus('Room code copied!', 'emerald');
+            setTimeout(() => this.setLobbyStatus(`Room: ${code} - Waiting for player...`), 1500);
+        };
+        const legacyCopy = () => {
+            // itch.io iframes block the async Clipboard API (permissions
+            // policy) — legacy execCommand path instead.
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = code;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                const ok = document.execCommand('copy');
+                ta.remove();
+                if (ok) { doneOk(); return true; }
+            } catch (e) {}
+            return false;
+        };
         if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(code).then(() => {
-                this.setLobbyStatus('Room code copied!', 'emerald');
-                setTimeout(() => this.setLobbyStatus(`Room: ${code} - Waiting for player...`), 1500);
-            }).catch(() => this.setLobbyStatus('Copy failed — select manually.', 'rose'));
-        } else {
+            navigator.clipboard.writeText(code).then(doneOk).catch(() => {
+                if (!legacyCopy()) this.setLobbyStatus('Copy blocked — long-press the code to copy manually.', 'rose');
+            });
+        } else if (!legacyCopy()) {
             this.setLobbyStatus('Clipboard unavailable — select manually.', 'rose');
         }
     },
@@ -1355,14 +1677,39 @@ const MultiplayerUI = {
         }
     },
 
+    // Diver color picker (lobby skin). Painted into every
+    // .mp-skin-picker container (multiplayer panel + lobby).
+    paintSkinPicker() {
+        try {
+            if (typeof Multiplayer === 'undefined' || !Multiplayer.DIVER_COLORS) return;
+            const cur = Multiplayer.playerSkin();
+            document.querySelectorAll('.mp-skin-picker').forEach(box => {
+                box.innerHTML = '';
+                Multiplayer.DIVER_COLORS.forEach(c => {
+                    const b = document.createElement('button');
+                    b.className = 'w-9 h-9 rounded-xl border-2 transition-all ' +
+                        (c.id === cur ? 'border-white scale-110 shadow-lg' : 'border-slate-600 hover:border-slate-400');
+                    b.style.background = `radial-gradient(circle at 35% 35%, ${c.body}, ${c.edge})`;
+                    b.title = c.name;
+                    b.onclick = () => {
+                        try { audio.playUIClick(); } catch (e) {}
+                        try { Multiplayer.setSkin(c.id); } catch (e) {}
+                        this.paintSkinPicker();
+                        try { this.refreshRoster(); } catch (e) {}
+                    };
+                    box.appendChild(b);
+                });
+            });
+        } catch (e) {}
+    },
+
     showInGameHUD() {
-        const hud = $('mp-hud');
-        if (hud) hud.classList.remove('hidden');
+        // Intentionally empty: the old floating mp-hud overlapped the HP
+        // bar, so ping/status now live ONLY in the TAB player list.
     },
 
     hideInGameHUD() {
-        const hud = $('mp-hud');
-        if (hud) hud.classList.add('hidden');
+        // No-op (see showInGameHUD).
     },
 
     forceExitMultiplayer() {
@@ -1489,7 +1836,7 @@ const PauseMenu = {
             let ok = false;
             try { if (typeof SaveSystem !== 'undefined') ok = SaveSystem.save(state); } catch (e) {}
             if (msg) {
-                msg.innerText = ok ? 'Progress saved!' : 'Save failed.';
+                msg.innerText = ok ? T('pause_saved') : T('pause_save_fail');
                 msg.className = 'text-center text-[11px] font-bold min-h-[1rem] ' + (ok ? 'text-emerald-300' : 'text-rose-300');
             }
         });
@@ -1530,13 +1877,24 @@ const TabList = {
             if (typeof state !== 'undefined' && state.player && state.player.isDead) return;
         } catch (e) {}
         this.render();
+        // Live diver-color picker inside the TAB list (in-game changes).
+        try { if (typeof MultiplayerUI !== 'undefined' && MultiplayerUI.paintSkinPicker) MultiplayerUI.paintSkinPicker(); } catch (e) {}
         ov.classList.remove('hidden');
         ov.classList.add('flex');
+        // Live refresh while held (ping ticks every 2s) — cleared on hide.
+        try {
+            if (this._timer) clearInterval(this._timer);
+            this._timer = setInterval(() => { try { this.render(); } catch (e) {} }, 1500);
+        } catch (e) {}
     },
 
     hide() {
         const ov = $('tablist-overlay');
         if (ov) { ov.classList.add('hidden'); ov.classList.remove('flex'); }
+        try {
+            if (this._timer) clearInterval(this._timer);
+            this._timer = null;
+        } catch (e) {}
     },
 
     render() {
@@ -1582,12 +1940,56 @@ const TabList = {
                 : (m.isHost
                     ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                     : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30');
+            // Diver color dot (lobby skin) + live ping chip
+            let dotStyle = 'background:#34d399';
+            try {
+                if (m && m.skin && m.skin.color && typeof Multiplayer !== 'undefined') {
+                    const c = Multiplayer.skinColor(m.skin.color);
+                    if (c) dotStyle = `background:${c.body}`;
+                }
+            } catch (e) {}
+            let pingHtml = '';
+            try {
+                if (m && typeof m.pingMs === 'number') {
+                    const pcol = m.pingMs < 100 ? 'text-emerald-400' : m.pingMs < 250 ? 'text-amber-300' : 'text-rose-400';
+                    pingHtml = `<span class="text-[9px] font-black ${pcol} whitespace-nowrap">${Math.round(m.pingMs)}ms</span>`;
+                }
+            } catch (e) {}
+            // Host kick button on every non-self row
+            let kickHtml = '';
+            try {
+                const amHost = typeof Multiplayer !== 'undefined' && Multiplayer.isHost && Multiplayer.roomCode;
+                if (amHost && !m.isYou && !m.isHost && m.id) {
+                    kickHtml = `<button data-kick="${this.esc(m.id)}" title="Kick ${nm}" class="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/40 shrink-0">KICK</button>`;
+                }
+            } catch (e) {}
             return `<div class="flex items-center gap-2 glass-panel px-3 py-2 rounded-xl">` +
-                `<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>` +
+                `<span class="w-2 h-2 rounded-full animate-pulse" style="${dotStyle}"></span>` +
                 `<i class="fa-solid fa-user text-slate-400 text-xs"></i>` +
                 `<span class="text-xs font-bold text-white flex-1">${nm}</span>` +
-                `<span class="px-1.5 py-0.5 rounded text-[9px] font-black ${cls}">${this.esc(badge)}</span></div>`;
+                pingHtml +
+                `<span class="px-1.5 py-0.5 rounded text-[9px] font-black ${cls}">${this.esc(badge)}</span>` +
+                kickHtml + `</div>`;
         }).join('');
+        // Wire kick + rescan buttons (rows re-render every open)
+        try {
+            rows.querySelectorAll('[data-kick]').forEach(btn => {
+                btn.onclick = (ev) => {
+                    try { ev.stopPropagation(); } catch (e) {}
+                    try {
+                        if (typeof Multiplayer !== 'undefined' && Multiplayer.kickPlayer) {
+                            Multiplayer.kickPlayer(btn.dataset.kick);
+                            setTimeout(() => { try { this.render(); } catch (e) {} }, 600);
+                        }
+                    } catch (e) {}
+                };
+            });
+            const rs = document.getElementById('btn-tab-rescan');
+            if (rs) rs.onclick = () => {
+                try { if (typeof Multiplayer !== 'undefined' && Multiplayer.rescan) Multiplayer.rescan(); } catch (e) {}
+                setTimeout(() => { try { this.render(); } catch (e) {} }, 800);
+            };
+        } catch (e) {}
     }
 };
 
@@ -1602,7 +2004,7 @@ const STORMCALLER_INFO = {
     size: 34, maxHp: 9000, staminaMax: 3000, attack: 70, speed: 5.5,
     value: 4000, rarity: 'boss', shape: 'seagull', finColor: '#991b1b',
     desc: 'Mother of gulls. Comes when 20 of her children fall. Enrages under 40% HP.',
-    skills: ['strike', 'feathers', 'roar'], skillName: 'Strike / Feather Barrage / Roar'
+    skills: ['strike', 'feathers', 'stormDive', 'galeWall', 'roar'], skillName: 'Strike / Feathers / Dive / Gale / Roar'
 };
 
 const FishIndex = {
@@ -1953,7 +2355,7 @@ const Tutorial = {
         const p = state.player;
         if (p.tutorialDone) return;
         p.tutorialDone = true;
-        UI.updateStatusBanner('Tutorial complete! Talk to <b>OLD MARLIN</b> (E) on the beach for quests.', 'Done', 'emerald');
+        UI.updateStatusBanner(T('t_tutorial_done'), T('t_done'), 'emerald');
         setTimeout(() => {
             const banner = $('status-banner');
             if (banner && state.player.tutorialDone) banner.style.display = 'none';
@@ -1978,7 +2380,7 @@ const Tutorial = {
         const banner = $('status-banner');
         if (banner) {
             banner.style.display = '';
-            banner.innerHTML = '<span class="text-amber-400 font-extrabold uppercase">Step 1:</span> Stand near water & Hold <span class="key">SPACE</span> to Cast!';
+            banner.innerHTML = T('step1_html');
         }
         if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
     }
@@ -1989,7 +2391,7 @@ const Tutorial = {
 // ==========================================
 const Settings = {
     KEY: 'ah_settings',
-    data: { sound: true, fx: 'med', shake: true, dayNightFx: true, master: 100, music: 80, sfx: 100, touch: 'auto' },
+    data: { sound: true, fx: 'med', shake: true, dayNightFx: true, master: 100, music: 80, sfx: 100, touch: 'auto', lang: 'en', uiScale: 100, binds: null },
 
     load() {
         try {
@@ -2006,6 +2408,17 @@ const Settings = {
                     if (typeof d[k] === 'number') this.data[k] = Math.max(0, Math.min(100, Math.round(d[k])));
                 });
                 if (['auto', 'on', 'off'].includes(d.touch)) this.data.touch = d.touch;
+                if (typeof d.uiScale === 'number') this.data.uiScale = Math.max(70, Math.min(130, Math.round(d.uiScale)));
+                // Keybinds: {action: e.code} — validated, unknown actions dropped.
+                if (d.binds && typeof d.binds === 'object') {
+                    const clean = {};
+                    const known = (typeof Input !== 'undefined' && Input.DEFAULT_BINDS) || {};
+                    for (const [k, v] of Object.entries(d.binds)) {
+                        if (known[k] && typeof v === 'string' && v.length >= 2 && v.length <= 24) clean[k] = v;
+                    }
+                    this.data.binds = clean;
+                }
+                if (d.lang === 'en' || d.lang === 'vi') this.data.lang = d.lang;
             }
         } catch (e) {}
         return this.data;
@@ -2032,6 +2445,33 @@ const Settings = {
                 CONFIG.FX_DENSITY = this.data.fx === 'low' ? 0.3 : this.data.fx === 'high' ? 1 : 0.55;
             }
         } catch (e) {}
+        this.applyUiScale();
+    },
+
+    // UI SIZE: manual % (70-130) x auto phone-compact factor. Written to
+    // #game-container --ui-scale; HUD/touch CSS zooms off that var so the
+    // canvas itself is never scaled (aim math untouched).
+    uiTierFactor() {
+        try {
+            const t = document.body && document.body.dataset ? document.body.dataset.uitier : 'lg';
+            if (t === 'xs') return 0.8;
+            if (t === 'sm') return 0.86;
+            if (t === 'md') return 0.94;
+        } catch (e) {}
+        return 1;
+    },
+
+    applyUiScale() {
+        try {
+            const manual = (typeof this.data.uiScale === 'number' ? this.data.uiScale : 100) / 100;
+            const eff = Math.max(0.55, Math.min(1.35, manual * this.uiTierFactor()));
+            const gc = document.getElementById('game-container');
+            if (gc) gc.style.setProperty('--ui-scale', eff.toFixed(3));
+            const r = document.getElementById('set-uiscale');
+            if (r && document.activeElement !== r) r.value = this.data.uiScale;
+            const v = document.getElementById('set-uiscale-val');
+            if (v) v.innerText = `${this.data.uiScale}%`;
+        } catch (e) {}
     },
 
     render() {
@@ -2048,17 +2488,89 @@ const Settings = {
         // 1.1.5: lighting only — the clock keeps ticking when OFF.
         set('set-daynight-val', this.data.dayNightFx !== false ? 'ON' : 'OFF', this.data.dayNightFx !== false);
         set('set-touch-val', this.data.touch.toUpperCase(), this.data.touch !== 'off');
+        const _ur = $('set-uiscale');
+        if (_ur) _ur.value = this.data.uiScale;
+        const _uv = $('set-uiscale-val');
+        if (_uv) _uv.innerText = `${this.data.uiScale}%`;
+        set('set-lang-val', (this.data.lang || 'en').toUpperCase(), true);
         ['master', 'music', 'sfx'].forEach(k => {
             const r = $(`set-${k}`);
             const v = $(`set-${k}-val`);
             if (r) r.value = this.data[k];
             if (v) v.innerText = `${this.data[k]}%`;
         });
+        this.renderKeybinds();
+    },
+
+    // Minecraft-style keybind list: click a key cap, press the new key.
+    // Duplicates swap (no two actions share a code). ESC cancels.
+    _listeningBind: null,
+
+    renderKeybinds() {
+        try {
+            const list = $('keybind-list');
+            if (!list || typeof Input === 'undefined') return;
+            const binds = Input.binds();
+            const labels = Input.BIND_LABELS || {};
+            list.innerHTML = '';
+            for (const action of Object.keys(Input.DEFAULT_BINDS)) {
+                const row = document.createElement('div');
+                row.className = 'flex items-center justify-between gap-2';
+                const lab = document.createElement('span');
+                lab.className = 'text-xs font-bold text-slate-300';
+                lab.innerText = labels[action] || action;
+                const btn = document.createElement('button');
+                const listening = this._listeningBind === action;
+                btn.className = 'key px-3 py-1.5 rounded-lg text-xs font-black min-w-[64px] text-center transition-all ' +
+                    (listening ? 'bg-amber-500/40 text-amber-200 border border-amber-400 animate-pulse'
+                        : 'bg-slate-800 text-white border border-slate-600 hover:border-sky-500');
+                btn.innerText = listening ? '…' : Input.keyName(binds[action]);
+                btn.onclick = () => {
+                    this._listeningBind = (this._listeningBind === action) ? null : action;
+                    this.renderKeybinds();
+                };
+                row.appendChild(lab);
+                row.appendChild(btn);
+                list.appendChild(row);
+            }
+        } catch (e) {}
+    },
+
+    _installBindCapture() {
+        if (this._bindCaptureOn) return;
+        this._bindCaptureOn = true;
+        window.addEventListener('keydown', (e) => {
+            try {
+                if (!this._listeningBind) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const action = this._listeningBind;
+                this._listeningBind = null;
+                if (e.code === 'Escape') { this.renderKeybinds(); return; }
+                if (!this.data.binds || typeof this.data.binds !== 'object') this.data.binds = {};
+                // Swap duplicates so every code stays unique.
+                try {
+                    for (const k of Object.keys(this.data.binds)) {
+                        if (k !== action && this.data.binds[k] === e.code) {
+                            const cur = (typeof Input !== 'undefined' && Input.binds()[action]) || null;
+                            if (cur) this.data.binds[k] = cur;
+                            else delete this.data.binds[k];
+                        }
+                    }
+                } catch (err) {}
+                this.data.binds[action] = e.code;
+                this.save();
+                this.renderKeybinds();
+                try { if (typeof audio !== 'undefined' && audio.playUIClick) audio.playUIClick(); } catch (err) {}
+            } catch (err) {}
+        }, true);
     },
 
     init() {
         this.load();
         this.apply();
+        // Saved language wins on boot (defaults to English)
+        try { if (typeof Lang !== 'undefined') Lang.setLang(this.data.lang || 'en'); } catch (e) {}
         const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
         on('set-sound', () => { this.data.sound = !this.data.sound; this.save(); this.apply(); this.render(); });
         on('set-fx', () => {
@@ -2078,6 +2590,19 @@ const Settings = {
                 if (typeof TouchControls !== 'undefined' && typeof state !== 'undefined') TouchControls.refresh(state);
             } catch (e) {}
         });
+        const uiSlider = $('set-uiscale');
+        if (uiSlider) uiSlider.oninput = () => {
+            this.data.uiScale = Math.max(70, Math.min(130, Math.round(Number(uiSlider.value) || 100)));
+            this.save(); this.applyUiScale();
+        };
+        const cycleLang = () => {
+            this.data.lang = (this.data.lang === 'vi') ? 'en' : 'vi';
+            this.save(); this.render();
+            try { if (typeof Lang !== 'undefined') Lang.setLang(this.data.lang); } catch (e) {}
+            try { if (typeof audio !== 'undefined' && audio.playUIClick) audio.playUIClick(); } catch (e) {}
+        };
+        on('set-lang', cycleLang);
+        on('btn-lang', cycleLang);
         ['master', 'music', 'sfx'].forEach(k => {
             const r = $(`set-${k}`);
             if (r) r.oninput = () => {
@@ -2089,6 +2614,14 @@ const Settings = {
         });
         on('set-tutorial', () => {
             if (typeof state !== 'undefined') Tutorial.replay(state);
+            try { audio.playUIClick(); } catch (e) {}
+        });
+        // Keybind capture (Minecraft-style rebinding) + reset.
+        try { this._installBindCapture(); } catch (e) {}
+        on('bind-reset', () => {
+            this.data.binds = {};
+            this._listeningBind = null;
+            this.save(); this.render();
             try { audio.playUIClick(); } catch (e) {}
         });
         this.render();
@@ -2136,11 +2669,12 @@ const Intro = {
         {
             kicker: 'CHAPTER III',
             title: 'THE HUNT',
-            body: 'WASD to move · hold SPACE to cast, ease off before the line snaps · ' +
-                'click to shoot hooked horrors · E talks, shops and rituals · ' +
+            body: 'WASD to move, Q to dash through danger · hold SPACE to cast, ease off before the line snaps · ' +
+                'click to shoot hooked horrors · E talks, shops, rituals — or uses your equipped item · ' +
                 'J opens the fish index. Walk the pier for deeper water, watch the clock ' +
-                'chip (time + weather + tier), and save coins for the ferryman\'s 3 wild isles. ' +
-                'North of the beach, a sealed cave waits for clever feet.',
+                'chip (time + weather + tier), and check the 📡 radar by your umbrella for what bites when. ' +
+                'Save coins for the ferryman\'s 3 wild isles. ' +
+                'South-west corner of the beach: a sealed cave waits for clever feet.',
         },
     ],
 
@@ -2179,7 +2713,7 @@ const Intro = {
         const back = $('btn-intro-back');
         if (back) back.style.visibility = this.idx === 0 ? 'hidden' : 'visible';
         const next = $('btn-intro-next');
-        if (next) next.innerText = this.idx === this.pages.length - 1 ? 'Begin the Hunt' : 'Next →';
+        if (next) next.innerText = this.idx === this.pages.length - 1 ? T('intro_begin') : T('intro_next');
     },
 
     back() {
@@ -2202,12 +2736,55 @@ const Intro = {
 };
 
 // Single source of truth for the displayed game version.
-const GAME_VERSION = '1.2.5';
+const GAME_VERSION = '1.3.3';
 
 // Newest first. Shown in Menu > Updates.
 const CHANGELOG = [
     {
-        ver: 'v1.2.5', date: 'Oct 2026', tag: 'LATEST',
+        ver: 'v1.3.3', date: 'Oct 2026', tag: 'LATEST',
+        items: [
+            'Event-tide crafting inside the Bait/Armor tabs (have/need rows): Storm Chum, Moon Paste, Fog Mash, Dawn Cry + 4 craft-only armors, forged from specific special fish + coins — locked fish are never eaten',
+            'Item hotbar now reads [F] (E stays interact/shop); dash tuned shorter',
+            'Press-E prompts go radar-style: circled ⓔ bubbles above shop/casino/ferry pads and docks replace the bottom prompt bar',
+        ],
+    },
+    {
+        ver: 'v1.3.2', date: 'Oct 2026', tag: '',
+        items: [
+            'EVENT SYSTEM: 7 rotating sky events (Typhoon, Monsoon, Fog Bank, Blood Moon, Dawn Chorus, Sunspell, Abyssal Surge) — island rarity boosts removed, all isle luck flows through events + weather, announced live',
+            'Strict spawn windows: schedule fish bite ONLY in-window (e.g. 20:00–23:00 + rain) and weigh 0 outside it — 16 gated species',
+            '30 new fish (281 total): commons to mythics wired into events, windows and skills',
+            'Fish radar v2: real island names (Sunspill/Mistfall/Abyss), per-spot odds HERE vs each isle, schedule windows, event tags, active-event header',
+            'Press-E goes radar-style: circled ⓔ bubbles above shop/casino/ferry pads and docks replace the bottom prompt bar',
+            'Dash tuned down (820→680 speed, 0.18→0.16s)',
+            'All ferries one flat 1500c fare — pick islands by radar, not wallet; dying dockside no longer offers a free Marlin-camp teleport',
+        ],
+    },
+    {
+        ver: 'v1.3.1', date: 'Oct 2026', tag: '',
+        items: [
+            'Isle-hopping luck loop: all ferries now 1500c — islands differ by waters/models, pick by radar, not by wallet',
+            'Fish radar projects honest odds per spot (HERE vs ISLE 1/2/3 shallows under the same clock/weather) with a ★ best-trip tag per species',
+            'Dying on an island dock-respawns with no free teleport to Marlin\'s camp — sail home or take the menu',
+        ],
+    },
+    {
+        ver: 'v1.3.0', date: 'Oct 2026', tag: '',
+        items: [
+            'DASH (Q / » / R3): burst dodge with i-frames — fish yanks, knockbacks and pulls now drag you for real instead of teleporting (shared pull-velocity channel)',
+            'Consumable ITEMS tab: Bandage (+60 HP), Adrenaline (dash reset + speed), Smoke Bomb (stun + dodge) — buy stacks, equip one on [E], press F to use, slots under the weapon hotbar with dash cooldown',
+            'Fish RADAR board by the spawn umbrella (E): live bite forecast — top species right now with time × weather × zone/ISLE odds from the real roll math',
+            'Minecraft-style KEYBINDS in the new sectioned Settings (Audio / Graphics / Controls / Game), with swap-on-conflict and reset',
+            'Bosses never flee a corpse: hooked bosses (hydra included) hold the sea phase and cost a boss chance per death (10 deaths and it leaves); ritual bosses swim in from the far sea with roar + 3-2-1 mutual-freeze intros (hooked bosses too)',
+            'Economy honesty: ambient kills pay XP + sellable carcass only (boss bounties stay); coin wallet sanitized against float/NaN dust',
+            'HUD regroup: tutorial steps on TOP, tension + drag % bottom-center on every orientation (corner belongs to the fish-HP cards); fight list + quest tracker stay visible-but-compact on phones; XP progress bar in Vitals',
+            'Walk-to-shop design: HUD quick-open Shop button removed — visit the beach shop pad; fish-pond loot rots if unclaimed (150s, keys 300s); SELL tab gains a discard (trash) button with quantity prompt on stacks',
+            'Custom fish PNGs auto-trim transparent margins (cached) so uploads render full-size like procedural models, in index and world',
+            'Square wild isles: exact rounded-box collision (no more lake flings), lagoon-safe floating loot, shared sea asset with the mainland, buoy-ring visual borders',
+        ],
+    },
+    {
+        ver: 'v1.2.5', date: 'Oct 2026', tag: '',
         items: [
             'Multiplayer identities: pilot name asked once, remembered, shown in lobby + name tags (same name rejoins seamlessly)',
             'Separate MP save system: personal slots 1-3 per browser, never touches single-player files; per-slot NEW/CONTINUE expedition',
@@ -2349,28 +2926,33 @@ const MainMenu = {
             // Fresh player: one big Start button, no Continue to misclick.
             topBtn.dataset.mode = 'new';
             topBtn.disabled = false;
-            if (topSpan) topSpan.innerText = 'Start New Game';
+            if (topSpan) topSpan.innerText = T('menu_play');
             if (topIcon) topIcon.className = 'fa-solid fa-play';
             newBtn.classList.add('hidden');
         } else {
             // TOP = Continue (safe default), BELOW = Start New Game.
             topBtn.dataset.mode = 'continue';
             topBtn.disabled = !hasSlot;
-            if (topSpan) topSpan.innerText = hasSlot ? `Continue (Slot ${slot})` : `Slot ${slot} Empty — Pick a Save`;
+            if (topSpan) topSpan.innerText = hasSlot ? T('menu_continue_slot', { n: slot }) : T('menu_slot_empty', { n: slot });
             if (topIcon) topIcon.className = 'fa-solid fa-folder-open';
-            try { topBtn.title = hasSlot ? 'Load this slot and jump straight back in' : 'This slot is empty — pick a slot with progress, or start new below'; } catch (e) {}
+            try { topBtn.title = hasSlot ? T('menu_continue') : T('menu_slot_empty', { n: slot }); } catch (e) {}
             newBtn.classList.remove('hidden');
             newBtn.dataset.mode = 'new';
             newBtn.disabled = false;
-            if (newSpan) newSpan.innerText = hasSlot ? `Start New Game (Slot ${slot})` : `Start New Game (Slot ${slot})`;
+            if (newSpan) newSpan.innerText = T('menu_new_slot', { n: slot });
             if (newIcon) newIcon.className = 'fa-solid fa-play';
-            try { newBtn.title = 'Fresh expedition in this slot (asks before wiping; records kept)'; } catch (e) {}
+            try { newBtn.title = T('menu_new_slot', { n: slot }); } catch (e) {}
         }
         const saveBtn = $('btn-save-menu');
         if (saveBtn) {
             const sspan = saveBtn.querySelector('span');
-            if (sspan) sspan.innerText = `Save Game (Slot ${slot})`;
+            if (sspan) sspan.innerText = T('menu_save_slot', { n: slot });
         }
+        // Menu language quick-toggle label
+        try {
+            const langVal = document.getElementById('menu-lang-val');
+            if (langVal) langVal.innerText = (typeof Lang !== 'undefined' ? Lang.get() : 'en').toUpperCase();
+        } catch (e) {}
     },
 
     hide() {
@@ -2570,11 +3152,11 @@ const MainMenu = {
         window.addEventListener('blur', () => {
             try { if (typeof TabList !== 'undefined') TabList.hide(); } catch (e) {}
         });
-        // Touch fallback (no TAB key): tapping the MP status bar toggles
+        // Touch fallback (no TAB key): tapping the MP room dot toggles
         // the same player list.
         try {
-            const hud = $('mp-hud');
-            if (hud) hud.onclick = () => {
+            const dot = $('btn-mp-dot');
+            if (dot) dot.onclick = () => {
                 if (typeof TabList === 'undefined') return;
                 if (TabList.isOpen()) TabList.hide();
                 else TabList.show();
@@ -2748,6 +3330,18 @@ if (typeof Feedback !== 'undefined') {
     } catch (e) {}
 }
 
+// Storage health: itch.io iframes / private mode can block localStorage
+// outright — then every load reads "empty" and every save fails silent,
+// which reports describe as "wiped data". Warn loudly instead.
+try {
+    if (typeof SaveSystem !== 'undefined' && !SaveSystem.storageOK()) {
+        console.warn('[SaveSystem] localStorage BLOCKED — progress will NOT persist after reload.');
+        if (typeof UI !== 'undefined' && UI.updateStatusBanner) {
+            UI.updateStatusBanner('⚠ Browser blocked game saves (private mode / iframe storage). Progress will NOT persist — allow storage for this site or play outside the itch.io frame.', 'Save', 'rose');
+        }
+    }
+} catch (e) {}
+
 // Initialize Multiplayer system
 if (typeof Multiplayer !== 'undefined') {
     Multiplayer.init(state, {
@@ -2775,6 +3369,12 @@ if (typeof Multiplayer !== 'undefined') {
                     window.Multiplayer._hasEverSynced = false;
                     if (window.Multiplayer.sendGameStartAck) window.Multiplayer.sendGameStartAck();
                     if (window.Multiplayer.sendSyncRequest) window.Multiplayer.sendSyncRequest();
+                    // Skin sync starts DURING loading (not after entering):
+                    // publish our manifest now so art flows while the first
+                    // snapshot is on its way; chunks keep arriving in game.
+                    try {
+                        if (typeof PeerSkins !== 'undefined') PeerSkins.startSession();
+                    } catch (e) {}
                 }
             } catch (e) {}
             const t0 = Date.now();
@@ -2836,6 +3436,77 @@ if (typeof Multiplayer !== 'undefined') {
 }
 
 // ==========================================
+// PERF OVERLAY (F3) — frame-time diagnostic.
+// Splits each frame into update / render / HUD ms (EMA) + worst frame in
+// the last 15. Zero cost when hidden (one Date-free rAF timestamp that
+// the loop already computes). Used to hunt map-specific lag spikes.
+// ==========================================
+const PerfOverlay = {
+    on: false,
+    ema: { frame: 16.7, update: 0, render: 0, hud: 0 },
+    worst: 0,
+    _n: 0,
+    _lastT: 0,
+    _map: '',
+
+    toggle() {
+        this.on = !this.on;
+        try {
+            const el = document.getElementById('perf-overlay');
+            if (el) el.style.display = this.on ? '' : 'none';
+        } catch (e) {}
+        return this.on;
+    },
+
+    frame(updateMs, renderMs, hudMs, mapLabel) {
+        try {
+            const now = (typeof performance !== 'undefined') ? performance.now() : 0;
+            if (this._lastT) {
+                const d = now - this._lastT;
+                this.ema.frame += (d - this.ema.frame) * 0.05;
+                if (d > this.worst) this.worst = d;
+            }
+            this._lastT = now;
+            const k = 0.12;
+            this.ema.update += (updateMs - this.ema.update) * k;
+            this.ema.render += (renderMs - this.ema.render) * k;
+            this.ema.hud += (hudMs - this.ema.hud) * k;
+            if (mapLabel) this._map = mapLabel;
+            if (++this._n % 15 === 0) {
+                if (this.on) this.paint();
+                this.worst = 0;
+            }
+        } catch (e) {}
+    },
+
+    paint() {
+        try {
+            let el = document.getElementById('perf-overlay');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'perf-overlay';
+                el.style.cssText = 'position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:65;pointer-events:none;background:rgba(2,6,23,0.85);border:1px solid rgba(56,189,248,0.4);border-radius:8px;padding:4px 10px;font:11px/1.5 monospace;color:#7dd3fc;white-space:nowrap;display:none;';
+                const host = document.getElementById('game-container') || document.body;
+                host.appendChild(el);
+            }
+            const fps = this.ema.frame > 0 ? Math.round(1000 / this.ema.frame) : 0;
+            const f1 = (v) => (Math.round(v * 10) / 10).toFixed(1);
+            // Self-diagnosis fields: hidden=true means the tab is throttled
+            // (rAF starved by the browser, not the game); canvas px tells
+            // whether the backing store is absurdly large for the GPU.
+            let hid = '', px = '';
+            try { hid = (typeof document !== 'undefined' && document.hidden) ? ' HIDDEN' : ''; } catch (e) {}
+            try {
+                const cv = document.getElementById('gameCanvas');
+                if (cv) px = ` ${cv.width}x${cv.height}`;
+            } catch (e) {}
+            el.textContent = `${fps} FPS · ${f1(this.ema.frame)}ms (U ${f1(this.ema.update)} / R ${f1(this.ema.render)} / H ${f1(this.ema.hud)}) · worst ${f1(this.worst)} · ${this._map || '?'}${hid}${px} · F3`;
+        } catch (e) {}
+    },
+};
+window.PerfOverlay = PerfOverlay;
+
+// ==========================================
 // MAIN GAME LOOP
 // ==========================================
 let lastTime = performance.now();
@@ -2870,6 +3541,7 @@ function mpClientInput() {
             activeSlot: state.player.activeSlot,
             equippedWeapons: [...state.player.equippedWeapons],
             gunSkins: state.player.gunSkins ? { ...state.player.gunSkins } : {},
+            skin: (typeof Multiplayer !== 'undefined' && Multiplayer.playerSkin) ? { color: Multiplayer.playerSkin() } : null,
             onIsland: state.player.onIsland || null,
             inCave: !!state.player.inCave
         }
@@ -2896,6 +3568,8 @@ function mainLoop(time) {
     }
 
     state.time += delta;
+
+    const _perfT0 = (typeof performance !== 'undefined') ? performance.now() : 0;
 
     // 1.1.5 WORLD: clock + weather always tick while playing.
     if (typeof WorldSystem !== 'undefined' && WorldSystem.update) {
@@ -2927,17 +3601,17 @@ function mainLoop(time) {
     if (typeof TouchControls !== 'undefined') {
         try { TouchControls.update(state, delta); } catch (e) {}
     }
-    if (typeof Player !== 'undefined') Player.update(state, delta);
+    if (typeof Player !== 'undefined') Utils.safeTick('Player', () => Player.update(state, delta));
     if (typeof Ritual !== 'undefined' && Ritual.update) {
         try { Ritual.update(state, delta); } catch (e) {}
     }
-    if (typeof Fishing !== 'undefined') Fishing.update(state, delta);
-    if (typeof WeaponSystem !== 'undefined') WeaponSystem.update(state, delta);
-    if (typeof Combat !== 'undefined') Combat.update(state, delta);
-    if (typeof Particles !== 'undefined') Particles.update(state, delta);
+    if (typeof Fishing !== 'undefined') Utils.safeTick('Fishing', () => Fishing.update(state, delta));
+    if (typeof WeaponSystem !== 'undefined') Utils.safeTick('WeaponSystem', () => WeaponSystem.update(state, delta));
+    if (typeof Combat !== 'undefined') Utils.safeTick('Combat', () => Combat.update(state, delta));
+    if (typeof Particles !== 'undefined') Utils.safeTick('Particles', () => Particles.update(state, delta));
 
     // Update enemies
-    if (typeof EnemySpawner !== 'undefined') EnemySpawner.update(delta);
+    if (typeof EnemySpawner !== 'undefined') Utils.safeTick('Enemies', () => EnemySpawner.update(delta));
 
     // Update multiplayer
     if (typeof Multiplayer !== 'undefined' && state.multiplayer) {
@@ -2953,6 +3627,7 @@ function mainLoop(time) {
         }
     }
 
+    const _perfT1 = (typeof performance !== 'undefined') ? performance.now() : 0;
     if (typeof Render !== 'undefined' && Render.drawWorld && ctx) {
         Render.drawWorld(state, ctx);
     }
@@ -2967,26 +3642,20 @@ function mainLoop(time) {
         }
     }
 
+    const _perfT2 = (typeof performance !== 'undefined') ? performance.now() : 0;
     UI.updateBossBar(state);
     UI.updateFightList(state);
     UI.renderStatusEffectsHUD(state);
+    try { if (typeof ItemSystem !== 'undefined') ItemSystem.updateHUD(state); } catch (e) {}
 
     // World SHOP / CASINO zone prompt (pads deep on the beach only —
     // no prompt near the sea anymore)
     const beachIndicator = $('beach-shop-indicator');
     if (beachIndicator) {
+        // World E-bubbles (radar-style ⓔ above pads/boats) replaced the
+        // bottom banner for shops, casino and ferries — the banner now
+        // only covers talk/ritual/cave prompts.
         let prompt = null;
-        // 1.1.5 WORLD: ferry + island dock prompts first (never mid-voyage)
-        try {
-            if (typeof WorldSystem !== 'undefined' && !state.paused &&
-                !(WorldSystem.boatRiding && WorldSystem.boatRiding(state))) {
-                if (state.player.onIsland && WorldSystem.nearIslandExit(state) < 120 + 60) {
-                    prompt = 'SAIL HOME (free)';
-                } else if (!state.player.onIsland && !state.player.inCave && WorldSystem.nearBoat(state) < 130 + 60) {
-                    prompt = "FERRYMAN'S BOAT";
-                }
-            }
-        } catch (e) {}
         try {
             if (!prompt && typeof NPC !== 'undefined' && NPC.near && !state.paused && NPC.near(state) < (NPC.RADIUS || 115) + 40) {
                 prompt = 'TALK TO OLD MARLIN';
@@ -3001,12 +3670,6 @@ function mainLoop(time) {
                     prompt = 'ENTER THE CAVE';
                 }
             } catch (e) {}
-        }
-        if (!prompt && typeof Render !== 'undefined' && Render.nearestShopZone) {
-            const near = Render.nearestShopZone(state);
-            if (near && near.dist < near.zone.radius + 60) {
-                prompt = near.zone.id === 'casino' ? 'CASINO' : 'SHOP';
-            }
         }
         if (prompt) {
             beachIndicator.classList.remove('hidden');
@@ -3029,6 +3692,20 @@ function mainLoop(time) {
         }
     }
 
+    try {
+        if (typeof PerfOverlay !== 'undefined' && typeof performance !== 'undefined') {
+            const _perfT3 = performance.now();
+            let _map = 'main';
+            try {
+                if (state.player) {
+                    if (state.player.inCave) _map = 'cave';
+                    else if (state.player.onIsland) _map = 'isle:' + state.player.onIsland;
+                }
+            } catch (e) {}
+            PerfOverlay.frame(_perfT1 - _perfT0, _perfT2 - _perfT1, _perfT3 - _perfT2, _map);
+        }
+    } catch (e) {}
+
     requestAnimationFrame(mainLoop);
 }
 
@@ -3049,7 +3726,7 @@ function bootScreen() {
         'Casting the line…',
         'Hold SPACE near water to charge your cast…',
         'Rare fish bite faster on Blood Bait…',
-        'The NW corner hides a sealed void portal…',
+        'The SW corner hides a sealed void portal…',
         'Runes hunger for fish: 🐟 → 💎 → 👑…',
         'Bosses snap lines — bring guns…',
     ];

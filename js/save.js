@@ -62,6 +62,7 @@ const SaveSystem = {
             level: p.level,
             xp: p.xp,
             xpToNext: p.xpToNext,
+            hp: Math.max(0, Math.round(p.hp || 0)),
             maxHp: p.maxHp,
             ownedWeapons: [...p.ownedWeapons],
             equippedWeapons: [...p.equippedWeapons],
@@ -79,6 +80,9 @@ const SaveSystem = {
             // inside the bucket itself — see bucket map above)
             baitStock: p.baitStock ? { ...p.baitStock } : {},
             activeBait: (typeof p.activeBait === 'string') ? p.activeBait : null,
+            // Consumable items: stock stacks + the one equipped on [E].
+            itemStock: p.itemStock ? { ...p.itemStock } : {},
+            equippedItem: (typeof p.equippedItem === 'string') ? p.equippedItem : null,
             caveUnlocked: !!p.caveUnlocked,
             inCave: !!p.inCave,
             returnPos: (p.returnPos && typeof p.returnPos.x === 'number') ? { x: p.returnPos.x, y: p.returnPos.y } : null,
@@ -90,6 +94,7 @@ const SaveSystem = {
             totalFishCaught: p.totalFishCaught || 0,
             totalKills: p.totalKills || 0,
             bossKills: p.bossKills || 0,
+            totalDeaths: p.totalDeaths || 0,
             casinoTotalLost: p.casinoTotalLost || 0,
             ownedArmor: p.ownedArmor ? [...p.ownedArmor] : ['vest_light'],
             equippedArmor: p.equippedArmor ? { ...p.equippedArmor } : {},
@@ -105,6 +110,82 @@ const SaveSystem = {
     },
 
     // ---- Local slots (single player) ----
+    // Storage health: itch.io iframes / private mode can block
+    // localStorage entirely (even reads throw). Probed once at boot —
+    // when blocked, every load looks "wiped" and every save silently
+    // fails, so the game warns instead of gaslighting the player.
+    _storageOK: null,
+    storageOK() {
+        if (this._storageOK !== null) return this._storageOK;
+        try {
+            const k = 'ah_storage_probe';
+            localStorage.setItem(k, '1');
+            const ok = localStorage.getItem(k) === '1';
+            try { localStorage.removeItem(k); } catch (e) {}
+            this._storageOK = ok;
+        } catch (e) {
+            this._storageOK = false;
+        }
+        return this._storageOK;
+    },
+
+    // Backup rotation: before overwriting a slot, the previous raw value
+    // moves to `<key>.bak`. A corrupt primary (one bad byte, killed tab
+    // mid-write, manual edit) then recovers from backup instead of
+    // reading "empty" and inviting an overwrite-new that wipes history.
+    _backup(key) {
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw) localStorage.setItem(key + '.bak', raw);
+        } catch (e) {}
+    },
+    _readWithBackup(key) {
+        let raw = null;
+        try { raw = localStorage.getItem(key); } catch (e) { return null; }
+        // Fall back when missing AND when present-but-unparseable (one bad
+        // byte, killed tab, manual edit) — a corrupt primary must never
+        // read as "empty slot".
+        let usable = false;
+        if (raw) {
+            try { JSON.parse(raw); usable = true; } catch (e) { usable = false; }
+        }
+        if (usable) return { raw, backed: false };
+        if (raw) console.warn('[SaveSystem] primary save corrupt — trying backup:', key);
+        try { raw = localStorage.getItem(key + '.bak'); } catch (e) { raw = null; }
+        if (raw) {
+            console.warn('[SaveSystem] recovered from backup:', key);
+            return { raw, backed: true };
+        }
+        return null;
+    },
+    sealEnvelope(data) {
+        try {
+            if (typeof SecureServer !== 'undefined' && SecureServer.seal) {
+                return { v: 2, data, seal: SecureServer.seal(data) };
+            }
+        } catch (e) {}
+        return { v: 2, data, seal: '' };
+    },
+    openEnvelope(raw) {
+        try {
+            const env = JSON.parse(raw);
+            if (env && env.v === 2 && env.data && env.data.version === 1) {
+                let ok = true;
+                try {
+                    if (typeof SecureServer !== 'undefined' && SecureServer.seal && env.seal) {
+                        ok = (SecureServer.seal(env.data) === env.seal);
+                    }
+                } catch (e) { ok = true; }
+                if (!ok) {
+                    console.warn('[SaveSystem] save seal mismatch — possible localStorage edit. Loading with guards.');
+                    try { if (typeof AntiCheat !== 'undefined') AntiCheat.violations++; } catch (e) {}
+                }
+                return env.data;
+            }
+            if (env && env.version === 1) return env; // legacy plain save
+        } catch (e) {}
+        return null;
+    },
     save(state, slot) {
         // MP rooms (host AND client) always write the personal MP-slot
         // file — SP slots are never touched while a room is open.
@@ -118,7 +199,9 @@ const SaveSystem = {
         this.setSlot(slot);
         try {
             const data = this.collect(state);
-            localStorage.setItem(this.slotKey(slot), JSON.stringify(data));
+            const key = this.slotKey(slot);
+            this._backup(key);
+            localStorage.setItem(key, JSON.stringify(this.sealEnvelope(data)));
             return true;
         } catch (e) {
             console.warn('[SaveSystem] save failed:', e);
@@ -130,14 +213,23 @@ const SaveSystem = {
         slot = slot || state.saveSlot || this.getSlot();
         try {
             // Legacy migration: old single key becomes slot 1
-            let raw = localStorage.getItem(this.slotKey(slot));
-            if (!raw && slot === 1) raw = localStorage.getItem(this.KEY);
+            let hit = this._readWithBackup(this.slotKey(slot));
+            let raw = hit && hit.raw;
+            if (!raw && slot === 1) {
+                const leg = this._readWithBackup(this.KEY);
+                raw = leg && leg.raw;
+            }
             if (!raw) return false;
-            const data = JSON.parse(raw);
+            const data = this.openEnvelope(raw);
             if (!data || data.version !== 1) return false;
             state.saveSlot = slot;
             this.setSlot(slot);
-            return this.apply(state, data);
+            const ok = this.apply(state, data);
+            // A rich save looks exactly like a cheat jump vs the pre-load
+            // snapshot — re-baseline the tamper guard so it never wipes
+            // legit progress on slot switch.
+            if (ok) { try { if (typeof AntiCheat !== 'undefined') AntiCheat.notifyLoad(); } catch (e) {} }
+            return ok;
         } catch (e) {
             console.warn('[SaveSystem] load failed:', e);
             return false;
@@ -155,10 +247,14 @@ const SaveSystem = {
     // Lightweight summary for the slot picker (no state mutation)
     slotMeta(slot) {
         try {
-            let raw = localStorage.getItem(this.slotKey(slot));
-            if (!raw && slot === 1) raw = localStorage.getItem(this.KEY);
+            let hit = this._readWithBackup(this.slotKey(slot));
+            let raw = hit && hit.raw;
+            if (!raw && slot === 1) {
+                const leg = this._readWithBackup(this.KEY);
+                raw = leg && leg.raw;
+            }
             if (!raw) return null;
-            const d = JSON.parse(raw);
+            const d = this.openEnvelope(raw);
             if (!d || d.version !== 1) return null;
             return { level: d.level || 1, coins: d.coins || 0, savedAt: d.savedAt || 0 };
         } catch (e) { return null; }
@@ -166,8 +262,14 @@ const SaveSystem = {
 
     wipe(slot) {
         try {
-            if (slot) localStorage.removeItem(this.slotKey(slot));
-            else localStorage.removeItem(this.KEY);
+            if (slot) {
+                // Explicit user wipe: drop the backup too, or a stale .bak
+                // would resurrect the deleted expedition on next load.
+                localStorage.removeItem(this.slotKey(slot));
+                localStorage.removeItem(this.slotKey(slot) + '.bak');
+            } else {
+                localStorage.removeItem(this.KEY);
+            }
         } catch (e) {}
     },
 
@@ -181,7 +283,9 @@ const SaveSystem = {
         this.setMPSlot(slot);
         try {
             const data = this.collect(state);
-            localStorage.setItem(this.mpSlotKey(slot), JSON.stringify(data));
+            const key = this.mpSlotKey(slot);
+            this._backup(key);
+            localStorage.setItem(key, JSON.stringify(this.sealEnvelope(data)));
             return true;
         } catch (e) {
             console.warn('[SaveSystem] mp save failed:', e);
@@ -197,14 +301,20 @@ const SaveSystem = {
             // Scoped (per-host) lookups NEVER fall back to the legacy
             // global file — that file is exactly the cross-server
             // contamination this scoping exists to kill.
-            let raw = localStorage.getItem(this.mpSlotKey(slot));
-            if (!raw && !this.mpScope) raw = localStorage.getItem(this.MP_KEY);
+            let hit = this._readWithBackup(this.mpSlotKey(slot));
+            let raw = hit && hit.raw;
+            if (!raw && !this.mpScope) {
+                const leg = this._readWithBackup(this.MP_KEY);
+                raw = leg && leg.raw;
+            }
             if (!raw) return false;
-            const data = JSON.parse(raw);
+            const data = this.openEnvelope(raw);
             if (!data || data.version !== 1) return false;
             state.mpSaveSlot = slot;
             this.setMPSlot(slot);
-            return this.apply(state, data);
+            const ok = this.apply(state, data);
+            if (ok) { try { if (typeof AntiCheat !== 'undefined') AntiCheat.notifyLoad(); } catch (e) {} }
+            return ok;
         } catch (e) {
             console.warn('[SaveSystem] mp load failed:', e);
             return false;
@@ -224,10 +334,14 @@ const SaveSystem = {
     mpMeta(slot) {
         slot = slot || this.getMPSlot();
         try {
-            let raw = localStorage.getItem(this.mpSlotKey(slot));
-            if (!raw && !this.mpScope) raw = localStorage.getItem(this.MP_KEY);
+            let hit = this._readWithBackup(this.mpSlotKey(slot));
+            let raw = hit && hit.raw;
+            if (!raw && !this.mpScope) {
+                const leg = this._readWithBackup(this.MP_KEY);
+                raw = leg && leg.raw;
+            }
             if (!raw) return null;
-            const d = JSON.parse(raw);
+            const d = this.openEnvelope(raw);
             if (!d || d.version !== 1) return null;
             return { level: d.level || 1, coins: d.coins || 0, savedAt: d.savedAt || 0 };
         } catch (e) { return null; }
@@ -235,8 +349,12 @@ const SaveSystem = {
 
     wipeMP(slot) {
         try {
-            if (slot) localStorage.removeItem(this.mpSlotKey(slot));
-            else localStorage.removeItem(this.MP_KEY);
+            if (slot) {
+                localStorage.removeItem(this.mpSlotKey(slot));
+                localStorage.removeItem(this.mpSlotKey(slot) + '.bak');
+            } else {
+                localStorage.removeItem(this.MP_KEY);
+            }
         } catch (e) {}
     },
 
@@ -287,6 +405,8 @@ const SaveSystem = {
         p.slainBosses = keepSlain || [];
         p.baitStock = {};
         p.activeBait = null;
+        p.itemStock = {};
+        p.equippedItem = null;
         p.caveUnlocked = false;
         p.inCave = false;
         p.returnPos = null;
@@ -342,10 +462,15 @@ const SaveSystem = {
         const p = state.player;
 
         if (typeof data.coins === 'number')    p.coins = data.coins;
-        if (typeof data.level === 'number')    p.level = data.level;
-        if (typeof data.xp === 'number')       p.xp = data.xp;
-        if (typeof data.xpToNext === 'number') p.xpToNext = data.xpToNext;
-        if (typeof data.maxHp === 'number')    p.maxHp = data.maxHp;
+        // Level block: strict-guarded so a corrupt/NaN save can never wipe
+        // progress (bare typeof checks used to assign NaN/0 verbatim).
+        if (Number.isFinite(data.level) && data.level >= 1) p.level = Math.min(999, Math.floor(data.level));
+        if (Number.isFinite(data.xp) && data.xp >= 0) p.xp = Math.min(1e9, Math.floor(data.xp));
+        if (Number.isFinite(data.xpToNext) && data.xpToNext > 0) p.xpToNext = Math.min(1e9, Math.floor(data.xpToNext));
+        if (Number.isFinite(data.maxHp) && data.maxHp > 0) p.maxHp = Math.min(99999, Math.floor(data.maxHp));
+        // Provisional HP (may exceed maxHp until armor recalc below — the
+        // exact value is re-applied after applyArmorStats).
+        p._savedHp = (Number.isFinite(data.hp) && data.hp > 0) ? Math.floor(data.hp) : null;
         p.hp = p.maxHp;
 
         if (Array.isArray(data.ownedWeapons) && data.ownedWeapons.length) {
@@ -402,8 +527,19 @@ const SaveSystem = {
         if (Array.isArray(data.bucket)) {
             p.bucket = data.bucket
                 .map(f => {
-                    // Summon key/trophy items ride in the bucket as-is
-                    if (f && f.keyItem && f.id && f.name) return f;
+                    // Summon key/trophy items ride in the bucket as-is.
+                    // Pre-price saves stored value: 0 — backfill from the
+                    // def so old keys sell for the same price as new ones.
+                    if (f && f.keyItem && f.id && f.name) {
+                        try {
+                            if ((typeof f.value !== 'number' || f.value <= 0) &&
+                                typeof Ritual !== 'undefined' && Ritual.keyValue) {
+                                const v = Ritual.keyValue(f.id);
+                                if (v > 0) f = Object.assign({}, f, { value: v });
+                            }
+                        } catch (e) {}
+                        return f;
+                    }
                     const base = FISH_SPECIES.find(s => s.id === f.id);
                     if (!base) return f.shiny || (f.value && f.name) ? f : null;
                     // Locked fish must be a private copy — never hand out the
@@ -496,6 +632,23 @@ const SaveSystem = {
                 : (data.activeBait && data.activeBait.id);
             if (id && BAITS.some(b => b.id === id) && (p.baitStock[id] > 0)) p.activeBait = id;
         }
+        // Consumable items: validated stacks + equipped id.
+        p.itemStock = {};
+        if (data.itemStock && typeof data.itemStock === 'object') {
+            const validItems = new Set((typeof ItemSystem !== 'undefined' ? ItemSystem.ITEMS : []).map(i => i.id));
+            for (const [k, v] of Object.entries(data.itemStock)) {
+                if (typeof v !== 'number' || v <= 0 || !validItems.has(k)) continue;
+                const def = ItemSystem.def(k);
+                p.itemStock[k] = Math.min(def ? def.max : 5, Math.floor(v));
+            }
+        }
+        p.equippedItem = null;
+        if (typeof data.equippedItem === 'string') {
+            try {
+                if (typeof ItemSystem !== 'undefined' && ItemSystem.def(data.equippedItem) &&
+                    (p.itemStock[data.equippedItem] > 0)) p.equippedItem = data.equippedItem;
+            } catch (e) {}
+        }
         // Sealed cave stays solved once opened (+ where you are in it)
         p.caveUnlocked = !!data.caveUnlocked;
         p.inCave = !!data.inCave;
@@ -515,6 +668,7 @@ const SaveSystem = {
         if (typeof data.totalKills === 'number') p.totalKills = Math.max(0, Math.floor(data.totalKills));
         if (typeof data.bossKills === 'number') p.bossKills = Math.max(0, Math.floor(data.bossKills));
         if (typeof data.casinoTotalLost === 'number') p.casinoTotalLost = Math.max(0, Math.floor(data.casinoTotalLost));
+        if (Number.isFinite(data.totalDeaths) && data.totalDeaths >= 0) p.totalDeaths = Math.min(1e6, Math.floor(data.totalDeaths));
         if (Array.isArray(data.ownedArmor) && data.ownedArmor.length) {
             const valid = new Set(ARMOR.map(a => a.id));
             p.ownedArmor = data.ownedArmor.filter(id => valid.has(id));
@@ -530,6 +684,15 @@ const SaveSystem = {
         if (typeof Shop !== 'undefined' && Shop.applyArmorStats) {
             try { Shop.applyArmorStats(state); } catch (e) {}
         }
+        // Exact HP restore AFTER the armor recalc (which recomputes maxHp):
+        // injured stays injured, never above max, never a corpse (a save
+        // written mid-death reloads at full HP instead of 0).
+        try {
+            const saved = (typeof p._savedHp === 'number' && p._savedHp > 0) ? p._savedHp : p.maxHp;
+            p.hp = Math.max(1, Math.min(p.maxHp, Math.round(saved)));
+            p.isDead = false;
+        } catch (e) { p.hp = p.maxHp; }
+        try { delete p._savedHp; } catch (e) {}
         if (typeof Casino !== 'undefined' && state.player) {
             Casino.tokens = p.casinoTokens || 0;
             try { Casino.updateTokenDisplay(); } catch (e) {}

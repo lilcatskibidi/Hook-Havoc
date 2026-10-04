@@ -24,6 +24,16 @@ try {
 const PORT = process.env.PORT || 8080;
 const ROOT = __dirname; // serve files from this script's folder
 
+// --- Server-authoritative RNG (casino rolls + signed receipts) ---------------
+// See server/authority.js. All /api/* requests are handled there so game
+// outcomes are rolled with node:crypto instead of client Math.random.
+let authority = null;
+try {
+    authority = require('./server/authority.js');
+} catch (e) {
+    console.warn('[API] authority module not loaded:', e.message);
+}
+
 // --- In-memory state --------------------------------------------------------
 const clients = new Map(); // clientId -> { ws, roomId, isHost }
 const rooms = new Map();   // roomCode -> { id, hostId, clients:Set, createdAt }
@@ -68,6 +78,26 @@ const MIME = {
     '.ttf':  'font/ttf'
 };
 
+const PROTECTED = process.env.PROTECTED === '1';
+let bundleCache = null; // { html, js }
+function protectedIndexHtml() {
+    // Ships ONE minified bundle instead of 36 readable files.
+    // Rebuild with: node scripts/build-protect.mjs
+    try {
+        if (bundleCache) return bundleCache;
+        const bundleJs = fs.readFileSync(path.join(ROOT, 'dist', 'protected', 'game.bundle.min.js'));
+        const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'dist', 'protected', 'manifest.json'), 'utf8'));
+        let html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+        // Replace the whole run of local <script src="js/..."> tags with one bundle tag.
+        html = html.replace(/(<script\s+src="js\/[^>]+><\/script>\s*)+/s,
+            '<script src="/dist/protected/game.bundle.min.js?v=' + String(manifest.sha256 || '1').slice(0, 12) + '"></script>\n');
+        bundleCache = { html, sha: manifest.sha256 };
+        return bundleCache;
+    } catch (e) {
+        return null;
+    }
+}
+
 const server = http.createServer((req, res) => {
     // Decode URL and strip query string
     let urlPath;
@@ -75,6 +105,30 @@ const server = http.createServer((req, res) => {
         urlPath = decodeURIComponent(req.url.split('?')[0]);
     } catch {
         res.writeHead(400); res.end('Bad Request'); return;
+    }
+
+    // --- Authoritative API (anti-F12: RNG lives on the server) ---------------
+    if (urlPath.startsWith('/api/') && authority) {
+        const ip = (req.socket && req.socket.remoteAddress) || 'unknown';
+        Promise.resolve(authority.handleApi(req, res, ip)).catch(() => {
+            try { res.writeHead(500); res.end('API error'); } catch {}
+        });
+        return;
+    }
+
+    // --- Protected mode: index.html ships the bundle -------------------------
+    if (PROTECTED && (urlPath === '/' || urlPath === '' || urlPath === '/index.html')) {
+        const p = protectedIndexHtml();
+        if (p) {
+            res.writeHead(200, {
+                'Content-Type': MIME['.html'],
+                'X-Content-Type-Options': 'nosniff',
+                'Referrer-Policy': 'no-referrer',
+                'Cache-Control': 'no-cache',
+            });
+            res.end(p.html);
+            return;
+        }
     }
 
     if (urlPath === '/' || urlPath === '') urlPath = '/index.html';
@@ -103,7 +157,18 @@ const server = http.createServer((req, res) => {
 
         fs.readFile(filePath, (err2, content) => {
             if (err2) { res.writeHead(500); res.end('Server Error'); return; }
-            res.writeHead(200, { 'Content-Type': type });
+            // Local dev server: never cache code (a stale bundle behind
+            // ?v= tags wastes more debug hours than re-downloads cost).
+            // itch.io ships immutable ?v= filenames, so this costs nothing.
+            const noCache = (ext === '.html' || ext === '.js' || ext === '.css' || ext === '.json');
+            res.writeHead(200, {
+                'Content-Type': type,
+                // Hardening headers: don't let browsers sniff types, and keep
+                // game files out of aggressive caches (fresh code after update).
+                'X-Content-Type-Options': 'nosniff',
+                'Referrer-Policy': 'no-referrer',
+                'Cache-Control': noCache ? 'no-cache' : 'public, max-age=3600',
+            });
             res.end(content);
         });
     });
@@ -111,6 +176,23 @@ const server = http.createServer((req, res) => {
 
 // --- WebSocket server -------------------------------------------------------
 const wss = new WebSocket.Server({ server });
+
+// Friendly fatal errors (EADDRINUSE surfaces on the WS server when it
+// wraps our HTTP server — handle BOTH emitters or node dumps a stack).
+let _fatalShown = false;
+function fatalPortInUse() {
+    if (_fatalShown) return;
+    _fatalShown = true;
+    console.error(`\n[FATAL] Port ${PORT} is already in use (another server.js is running?).`);
+    console.error('Fix: stop the other one, or run on another port:\n');
+    console.error(`    $env:PORT=8081; node server.js   # powershell`);
+    console.error(`    PORT=8081 node server.js          # sh\n`);
+    process.exit(1);
+}
+wss.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') fatalPortInUse();
+    else throw err;
+});
 
 wss.on('connection', (ws) => {
     const clientId = generateId();
@@ -428,6 +510,10 @@ setInterval(() => {
 }, 30_000);
 
 // --- Start ------------------------------------------------------------------
+server.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') fatalPortInUse();
+    else throw err;
+});
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`\n=== Fishing Game Server ===`);
     console.log(`HTTP  : http://localhost:${PORT}`);

@@ -9,7 +9,7 @@ const RARITY_LABELS = {
 
 const Shop = {
     // Open the shop modal on a specific tab. The world SHOP circle opens
-    // the Beach tab — yes, SHOP and the beach shop are the same shop.
+    // the Sell tab (Beach Shop tab was removed).
     openShop(state, tab = 'sell') {
         const modal = document.getElementById('shop-modal');
         if (!modal) return;
@@ -19,15 +19,6 @@ const Shop = {
         const mpHud = document.getElementById('mp-hud');
         if (mpHud) mpHud.classList.add('hidden');
         Player.refreshHUD(state);
-    },
-
-    openBeach(state) {
-        if (!state.player.beachShopUnlocked) {
-            state.player.beachShopUnlocked = true;
-            if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
-            if (typeof Particles !== 'undefined') Particles.showFloatingText(state, 'Beach Shop Unlocked!', state.player.x, state.player.y - 50, '#facc15');
-        }
-        this.openShop(state, 'beach');
     },
 
     closeShop(state) {
@@ -66,13 +57,18 @@ const Shop = {
             }
         } catch (e) {}
 
-        document.getElementById('btn-open-shop').onclick = () => {
-            try { audio.playUIClick(); } catch (e) {}
-            this.renderTab(state, 'sell');
-            modal.classList.remove('hidden');
-            if (mpHud) mpHud.classList.add('hidden'); // Hide MP HUD when shop opens
-            Player.refreshHUD(state);
-        };
+        // Walk-to-shop design: no HUD quick-open button (removed) — the
+        // beach/casino zones + NPC open it via E. Guarded for old saves.
+        try {
+            const shopBtn = document.getElementById('btn-open-shop');
+            if (shopBtn) shopBtn.onclick = () => {
+                try { audio.playUIClick(); } catch (e) {}
+                this.renderTab(state, 'sell');
+                modal.classList.remove('hidden');
+                if (mpHud) mpHud.classList.add('hidden'); // Hide MP HUD when shop opens
+                Player.refreshHUD(state);
+            };
+        } catch (e) {}
 
         document.querySelectorAll('.shop-close').forEach(b => {
             b.onclick = () => {
@@ -93,19 +89,46 @@ const Shop = {
             };
         });
 
-        document.getElementById('btn-sell-all').onclick = () => {
-            // Locked fish AND key items are keepers — SELL ALL only sells unlocked fish
-            const sellable = (state.player.bucket || []).filter(f => !f.locked && !f.keyItem);
+        document.getElementById('btn-sell-all').onclick = async () => {
+            // In-flight guard: the server clamp awaits network, and a lagged
+            // double-click must not sell twice.
+            if (this._selling) return;
+            this._selling = true;
+            try { document.getElementById('btn-sell-all').disabled = true; } catch (e) {}
+            try {
+            const keyVal = (f) => {
+                try {
+                    if (typeof Ritual !== 'undefined' && Ritual.entryValue) return Ritual.entryValue(f);
+                } catch (e) {}
+                return (f && f.value) || 0;
+            };
+            const sellable = (state.player.bucket || []).filter(f => !f.locked);
             const lockedKept = (state.player.bucket || []).length - sellable.length;
-            const total = sellable.reduce((acc, f) => acc + (f.value || 0), 0);
+            let total = sellable.reduce((acc, f) => acc + keyVal(f), 0);
             if (total === 0) {
                 try { audio.playError(); } catch (e) {}
                 return;
             }
+            // Server sell-clamp (anti-F12 value edits): never pay more than
+            // the server approves when online. Offline (itch.io) = local.
+            try {
+                if (typeof SecureServer !== 'undefined') {
+                    const clamp = await SecureServer.sellClamp(sellable.map(f => ({ id: f.id, value: keyVal(f) })));
+                    if (clamp && typeof clamp.approvedTotal === 'number') {
+                        if (clamp.approvedTotal < total) {
+                            total = clamp.approvedTotal;
+                            if (typeof AntiCheat !== 'undefined') AntiCheat.violations++;
+                        }
+                    }
+                }
+            } catch (e) {}
+            if (total <= 0) {
+                try { audio.playError(); } catch (e) {}
+                return;
+            }
             state.player.coins += total;
-            // Keepers stay: locked fish AND key items (summon keys/trophies
-            // are unsellable — SELL ALL must never delete them).
-            state.player.bucket = (state.player.bucket || []).filter(f => f.locked || f.keyItem);
+            // Keepers stay: anything 🔒 locked (fish or key).
+            state.player.bucket = (state.player.bucket || []).filter(f => f.locked);
             try { audio.playCoin(); } catch (e) {}
             if (lockedKept > 0) {
                 const keysKept = (state.player.bucket || []).filter(f => f.keyItem).length;
@@ -122,6 +145,10 @@ const Shop = {
             if (typeof AntiCheat !== 'undefined') AntiCheat.markLegit();
             if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
             this.renderTab(state, 'sell');
+            } finally {
+                this._selling = false;
+                try { document.getElementById('btn-sell-all').disabled = false; } catch (e) {}
+            }
         };
     },
 
@@ -141,8 +168,10 @@ const Shop = {
         else if (tab === 'ammo')    this.renderAmmo(state, content);
         else if (tab === 'bucket')  this.renderBucketTab(state, content);
         else if (tab === 'bait')    this.renderBaitTab(state, content);
+        else if (tab === 'items') {
+            if (typeof ItemSystem !== 'undefined') ItemSystem.renderItemsTab(state, content);
+        }
         else if (tab === 'casino')  this.renderCasinoTab(state, content);
-        else if (tab === 'beach')   this.renderBeachTab(state, content);
     },
 
     // Lock a bucket fish so SELL ALL skips it (quest fish keeper).
@@ -158,11 +187,67 @@ const Shop = {
         bucket[i] = copy;
     },
 
+    // Discard bucket entries (thinning a full bucket). Locked entries are
+    // keepers and are never removed — unlock first. Groups of more than 2
+    // ask how many to drop (oldest unlocked first).
+    dropGroup(state, id, isKey) {
+        const bucket = state.player.bucket || [];
+        const items = bucket.filter(f => f && f.id === id && !!f.keyItem === !!isKey);
+        if (!items.length) return;
+        const unlocked = items.filter(f => !f.locked);
+        const name = (items[0] && items[0].name) || id;
+        if (!unlocked.length) {
+            try { audio.playError(); } catch (e) {}
+            if (typeof Particles !== 'undefined') {
+                Particles.showFloatingText(state, `All ${name} locked — unlock first!`, state.player.x, state.player.y - 50, '#fbbf24');
+            }
+            return;
+        }
+        let n = unlocked.length;
+        if (items.length > 2) {
+            let raw = null;
+            try { raw = window.prompt(`Remove how many ${name}? (1–${unlocked.length} unlocked)`, String(unlocked.length)); } catch (e) { return; }
+            if (raw === null || raw === undefined) return; // cancelled
+            n = Math.floor(Number(raw));
+            if (!n || n < 1) return;
+            n = Math.min(n, unlocked.length);
+        }
+        let left = n;
+        for (let i = 0; i < bucket.length && left > 0; i++) {
+            const f = bucket[i];
+            if (f && f.id === id && !!f.keyItem === !!isKey && !f.locked) {
+                bucket.splice(i, 1);
+                i--;
+                left--;
+            }
+        }
+        const removed = n - left;
+        if (removed > 0) {
+            try { audio.playUIClick(); } catch (e) {}
+            if (typeof Particles !== 'undefined') {
+                Particles.showFloatingText(state, `🗑 Removed ×${removed} ${name}`, state.player.x, state.player.y - 50, '#f87171');
+            }
+            if (typeof Player !== 'undefined') {
+                try { Player.refreshHUD(state); } catch (e) {}
+                try { if (typeof UI !== 'undefined') UI.renderWeaponToolbar(state); } catch (e) {}
+            }
+            if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+            this.renderTab(state, 'sell');
+        }
+    },
+
     renderSell(state, content) {
         const bucket = state.player.bucket || [];
-        const sellable = bucket.filter(f => !f.locked && !f.keyItem);
-        const totalVal = sellable.reduce((acc, f) => acc + (f.value || 0), 0);
+        const keyVal = (f) => {
+            try {
+                if (typeof Ritual !== 'undefined' && Ritual.entryValue) return Ritual.entryValue(f);
+            } catch (e) {}
+            return (f && f.value) || 0;
+        };
+        const sellable = bucket.filter(f => !f.locked);
+        const totalVal = sellable.reduce((acc, f) => acc + keyVal(f), 0);
         const lockedCount = bucket.filter(f => f.locked && !f.keyItem).length;
+        const lockedKeys = bucket.filter(f => f.locked && f.keyItem).length;
         const keyItems = bucket.filter(f => f.keyItem);
 
         if (bucket.length === 0) {
@@ -171,10 +256,13 @@ const Shop = {
                 <p class="text-slate-500 text-sm">Your fishing bucket is empty!</p>
             </div>`;
         } else {
-            if (lockedCount > 0) {
+            if (lockedCount > 0 || lockedKeys > 0) {
                 const note = document.createElement('div');
                 note.className = 'glass-panel-light p-2.5 rounded-xl text-center text-xs font-bold text-amber-300 border border-amber-500/30 mb-1';
-                note.innerHTML = `🔒 ${lockedCount} locked fish kept safe from SELL ALL`;
+                const bits = [];
+                if (lockedCount > 0) bits.push(`🔒 ${lockedCount} locked fish`);
+                if (lockedKeys > 0) bits.push(`🔑 ${lockedKeys} locked keys`);
+                note.innerHTML = `${bits.join(' · ')} kept safe from SELL ALL`;
                 content.appendChild(note);
             }
             const grouped = {};
@@ -211,6 +299,10 @@ const Shop = {
                                 class="w-8 h-8 rounded-lg text-sm font-black border transition-all ${allLocked ? 'bg-amber-500/25 text-amber-300 border-amber-500/50' : 'bg-slate-800 text-slate-400 border-slate-600 hover:bg-slate-700'}">
                             ${allLocked ? '🔒' : '🔓'}
                         </button>
+                        <button data-drop-group="${species.id}" title="Remove from bucket (discard)"
+                                class="w-8 h-8 rounded-lg text-sm font-black border transition-all bg-slate-800 text-slate-400 border-slate-600 hover:bg-rose-900/60 hover:text-rose-300 hover:border-rose-500/50">
+                            🗑
+                        </button>
                         <span class="text-amber-400 font-bold">
                             <i class="fa-solid fa-coins mr-1"></i>${species.value * unlocked}
                         </span>
@@ -230,19 +322,28 @@ const Shop = {
                     this.renderTab(state, 'sell');
                 };
             });
+            content.querySelectorAll('[data-drop-group]').forEach(btn => {
+                btn.onclick = () => this.dropGroup(state, btn.dataset.dropGroup, false);
+            });
 
-            // Summon keys / trophies: physical, unsellable, used at rituals
+            // Summon keys / trophies: sellable like fish (🔒 locks protect
+            // them from SELL ALL AND from ritual/craft spending).
             if (keyItems.length) {
                 const kNote = document.createElement('div');
                 kNote.className = 'text-[10px] font-black tracking-widest text-slate-500 mt-2 mb-1 px-1';
-                kNote.innerText = '🔑 SUMMON ITEMS (UNSELLABLE — SPEND AT RITUALS)';
+                kNote.innerText = '🔑 SUMMON ITEMS (SELL FOR COINS OR SPEND AT RITUALS — 🔒 TO KEEP)';
                 content.appendChild(kNote);
                 const kGrouped = {};
                 keyItems.forEach(it => {
-                    if (!kGrouped[it.id]) kGrouped[it.id] = { item: it, count: 0 };
+                    if (!kGrouped[it.id]) kGrouped[it.id] = { item: it, count: 0, locked: 0, unlocked: 0 };
                     kGrouped[it.id].count++;
+                    if (it.locked) kGrouped[it.id].locked++;
+                    else kGrouped[it.id].unlocked++;
                 });
-                Object.values(kGrouped).forEach(({ item, count }) => {
+                Object.entries(kGrouped).forEach(([kid, { item, count, locked, unlocked }]) => {
+                    const price = keyVal(item);
+                    const allLocked = locked === count;
+                    const hint = item.id === 'storm_egg' ? 'Bake into a Hydra Lure (Bait tab)' : item.id === 'shard' ? '3 open the Void Leviathan (Ritual)' : 'Emperor gate piece (Ritual)';
                     const div = document.createElement('div');
                     div.className = 'shop-item glass-panel-light p-3 rounded-xl flex items-center justify-between';
                     div.style.borderLeft = `3px solid ${item.color || '#fbbf24'}`;
@@ -254,19 +355,45 @@ const Shop = {
                             </div>
                             <div>
                                 <span class="font-bold text-white text-sm">${item.name}</span>
-                                <span class="text-xs text-slate-400"> ×${count}</span>
-                                <div class="text-[10px] text-slate-500">${item.id === 'storm_egg' ? 'Bake into a Hydra Lure (Bait tab)' : item.id === 'shard' ? '3 open the Void Shepherd (Ritual)' : 'Emperor gate piece (Ritual)'}</div>
+                                <span class="text-xs text-slate-400"> ×${count}${locked > 0 ? ` · <span class="text-amber-300 font-bold">🔒${locked} locked</span>` : ''}</span>
+                                <div class="text-[10px] text-slate-500">${hint}</div>
                             </div>
                         </div>
-                        <span class="text-[10px] font-black px-2 py-1 rounded bg-slate-800 text-slate-400 border border-slate-600 shrink-0">KEY</span>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <button data-lock-key="${kid}" title="${allLocked ? 'Unlock all (allow selling/spending)' : 'Lock all (protect from SELL ALL + rituals)'}"
+                                    class="w-8 h-8 rounded-lg text-sm font-black border transition-all ${allLocked ? 'bg-amber-500/25 text-amber-300 border-amber-500/50' : 'bg-slate-800 text-slate-400 border-slate-600 hover:bg-slate-700'}">
+                                ${allLocked ? '🔒' : '🔓'}
+                            </button>
+                            <button data-drop-key="${kid}" title="Remove from bucket (discard)"
+                                    class="w-8 h-8 rounded-lg text-sm font-black border transition-all bg-slate-800 text-slate-400 border-slate-600 hover:bg-rose-900/60 hover:text-rose-300 hover:border-rose-500/50">
+                                🗑
+                            </button>
+                            <span class="text-amber-400 font-bold">
+                                <i class="fa-solid fa-coins mr-1"></i>${price * unlocked}
+                            </span>
+                        </div>
                     `;
                     content.appendChild(div);
+                });
+                content.querySelectorAll('[data-lock-key]').forEach(btn => {
+                    btn.onclick = () => {
+                        try { audio.playUIClick(); } catch (e) {}
+                        const items = (state.player.bucket || []).filter(f => f && f.keyItem && f.id === btn.dataset.lockKey);
+                        if (!items.length) return;
+                        const lock = !items.every(f => f.locked);
+                        items.forEach(f => this.setFishLock(state, f, lock));
+                        if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+                        this.renderTab(state, 'sell');
+                    };
+                });
+                content.querySelectorAll('[data-drop-key]').forEach(btn => {
+                    btn.onclick = () => this.dropGroup(state, btn.dataset.dropKey, true);
                 });
             }
         }
 
         const totalEl = document.getElementById('shop-total-val');
-        if (totalEl) totalEl.innerText = `${totalVal} Coins`;
+        if (totalEl) totalEl.innerText = T('coins_fmt', { n: totalVal });
 
         const sellBtn = document.getElementById('btn-sell-all');
         if (sellBtn) sellBtn.disabled = (totalVal === 0);
@@ -383,12 +510,31 @@ const Shop = {
                 btn.className = 'btn-buy px-4 py-2 text-slate-950 text-xs font-black rounded-xl';
                 btn.innerText = `${w.price} C`;
                 btn.disabled = p.coins < w.price;
-                btn.onclick = () => {
-                    if (p.coins < w.price) {
-                        try { audio.playError(); } catch (e) {}
+                btn.onclick = async () => {
+                    // In-flight guard: the server quote awaits network — a
+                    // lagged double-click must not buy (and push) twice.
+                    if (btn.disabled) return;
+                    btn.disabled = true;
+                    // Server-canonical price (anti-F12 price=0 edits).
+                    let price = w.price;
+                    try {
+                        if (typeof SecureServer !== 'undefined') {
+                            const q = await SecureServer.quote('weapon', w.id, 1);
+                            if (q && typeof q.price === 'number') price = q.price;
+                        }
+                    } catch (e) {}
+                    // Re-check AFTER the await: the first tap may have
+                    // completed while this one was in flight.
+                    if (p.ownedWeapons.includes(w.id)) {
+                        this.renderTab(state, 'weapons');
                         return;
                     }
-                    p.coins -= w.price;
+                    if (p.coins < price) {
+                        try { audio.playError(); } catch (e) {}
+                        btn.disabled = false;
+                        return;
+                    }
+                    p.coins -= price;
                     p.ownedWeapons.push(w.id);
 
                     if (w.id !== 'pistol' && p.weaponAmmo[w.id] === undefined) {
@@ -451,6 +597,8 @@ const Shop = {
                     else p.gunSkins[w.id] = 'classic';
                     try { audio.playUIClick(); } catch (e) {}
                     if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+                    // Live: the room sees the new pref instantly (no snapshot wait).
+                    try { if (typeof Multiplayer !== 'undefined' && Multiplayer.pushSkinPrefs) Multiplayer.pushSkinPrefs(); } catch (e) {}
                     this.renderTab(state, 'weapons');
                 };
                 right.appendChild(skinBtn);
@@ -573,12 +721,21 @@ const Shop = {
         });
 
         content.querySelectorAll('[data-buy-rod]').forEach(btn => {
-            btn.onclick = () => {
+            btn.onclick = async () => {
+                if (btn.disabled) return;
+                btn.disabled = true;
                 const idx = +btn.dataset.buyRod;
                 const r = RODS[idx];
                 const p = state.player;
-                if (p.coins >= r.price && !p.unlockedRods.includes(r.id)) {
-                    p.coins -= r.price;
+                let price = r.price;
+                try {
+                    if (typeof SecureServer !== 'undefined') {
+                        const q = await SecureServer.quote('rod', r.id, 1);
+                        if (q && typeof q.price === 'number') price = q.price;
+                    }
+                } catch (e) {}
+                if (p.coins >= price && !p.unlockedRods.includes(r.id)) {
+                    p.coins -= price;
                     p.unlockedRods.push(r.id);
                     p.equippedRod = r;
                     try { audio.playCoin(); } catch (e) {}
@@ -591,6 +748,7 @@ const Shop = {
                     this.renderTab(state, 'rods');
                 } else {
                     try { audio.playError(); } catch (e) {}
+                    try { btn.disabled = false; } catch (e) {}
                 }
             };
         });
@@ -855,8 +1013,13 @@ const Shop = {
             const chk = (typeof Ritual !== 'undefined' && Ritual.canCraft)
                 ? Ritual.canCraft(state, def.id) : { ok: false, why: '' };
             const buyPrice = (typeof BAIT_PRICES !== 'undefined' && BAIT_PRICES[def.id]) || 0;
+            // Explicit fish + coins recipes render Craft-style have/need
+            // rows (same look as armor crafts); legacy tier recipes keep
+            // the one-line text.
+            const explicit = !!(def.recipe && (def.recipe.fish || def.recipe.coins) && typeof Craft !== 'undefined');
             const recipeTxt = (def.recipe.key ? `${BOSS_KEYS[def.recipe.key].icon} ${BOSS_KEYS[def.recipe.key].name} ×1 + ` : '') +
                 `${def.recipe.count}× ${def.recipe.tier} fish → +${def.yield || 10}`;
+            const reqRows = explicit ? Craft._reqRows(state, def.recipe).rows : '';
             const div = document.createElement('div');
             div.className = 'shop-item glass-panel-light p-4 rounded-xl flex items-center justify-between mb-2';
             div.innerHTML = `
@@ -866,13 +1029,15 @@ const Shop = {
                     </div>
                     <div class="min-w-0">
                         <div class="flex items-center gap-2 flex-wrap">
-                            <h3 class="font-bold text-white text-base truncate">${def.name}</h3>
+                            <h3 class="font-bold text-white text-base break-words">${def.name}</h3>
                             ${def.hookBait ? '<span class="text-[10px] font-black px-1.5 py-0.5 rounded bg-red-900/60 text-red-300 border border-red-500/50">HOOKS HYDRA</span>' : ''}
                             ${isActive ? '<span class="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">ON HOOK</span>' : ''}
                         </div>
-                        <p class="text-xs text-slate-400 mt-0.5">${def.desc}</p>
-                        <p class="text-[10px] text-slate-500 mt-0.5">Craft: ${recipeTxt} · Stock: <span class="text-white font-bold">${have}</span></p>
-                        ${!chk.ok && have === 0 ? `<p class="text-[10px] text-amber-300/80">${chk.why}</p>` : ''}
+                        <p class="text-xs text-slate-400 mt-0.5 break-words">${def.desc}</p>
+                        ${explicit
+                            ? `<div class="flex flex-col gap-0.5 mt-1 w-full">${reqRows}</div><p class="text-[11px] text-slate-500 mt-0.5">Craft → +${def.yield || 10} · Stock: <span class="text-white font-bold">${have}</span></p>`
+                            : `<p class="text-[11px] text-slate-500 mt-0.5 break-words">Craft: ${recipeTxt} · Stock: <span class="text-white font-bold">${have}</span></p>`}
+                        ${!chk.ok ? `<p class="text-[11px] text-amber-300/90 break-words">${chk.why || 'Missing ingredients.'}</p>` : ''}
                     </div>
                 </div>`;
             const right = document.createElement('div');
@@ -934,7 +1099,7 @@ const Shop = {
                 <button id="btn-open-casino-from-shop" class="w-full px-4 py-3 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 font-black rounded-xl transition-all shadow-lg">
                     <i class="fa-solid fa-dice mr-2"></i> OPEN CASINO
                 </button>
-                <p class="text-xs text-slate-500 mt-2">Also accessible from Beach Shop when near shore</p>
+                <p class="text-xs text-slate-500 mt-2">Also accessible from the Casino pad & HUD button</p>
             </div>
         `;
         
@@ -945,106 +1110,6 @@ const Shop = {
         };
     },
 
-    renderBeachTab(state, content) {
-        const p = state.player;
-        const nearShore = p.x >= state.waterBoundaryX - 100;
-        const canAccess = nearShore || p.beachShopUnlocked;
-
-        const baitLeft = Math.max(0, Math.ceil(p.baitTimer || 0));
-        const umbLeft = Math.max(0, Math.ceil(p.umbrellaTimer || 0));
-
-        content.innerHTML = `
-            <div class="glass-panel-light p-4 rounded-xl text-center">
-                <div class="w-16 h-16 mx-auto mb-3 rounded-2xl flex items-center justify-center" style="background: linear-gradient(135deg, #fbbf24, #f59e0b);">
-                    <i class="fa-solid fa-umbrella-beach text-3xl text-white"></i>
-                </div>
-                <h3 class="font-bold text-amber-300 text-lg mb-2">Beach Shop</h3>
-                <p class="text-slate-400 text-sm mb-3">
-                    ${canAccess ? 'Welcome to the beach shop!' : 'Walk to the shoreline to access the beach shop.'}
-                </p>
-                ${(baitLeft > 0 || umbLeft > 0) ? `
-                    <div class="flex gap-2 justify-center mb-3 text-xs font-bold">
-                        ${baitLeft > 0 ? `<span class="px-2 py-1 bg-sky-500/20 border border-sky-500/40 rounded-lg text-sky-300">🪱 Bait ${baitLeft}s</span>` : ''}
-                        ${umbLeft > 0 ? `<span class="px-2 py-1 bg-emerald-500/20 border border-emerald-500/40 rounded-lg text-emerald-300">⛱️ Umbrella ${umbLeft}s</span>` : ''}
-                    </div>` : ''}
-
-                ${!canAccess ? `
-                    <div class="glass-panel p-4 rounded-xl mb-4">
-                        <i class="fa-solid fa-location-arrow text-2xl text-sky-400 mb-2"></i>
-                        <p class="text-slate-300">Distance to shore: ${Math.max(0, Math.round(state.waterBoundaryX - p.x))}m</p>
-                        <p class="text-xs text-slate-500 mt-1">Press <kbd class="bg-slate-800 px-2 py-1 rounded text-xs">E</kbd> near shore, or walk closer</p>
-                    </div>` : ''}
-
-                <div class="space-y-2">
-                    <button id="beach-open-casino" class="w-full px-4 py-3 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 font-black rounded-xl transition-all">
-                        <i class="fa-solid fa-dice mr-2"></i> Open Casino (${p.casinoTokens || 0}T)
-                    </button>
-                    <button id="beach-buy-bait" class="w-full px-4 py-3 bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-400 hover:to-sky-500 text-white font-black rounded-xl transition-all ${(!canAccess || p.coins < 500) ? 'opacity-50 cursor-not-allowed' : ''}" ${(!canAccess || p.coins < 500) ? 'disabled' : ''}>
-                        <i class="fa-solid fa-fish-fins mr-2"></i> Buy Bait — 20% faster bites, 5 min (500c)
-                    </button>
-                    <button id="beach-buy-umbrella" class="w-full px-4 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black rounded-xl transition-all ${(!canAccess || p.coins < 1000) ? 'opacity-50 cursor-not-allowed' : ''}" ${(!canAccess || p.coins < 1000) ? 'disabled' : ''}>
-                        <i class="fa-solid fa-umbrella-beach mr-2"></i> Rent Umbrella — safe zone + regen, 5 min (1000c)
-                    </button>
-                    <button id="beach-appraise" class="w-full px-4 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl transition-all ${(!canAccess || p.coins < 200 || !(p.bucket || []).length) ? 'opacity-50 cursor-not-allowed' : ''}" ${(!canAccess || p.coins < 200 || !(p.bucket || []).length) ? 'disabled' : ''}>
-                        <i class="fa-solid fa-gem mr-2"></i> Appraise Catch — +15% bucket value (200c)
-                    </button>
-                </div>
-                <p class="text-xs text-slate-500 mt-4">Beach shop unlocks permanently after first visit</p>
-            </div>`;
-
-        if (nearShore && !p.beachShopUnlocked) {
-            p.beachShopUnlocked = true;
-            if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
-            Particles.showFloatingText(state, 'Beach Shop Unlocked!', p.x, p.y - 50, '#facc15');
-        }
-        const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
-        on('beach-open-casino', () => {
-            document.getElementById('shop-modal').classList.add('hidden');
-            if (typeof Casino !== 'undefined') Casino.open();
-        });
-        on('beach-buy-bait', () => this.buyBait(state));
-        on('beach-buy-umbrella', () => this.buyUmbrella(state));
-        on('beach-appraise', () => this.appraiseCatch(state));
-    },
-
-    buyBait(state) {
-        const p = state.player;
-        if (p.coins < 500) { try { audio.playError(); } catch (e) {} return; }
-        p.coins -= 500;
-        p.baitTimer = 300;
-        try { audio.playCoin(); } catch (e) {}
-        Particles.showFloatingText(state, 'BAIT ACTIVE 5:00!', p.x, p.y - 50, '#38bdf8');
-        Player.refreshHUD(state);
-        if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
-        this.renderTab(state, 'beach');
-    },
-
-    buyUmbrella(state) {
-        const p = state.player;
-        if (p.coins < 1000) { try { audio.playError(); } catch (e) {} return; }
-        p.coins -= 1000;
-        p.umbrellaTimer = 300;
-        p.hp = Math.min(p.maxHp, p.hp + 40);
-        try { audio.playCoin(); } catch (e) {}
-        Particles.showFloatingText(state, 'UMBRELLA SAFE ZONE 5:00!', p.x, p.y - 50, '#34d399');
-        Player.refreshHUD(state);
-        if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
-        this.renderTab(state, 'beach');
-    },
-
-    appraiseCatch(state) {
-        const p = state.player;
-        if (p.coins < 200 || !(p.bucket || []).length) { try { audio.playError(); } catch (e) {} return; }
-        p.coins -= 200;
-        p.bucket.forEach(f => { if (!f.appraised) { f.value = Math.round((f.value || 0) * 1.15); f.appraised = true; } });
-        try { audio.playCoin(); } catch (e) {}
-        const total = p.bucket.reduce((a, f) => a + (f.value || 0), 0);
-        Particles.showFloatingText(state, `APPRAISED! Bucket now ${total}c`, p.x, p.y - 50, '#facc15');
-        Player.addXP(state, 25);
-        Player.refreshHUD(state);
-        if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
-        this.renderTab(state, 'beach');
-    },
 
     armorIcon(type) {
         return type === 'head' ? 'helmet' : type === 'chest' ? 'vest' : type === 'hands' ? 'hand-fist' : type === 'feet' ? 'shoe-prints' : 'crown';
@@ -1093,6 +1158,11 @@ const Shop = {
         if (!p.ownedArmor) p.ownedArmor = ['vest_light'];
         const item = ARMOR.find(a => a.id === id);
         if (!item || p.ownedArmor.includes(id)) return;
+        // Craft-only pieces (fish + coins recipes) never sell for coins.
+        if (item.recipe) {
+            try { audio.playError(); } catch (e) {}
+            return;
+        }
         if (p.coins < item.price) { try { audio.playError(); } catch (e) {} return; }
         p.coins -= item.price;
         p.ownedArmor.push(id);
@@ -1177,11 +1247,12 @@ const Shop = {
         content.innerHTML = equippedHTML;
 
         const categories = {
-            'Light': armorItems.filter(a => a.weight === 'Light').sort((a, b) => a.price - b.price),
-            'Medium': armorItems.filter(a => a.weight === 'Medium').sort((a, b) => a.price - b.price),
-            'Heavy': armorItems.filter(a => a.weight === 'Heavy').sort((a, b) => a.price - b.price),
-            'Legendary': armorItems.filter(a => a.rarity === 'legendary').sort((a, b) => a.price - b.price),
-            'Mythic': [...armorItems.filter(a => a.rarity === 'mythic'), ...sets].sort((a, b) => a.price - b.price),
+            'Light': armorItems.filter(a => a.weight === 'Light').sort((a, b) => (a.price || 0) - (b.price || 0)),
+            'Medium': armorItems.filter(a => a.weight === 'Medium').sort((a, b) => (a.price || 0) - (b.price || 0)),
+            'Heavy': armorItems.filter(a => a.weight === 'Heavy').sort((a, b) => (a.price || 0) - (b.price || 0)),
+            'Legendary': armorItems.filter(a => a.rarity === 'legendary').sort((a, b) => (a.price || (a.recipe && a.recipe.coins) || 0) - (b.price || (b.recipe && b.recipe.coins) || 0)),
+            'Mythic': [...armorItems.filter(a => a.rarity === 'mythic'), ...sets].sort((a, b) => (a.price || 0) - (b.price || 0)),
+            'Crafted': armorItems.filter(a => a.recipe),
         };
 
         for (const [cat, items] of Object.entries(categories)) {
@@ -1196,6 +1267,8 @@ const Shop = {
             items.forEach(item => {
                 const isOwned = p.ownedArmor.includes(item.id);
                 const isEquipped = Object.values(p.equippedArmor).includes(item.id);
+                const craftChk = (item.recipe && typeof Craft !== 'undefined')
+                    ? Craft.check(state, item.recipe) : { ok: true, why: '' };
                 const div = document.createElement('div');
                 div.className = `shop-item glass-panel p-3 rounded-xl flex items-center justify-between rarity-${item.rarity} ${isEquipped ? 'ring-2 ring-emerald-400' : ''}`;
                 div.innerHTML = `
@@ -1205,7 +1278,7 @@ const Shop = {
                         </div>
                         <div class="min-w-0">
                             <div class="flex items-center gap-2 flex-wrap">
-                                <h3 class="font-bold text-white text-sm truncate">${item.name}</h3>
+                                <h3 class="font-bold text-white text-sm break-words">${item.name}</h3>
                                 <span class="text-[10px] font-black px-1.5 py-0.5 rounded" style="background:${RARITY_LABELS[item.rarity]?.color || '#94a3b8'}20;color:${RARITY_LABELS[item.rarity]?.color || '#94a3b8'}">${RARITY_LABELS[item.rarity]?.label || item.rarity.toUpperCase()}</span>
                                 ${isEquipped ? '<span class="text-[10px] text-emerald-400 font-bold px-1.5 py-0.5 rounded bg-emerald-500/20">EQUIPPED</span>' : ''}
                             </div>
@@ -1222,6 +1295,7 @@ const Shop = {
                                 ${item.waterWalk ? `<span class="text-sky-300">Water Walk</span>` : ''}
                                 ${item.fullSetBonus ? `<span class="text-yellow-300">Set: Regen ${item.fullSetBonus.hpRegen}/s, DR ${Math.round(item.fullSetBonus.damageReduction * 100)}%</span>` : ''}
                             </div>
+                            ${item.recipe && typeof Craft !== 'undefined' ? `<div class="flex flex-col gap-0.5 mt-1.5 pt-1.5 border-t border-slate-700/50 w-full">${Craft._reqRows(state, item.recipe).rows}</div>` : ''}
                         </div>
                     </div>
                     <div class="shrink-0 flex flex-col items-end gap-1 ml-2">
@@ -1229,12 +1303,22 @@ const Shop = {
                             ? `<span class="text-xs text-emerald-400 font-bold px-2 py-1 bg-emerald-500/20 rounded">EQUIPPED</span>`
                             : isOwned
                                 ? `<button data-equip-armor="${item.id}" class="px-3 py-1.5 bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-black rounded-lg">EQUIP</button>`
-                                : `<button data-buy-armor="${item.id}" class="btn-buy px-3 py-1.5 text-slate-950 text-xs font-black rounded-lg" ${p.coins < item.price ? 'disabled' : ''}>${item.price.toLocaleString()} C</button>`}
+                                : item.recipe
+                                    ? `<button data-craft-armor="${item.id}" ${craftChk.ok ? '' : 'disabled'} class="btn-buy px-3 py-1.5 text-slate-950 text-xs font-black rounded-lg"><i class="fa-solid fa-hammer mr-1"></i>CRAFT</button>
+                                       ${!craftChk.ok && !isOwned ? `<div class="text-[10px] text-amber-300/80 text-right">${craftChk.why || ''}</div>` : ''}`
+                                    : `<button data-buy-armor="${item.id}" class="btn-buy px-3 py-1.5 text-slate-950 text-xs font-black rounded-lg" ${p.coins < item.price ? 'disabled' : ''}>${item.price.toLocaleString()} C</button>`}
                     </div>`;
                 grid.appendChild(div);
             });
         }
         content.querySelectorAll('[data-buy-armor]').forEach(btn => { btn.onclick = () => this.buyArmor(state, btn.dataset.buyArmor); });
+        content.querySelectorAll('[data-craft-armor]').forEach(btn => {
+            btn.onclick = () => {
+                try {
+                    if (typeof Craft !== 'undefined' && Craft.craftArmor(state, btn.dataset.craftArmor)) this.renderTab(state, 'armor');
+                } catch (e) {}
+            };
+        });
         content.querySelectorAll('[data-equip-armor]').forEach(btn => { btn.onclick = () => this.equipArmor(state, btn.dataset.equipArmor); });
         content.querySelectorAll('[data-unequip-armor]').forEach(btn => { btn.onclick = () => this.unequipArmor(state, btn.dataset.unequipArmor); });
     }

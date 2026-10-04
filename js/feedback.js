@@ -198,11 +198,28 @@ const Feedback = {
             throw err;
         }
         const rep = this.collect(desc);
-        const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(this.buildPayload(rep)),
-        });
+        // Timeout: on itch.io a hanging Discord request used to stick on
+        // "Sending…" forever with no feedback.
+        const ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        const t = ctl ? setTimeout(() => { try { ctl.abort(); } catch (e) {} }, 15000) : null;
+        let res = null;
+        try {
+            res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.buildPayload(rep)),
+                signal: ctl ? ctl.signal : undefined,
+            });
+        } catch (e) {
+            // Network-level failure (offline, adblock, iframe CSP): fall
+            // back to clipboard instead of a dead error line.
+            const err = new Error('Network blocked — report COPIED, paste it into Discord manually.');
+            err.fallback = true;
+            err.causeText = String((e && e.message) || e);
+            throw err;
+        } finally {
+            if (t) clearTimeout(t);
+        }
         if (!res.ok) {
             throw new Error(`Discord rejected the report (HTTP ${res.status}). Check the webhook URL.`);
         }
@@ -284,13 +301,23 @@ const Feedback = {
         this._bound = true;
         // Local secret (js/secret.js, gitignored): loads silently when
         // present so window.FEEDBACK_WEBHOOK_URL is set before Send.
-        // Missing file = one quiet network 404, nothing breaks.
+        // Local-dev only (localhost/file): it NEVER ships to itch.io or
+        // GitHub Pages, so don't even request it there (avoids a 404).
+        // Missing file = nothing breaks.
         try {
-            const s = document.createElement('script');
-            s.src = 'js/secret.js?v=125';
-            s.async = true;
-            s.onerror = () => { try { s.remove(); } catch (e) {} };
-            document.head.appendChild(s);
+            let local = false;
+            try {
+                const h = (typeof location !== 'undefined' && location.hostname) || '';
+                const p = (typeof location !== 'undefined' && location.protocol) || '';
+                local = !h || h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || p === 'file:';
+            } catch (e) {}
+            if (local) {
+                const s = document.createElement('script');
+                s.src = 'js/secret.js?v=125';
+                s.async = true;
+                s.onerror = () => { try { s.remove(); } catch (e) {} };
+                document.head.appendChild(s);
+            }
         } catch (e) {}
         const on = (id, fn) => {
             try {

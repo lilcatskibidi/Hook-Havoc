@@ -37,11 +37,38 @@ const Player = {
                 p.slowTimer = Math.max(0, p.slowTimer - delta);
                 moveSpeed *= 0.5;
             }
+            // Adrenaline item: 1.5x legs while it lasts.
+            if ((p.adrenalineT || 0) > 0) {
+                p.adrenalineT = Math.max(0, p.adrenalineT - delta);
+                moveSpeed *= 1.5;
+            }
 
             p.x += dx * moveSpeed * 60 * delta;
             p.y += dy * moveSpeed * 60 * delta;
 
             if (dx !== 0) p.facing = dx > 0 ? 1 : -1;
+        }
+
+        // Dash (Q): burst of speed + i-frames. Reuses the pull-velocity
+        // channel so knockbacks and dashes compose instead of stacking.
+        if ((p.dashT || 0) > 0) {
+            p.dashT = Math.max(0, p.dashT - delta);
+            try {
+                Particles.spawnParticles(state, p.x, p.y, '#67e8f9', 1, { size: 3 });
+            } catch (e) {}
+        }
+        if ((p.iframes || 0) > 0) p.iframes = Math.max(0, p.iframes - delta);
+        if ((p.dashCd || 0) > 0) p.dashCd = Math.max(0, p.dashCd - delta);
+        if ((p.itemCd || 0) > 0) p.itemCd = Math.max(0, p.itemCd - delta);
+
+        // Pull velocity (fish yanks, knockbacks, dash): REAL dragging over
+        // time — never a teleport. clampPlayer below keeps it legal, so a
+        // 200px yank slides along the shore instead of corner-stranding you.
+        if ((p.pullT || 0) > 0) {
+            p.x += (p.pullVx || 0) * delta;
+            p.y += (p.pullVy || 0) * delta;
+            p.pullT -= delta;
+            if (p.pullT <= 0) { p.pullVx = 0; p.pullVy = 0; p.pullT = 0; }
         }
 
         if (p.burnTimer > 0) {
@@ -109,6 +136,100 @@ const Player = {
                 }
             }
         }
+        // Hydra grasping tide: living leash anchored to the hydra body.
+        // Drags the player toward it for 5s; the dotted energy rope is
+        // drawn as particles (no render plumbing needed).
+        if (p.tether && p.tether.timer > 0) {
+            p.tether.timer -= delta;
+            let ax = p.tether.x, ay = p.tether.y;
+            try {
+                const s = p.tether.src;
+                if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) { ax = s.x; ay = s.y; }
+            } catch (e) {}
+            const dx = ax - p.x, dy = ay - p.y;
+            const d = Math.hypot(dx, dy) || 1;
+            const pull = 260;
+            p.x += (dx / d) * pull * delta;
+            p.y += (dy / d) * pull * delta;
+            try {
+                for (let i = 1; i <= 5; i++) {
+                    const t = i / 6;
+                    Particles.spawnParticles(state, p.x + dx * t, p.y + dy * t, '#4ade80', 1, { size: 3 });
+                }
+                if (typeof WorldSystem !== 'undefined' && WorldSystem.clampEntity) {
+                    WorldSystem.clampEntity(state, p, p.radius);
+                }
+            } catch (e) {}
+            if (p.tether.timer <= 0) {
+                p.tether = null;
+                try {
+                    Particles.showFloatingText(state, '🪢 LEASH BROKEN!', p.x, p.y - 50, '#86efac');
+                } catch (e) {}
+            }
+        }
+        // Void Leviathan LAND PULL tug-of-war: mash SPACE to fill the bar
+        // before the timer runs out while it drags you toward itself.
+        if (p.voidDrag && p.voidDrag.timer > 0) {
+            const vd = p.voidDrag;
+            vd.timer -= delta;
+            try {
+                const b = vd.boss;
+                if (b && Number.isFinite(b.x) && Number.isFinite(b.y)) {
+                    const dx = b.x - p.x, dy = b.y - p.y;
+                    const d = Math.hypot(dx, dy) || 1;
+                    p.x += (dx / d) * 190 * delta;
+                    p.y += (dy / d) * 190 * delta;
+                    for (let i = 1; i <= 4; i++) {
+                        const t = i / 5;
+                        Particles.spawnParticles(state, p.x + dx * t, p.y + dy * t, '#a855f7', 1, { size: 3 });
+                    }
+                }
+                if (typeof WorldSystem !== 'undefined' && WorldSystem.clampEntity) {
+                    WorldSystem.clampEntity(state, p, p.radius);
+                }
+            } catch (e) {}
+            // Tension bar doubles as the break-free meter.
+            try {
+                const bar = document.getElementById('tension-bar');
+                const txt = document.getElementById('tension-text');
+                const hud = document.getElementById('tension-hud');
+                if (hud) hud.classList.remove('hidden');
+                if (bar) bar.style.width = `${Math.min(100, Math.round((vd.mash / vd.need) * 100))}%`;
+                if (txt) { txt.innerText = `MASH SPACE! ${vd.mash}/${vd.need}`; txt.className = 'text-fuchsia-400'; }
+            } catch (e) {}
+            if (vd.mash >= vd.need) {
+                // SUCCESS: yanked aground — stunned 4s, free damage.
+                try {
+                    if (vd.boss) vd.boss.stunTimer = Math.max(vd.boss.stunTimer || 0, 4);
+                    Particles.showFloatingText(state, '💥 BEACHED! UNLOAD EVERYTHING!', p.x, p.y - 60, '#22d3ee');
+                    try { audio.playLevelUp(); } catch (e) {}
+                } catch (e) {}
+                p.voidDrag = null;
+                try { document.getElementById('tension-hud').classList.add('hidden'); } catch (e) {}
+            } else if (vd.timer <= 0) {
+                // FAIL: slammed toward the water for 30% max HP, boss opens P2.
+                try {
+                    if (typeof Combat !== 'undefined' && Combat.damagePlayer) {
+                        Combat.damagePlayer(state, Math.round((p.maxHp || 100) * 0.3), { knockback: 0 });
+                    } else {
+                        p.hp = Math.max(1, p.hp - Math.round((p.maxHp || 100) * 0.3));
+                    }
+                    if (typeof Player !== 'undefined' && Player.addPull && !(p.onIsland)) {
+                        // Mainland: slammed east toward the surf.
+                        Player.addPull(state, (500 / 0.8), 0, 0.8);
+                    }
+                    Particles.showFloatingText(state, '🌊 DRAGGED UNDER!', p.x, p.y - 60, '#38bdf8');
+                    if (vd.boss) {
+                        state.delayedBlasts.push({
+                            x: vd.boss.x, y: vd.boss.y, radius: 200, damage: 60,
+                            timer: 0.6, color: '#7c3aed', shake: 20,
+                        });
+                    }
+                } catch (e) {}
+                p.voidDrag = null;
+                try { document.getElementById('tension-hud').classList.add('hidden'); } catch (e) {}
+            }
+        }
         // Abyssal set regen
         if (p.armorSetBonus && p.armorSetBonus.hpRegen && p.hp < p.maxHp && !p.isDead) {
             p._regenTick = (p._regenTick || 0) + delta;
@@ -134,6 +255,8 @@ const Player = {
         if (typeof UI !== 'undefined' && UI.renderWeaponToolbar) {
             UI.renderWeaponToolbar(state);
         }
+        // Live: other divers see the switched gun instantly.
+        try { if (typeof Multiplayer !== 'undefined' && Multiplayer.pushSkinPrefs) Multiplayer.pushSkinPrefs(); } catch (e) {}
     },
 
     refreshWeaponHUD(state) {
@@ -177,6 +300,11 @@ const Player = {
 
     refreshHUD(state) {
         const p = state.player;
+        // Money sanitizer: coins are whole and never negative/NaN — a
+        // single funnel so casino/MP/sell float dust can't corrupt the wallet.
+        try {
+            p.coins = Math.max(0, Math.floor(Number(p.coins) || 0));
+        } catch (e) {}
         const hpText = document.getElementById('hp-text');
         if (hpText) hpText.innerText = `${Math.max(0, Math.round(p.hp))} / ${p.maxHp}`;
 
@@ -197,14 +325,37 @@ const Player = {
         const xpDisplay = document.getElementById('xp-display');
         if (xpDisplay) xpDisplay.innerText = `Lv.${p.level}`;
 
+        // XP progress bar (vitals panel) — kept in sync on every HUD pass
+        // so gains read live, not just on level-up.
+        try {
+            const xpBar = document.getElementById('xp-bar');
+            const xpText = document.getElementById('xp-text');
+            const need = Math.max(1, Number(p.xpToNext) || 1);
+            const pct = Math.max(0, Math.min(100, (Number(p.xp) || 0) / need * 100));
+            if (xpBar) xpBar.style.width = `${pct}%`;
+            if (xpText) xpText.innerText = `${Math.floor(Number(p.xp) || 0)} / ${Math.floor(need)}`;
+        } catch (e) {}
+
         const shopCoins = document.getElementById('shop-coins-display');
         if (shopCoins) shopCoins.innerText = p.coins;
+
+        // Live fortune achievements (guarded, one comparison each)
+        try {
+            if (typeof Achievements !== 'undefined' && Achievements.checkWealth) {
+                Achievements.checkWealth(state);
+            }
+        } catch (e) {}
     },
 
     addXP(state, amount) {
         const p = state.player;
-        p.xp += amount;
-        while (p.xp >= p.xpToNext) {
+        if (!Number.isFinite(Number(p.xpToNext)) || Number(p.xpToNext) <= 0) {
+            p.xpToNext = (typeof CONFIG !== 'undefined' && CONFIG.XP_LEVEL_BASE) || 100;
+        }
+        if (!Number.isFinite(Number(p.xp))) p.xp = 0;
+        p.xp += Math.max(0, Math.floor(Number(amount) || 0));
+        let guard = 0;
+        while (p.xp >= p.xpToNext && guard++ < 100) {
             p.xp -= p.xpToNext;
             p.level++;
             p.xpToNext = Math.round(p.xpToNext * CONFIG.XP_LEVEL_GROWTH);
@@ -214,6 +365,71 @@ const Player = {
             Particles.showFloatingText(state, `LEVEL UP! Lv.${p.level}`, p.x, p.y - 50, '#facc15');
             this.refreshHUD(state);
         }
+        this.refreshHUD(state);
+    },
+
+    // Pull-velocity channel: fish yanks, knockbacks and dash all push
+    // THROUGH here (px/s over time) instead of teleporting position.
+    // Capped so simultaneous hits can't stack into orbit.
+    addPull(state, vx, vy, dur) {
+        try {
+            const p = state.player;
+            if (!p || p.isDead) return;
+            p.pullVx = (p.pullVx || 0) + (vx || 0);
+            p.pullVy = (p.pullVy || 0) + (vy || 0);
+            const m = Math.hypot(p.pullVx, p.pullVy);
+            const MAXV = 950;
+            if (m > MAXV) { p.pullVx *= MAXV / m; p.pullVy *= MAXV / m; }
+            p.pullT = Math.max(p.pullT || 0, dur || 0.25);
+        } catch (e) {}
+    },
+
+    // Dash (Q): short burst + i-frames for dodging. Direction = current
+    // move input (keys / joystick), else facing. Blocked while casting,
+    // frozen, sailing or dead — same gates as walking.
+    DASH_CD: 2.5,
+    DASH_TIME: 0.16,
+    DASH_SPEED: 680,
+    DASH_IFRAMES: 0.35,
+
+    tryDash(state) {
+        try {
+            const p = state.player;
+            if (!p || p.isDead || (p.hp || 0) <= 0) return false;
+            if (state.paused) return false;
+            if ((p.dashCd || 0) > 0) return false;
+            if (typeof state._fightFreezeUntil === 'number' && state.time < state._fightFreezeUntil) return false;
+            try {
+                if (typeof WorldSystem !== 'undefined' && WorldSystem.boatRiding && WorldSystem.boatRiding(state)) return false;
+            } catch (e) {}
+            if (state.fishing && state.fishing.mode === 'CASTING') return false;
+            let dx = 0, dy = 0;
+            try {
+                const k = state.keys || {};
+                if (k['w'] || k['arrowup']) dy -= 1;
+                if (k['s'] || k['arrowdown']) dy += 1;
+                if (k['a'] || k['arrowleft']) dx -= 1;
+                if (k['d'] || k['arrowright']) dx += 1;
+                if (dx === 0 && dy === 0 && typeof TouchControls !== 'undefined' && TouchControls.active) {
+                    dx = TouchControls.joy.dx || 0;
+                    dy = TouchControls.joy.dy || 0;
+                }
+            } catch (e) {}
+            if (dx === 0 && dy === 0) dx = (p.facing && p.facing < 0) ? -1 : 1;
+            const l = Math.hypot(dx, dy) || 1;
+            // Dash overrides the channel (a fresh dodge, not a stack).
+            p.pullVx = (dx / l) * this.DASH_SPEED;
+            p.pullVy = (dy / l) * this.DASH_SPEED;
+            p.pullT = this.DASH_TIME;
+            p.dashT = this.DASH_TIME;
+            p.iframes = Math.max(p.iframes || 0, this.DASH_IFRAMES);
+            p.dashCd = this.DASH_CD;
+            try { audio.playWhoosh(); } catch (e) {}
+            try {
+                Particles.spawnParticles(state, p.x, p.y, '#67e8f9', 10, { size: 4 });
+            } catch (e) {}
+            return true;
+        } catch (e) { return false; }
     },
 
     die(state) {
@@ -235,6 +451,19 @@ const Player = {
         p.burnTick = 0;
         p.flashTimer = 0;
         p.blurTimer = 0;
+        p.totalDeaths = (p.totalDeaths || 0) + 1;
+        // Hydra soldiers are bound to the fight's momentum, not the map:
+        // they scatter the moment you fall (regular jumpers keep their
+        // revenge/flee script in updateJumpingFish instead).
+        try {
+            const gone = (state.enemies || []).filter(e => e && e.enemyType === 'hydraSoldier');
+            if (gone.length) {
+                state.enemies = (state.enemies || []).filter(e => !e || e.enemyType !== 'hydraSoldier');
+                if (typeof Particles !== 'undefined') {
+                    Particles.showFloatingText(state, 'The hydra\'s soldiers scatter...', p.x, p.y - 60, '#94a3b8');
+                }
+            }
+        } catch (e) {}
         try {
             const cv = document.getElementById('gameCanvas');
             if (cv) cv.style.filter = '';
@@ -247,22 +476,39 @@ const Player = {
         // Boss-fight rule: bosses DON'T run and DON'T despawn. Dying costs
         // one of 10 chances — the field is left exactly as it was so the
         // boss waits for you. Die 10 times and it leaves, mocking you.
+        // (Hooked bosses — hydra circling your corpse — count the same.)
         let inBossFight = false;
         try {
             inBossFight = (typeof Ritual !== 'undefined' && Ritual.bossFightActive)
                 ? Ritual.bossFightActive(state) : false;
+        } catch (e) {}
+        let hookedBoss = false;
+        try {
+            const hf = state.fishing && state.fishing.hookedFish;
+            hookedBoss = !!(hf && hf.species && (hf.species.isBoss || hf.species.rarity === 'boss'));
         } catch (e) {}
         if (inBossFight) {
             state.bossDeaths = (state.bossDeaths || 0) + 1;
             if (state.bossDeaths >= 10) {
                 this.fleeBoss(state);
             }
+        } else if (hookedBoss) {
+            state.bossDeaths = (state.bossDeaths || 0) + 1;
+            if (state.bossDeaths >= 10) {
+                state.bossDeaths = 0;
+                try {
+                    if (typeof Fishing !== 'undefined') Fishing.escapeFish(state, 'THE BOSS TIRES OF WAITING...');
+                } catch (e) {}
+                try {
+                    if (typeof UI !== 'undefined') UI.updateStatusBanner('Ten deaths. The boss spurns you and leaves. Train, gear up, try again.', 'Outmatched', 'rose');
+                } catch (e) {}
+            }
         } else {
             state.bossDeaths = 0;
         }
 
         // Normal death drops your current fight — but NEVER a boss fight
-        if (!inBossFight && state.fishing) {
+        if (!inBossFight && !hookedBoss && state.fishing) {
             if (state.fishing.mode === 'REELING' ||
                 state.fishing.mode === 'WAITING' ||
                 state.fishing.mode === 'BITING') {
@@ -292,7 +538,7 @@ const Player = {
 
         // Close anything else open — death takes over the screen
         try {
-            ['shop-modal', 'casino-modal', 'index-modal', 'npc-modal'].forEach(id => {
+            ['shop-modal', 'casino-modal', 'index-modal', 'npc-modal', 'radar-modal'].forEach(id => {
                 const m = document.getElementById(id);
                 if (m) m.classList.add('hidden');
             });
@@ -306,7 +552,7 @@ const Player = {
         const p = state.player;
         const menu = document.getElementById('death-menu');
         if (!menu) return;
-        const cause = wasBurning ? 'Burned alive!' : 'Slain in the deep!';
+        const cause = wasBurning ? T('death_burned') : T('death_slain');
         const set = (id, txt) => { const el = document.getElementById(id); if (el) el.innerText = txt; };
         set('death-cause', cause);
         const chances = 10 - (state.bossDeaths || 0);
@@ -315,15 +561,18 @@ const Player = {
             : `Lv.${p.level} · Bucket kept (${(p.bucket || []).length} fish) · Penalty −${lost}c`);
         const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
         // Dying on an isle offers the island dock as respawn (stays on the
-        // isle); camp/menu still send you back to the mainland beach.
+        // isle). Island spawn set = NO free teleport to Marlin's camp:
+        // sail home like everyone else (or abandon via menu).
         const isleSpawn = (p.onIsland && p.islandSpawn &&
             typeof p.islandSpawn.x === 'number') ? p.islandSpawn : null;
+        const campBtn = document.getElementById('btn-respawn-camp');
+        if (campBtn) campBtn.style.display = isleSpawn ? 'none' : '';
         const beachBtn = document.getElementById('btn-respawn-beach');
         if (isleSpawn) {
-            if (beachBtn) beachBtn.innerHTML = '<i class="fa-solid fa-anchor mr-2"></i> Respawn — Island Dock';
+            if (beachBtn) beachBtn.innerHTML = '<i class="fa-solid fa-anchor mr-2"></i> ' + T('death_isle');
             on('btn-respawn-beach', () => this.respawnAt(state, isleSpawn.x, isleSpawn.y, 'Island Dock', false, true));
         } else {
-            if (beachBtn) beachBtn.innerHTML = '<i class="fa-solid fa-heart-pulse mr-2"></i> Respawn — Beach';
+            if (beachBtn) beachBtn.innerHTML = '<i class="fa-solid fa-heart-pulse mr-2"></i> ' + T('death_beach');
             on('btn-respawn-beach', () => this.respawnAt(state, 220, 300, 'Beach'));
         }
         on('btn-respawn-camp', () => {
@@ -398,6 +647,11 @@ const Player = {
         p.burnTick = 0;
         p.flashTimer = 0;
         p.blurTimer = 0;
+        // Fresh body, fresh fight: drop boss debuffs (tether/QTE/drain).
+        p.tether = null;
+        p.voidDrag = null;
+        p.voidDrain = null;
+        try { document.getElementById('tension-hud').classList.add('hidden'); } catch (e) {}
         this.hideDeathMenu();
         this.refreshHUD(state);
         if (typeof UI !== 'undefined' && UI.renderWeaponToolbar) UI.renderWeaponToolbar(state);

@@ -3,7 +3,9 @@
  *
  * LOOP:
  *   1. Earn summon ITEMS by fishing/fighting — they drop as physical
- *      loot (with models) and live in the bucket, unsellable:
+ *      loot (with models) and live in the bucket. Keys have sell prices:
+ *      sell spares for coins, or 🔒 lock them (shop) to keep them safe
+ *      from SELL ALL and ritual/craft spending:
  *      Storm Eggs (Stormcaller/gulls/legendary catches),
  *      Void Shards (void-tainted only), boss trophies (boss kills).
  *   2. Bake a Storm Egg into a Hydra Lure (Shop > Bait tab).
@@ -17,17 +19,28 @@
 // ---- Boss keys: each boss wants something DIFFERENT.
 //   🥚 Storm Egg  <- Stormcaller kill (always) + seagulls (6%)
 //   🔮 Void Shard <- jumping-fish kills (30%)
+// Keys are SELLABLE (value below): sell spares for coins, or 🔒 lock them
+// in the shop to keep them safe from SELL ALL and ritual spending.
 const BOSS_KEYS = {
-    storm_egg: { name: 'Storm Egg',  icon: '🥚', color: '#10b981' },
-    shard:     { name: 'Void Shard', icon: '🔮', color: '#a855f7' },
+    storm_egg: { name: 'Storm Egg',  icon: '🥚', color: '#10b981', value: 1200 },
+    shard:     { name: 'Void Shard', icon: '🔮', color: '#a855f7', value: 2000 },
 };
 
 // ---- Boss trophies: 100% drop from each boss kill. All three trophies
 // combined open the way to the Crimson Emperor (endgame gate).
+// Sellable like keys — but selling them delays the Emperor.
 const TROPHIES = {
-    chalice: { name: "Priest's Chalice", icon: '🏆', color: '#0ea5e9', from: 'Leviathan Priest' },
-    fang:    { name: 'Hydra Fang',       icon: '🦷', color: '#10b981', from: 'Stormlord Hydra' },
-    eye:     { name: "Shepherd's Eye",   icon: '👁️', color: '#a855f7', from: 'Void Shepherd' },
+    chalice: { name: "Priest's Chalice", icon: '🏆', color: '#0ea5e9', from: 'Leviathan Priest', value: 8000 },
+    fang:    { name: 'Hydra Fang',       icon: '🦷', color: '#10b981', from: 'Stormlord Hydra', value: 8000 },
+    eye:     { name: "Leviathan's Eye",   icon: '👁️', color: '#a855f7', from: 'Void Leviathan', value: 8000 },
+};
+
+// Boss species id -> trophy id (kill tribute drops). Matches
+// Ritual.grantTrophy's map; the combat/fishing kill paths read this.
+const TROPHY_OF = {
+    leviathan_priest: 'chalice',
+    stormlord_hydra: 'fang',
+    void_shepherd: 'eye',
 };
 
 // ---- Baits are PER-HOOK consumables (no timers): 1 craft = 10 baits,
@@ -83,15 +96,32 @@ const BAITS = [
       desc: 'EQUIP as bait: 30% of hooks grab the STORMLORD HYDRA itself. Eaten per hook.',
       recipe: { key: 'storm_egg', tier: 'legendaryPlus', count: 2 }, summon: 'stormlord_hydra',
       hookBait: true, yield: 2 },
+    // ---- Event-tide crafts: explicit special-fish + coins recipes ----
+    { id: 'stormchum', name: 'Storm Chum', icon: 'fa-cloud-bolt', color: '#38bdf8',
+      desc: 'Typhoon-ground mash. +32% luck, 30% faster bites.',
+      recipe: { coins: 800, fish: [{ id: 'typhoon_dart', n: 2 }, { id: 'stormpetrel_fish', n: 1 }] },
+      biteMult: 0.70, luckBonus: 0.32, yield: 8 },
+    { id: 'moonpaste', name: 'Moon Paste', icon: 'fa-moon', color: '#e2e8f0',
+      desc: 'Ground under a clear night moon. +40% luck, 20% faster bites.',
+      recipe: { coins: 1500, fish: [{ id: 'bloodmoon_raya', n: 1 }, { id: 'bloodfin_tetra', n: 2 }] },
+      biteMult: 0.80, luckBonus: 0.40, yield: 6 },
+    { id: 'fogmash', name: 'Fog Mash', icon: 'fa-smog', color: '#94a3b8',
+      desc: 'Condensed fog bank. +30% luck, 25% faster bites.',
+      recipe: { coins: 800, fish: [{ id: 'mistwisp_eel', n: 2 }, { id: 'fog_guppy', n: 3 }] },
+      biteMult: 0.75, luckBonus: 0.30, yield: 8 },
+    { id: 'dawncry', name: 'Dawn Cry', icon: 'fa-sun', color: '#fdba74',
+      desc: 'Bottled first light. +35% luck, 30% faster bites.',
+      recipe: { coins: 1200, fish: [{ id: 'dawn_runner', n: 2 }, { id: 'sunfin_tetra', n: 2 }] },
+      biteMult: 0.70, luckBonus: 0.35, yield: 8 },
 ];
 
 // ---- Pad rituals (only Shepherd + Emperor use the circle now — every
 // boss summons DIFFERENTLY: gulls / Marlin rite / hook lure / pad).
 // cost = { shards: n } or { trophies: { id: n } }
 const RITUALS = [
-    { bossId: 'void_shepherd', cost: { shards: 3 },
+    { bossId: 'void_shepherd', cost: { shards: 3 }, intro: 'rise', introDur: 10,
       blurb: 'The abyss only takes its own: 3 Void Shards from void-tainted jumpers.' },
-    { bossId: 'crimson_emperor', cost: { trophies: { chalice: 1, fang: 1, eye: 1 } },
+    { bossId: 'crimson_emperor', cost: { trophies: { chalice: 1, fang: 1, eye: 1 } }, intro: 'fall', introDur: 10,
       blurb: 'The endgame gate: one trophy from each lesser boss. No fish can buy this.' },
 ];
 
@@ -125,11 +155,11 @@ const Ritual = {
         return { x: 6700, y: 1900 };
     },
 
-    // The hole on the beach — pinned to the NORTH-WEST corner of the
-    // sand so it never drifts into the middle of play.
+    // The hole on the beach — pinned to the SOUTH-WEST corner of the
+    // sand (bottom beach corner) so it never drifts into spawn play.
     caveHole(state) {
         const B = CONFIG.WORLD;
-        return { x: B.MIN_X + 250, y: B.MIN_Y + 250 };
+        return { x: B.MIN_X + 250, y: B.MAX_Y - 250 };
     },
 
     runeStones(state) {
@@ -384,7 +414,7 @@ const Ritual = {
         if (typeof TROPHIES !== 'undefined' && TROPHIES[keyId]) {
             const t = TROPHIES[keyId];
             const icons = { chalice: '🏆', fang: '🦷', eye: '👁️' };
-            return { name: t.name, icon: icons[keyId] || '🏆', color: t.color || '#fbbf24' };
+            return { name: t.name, icon: icons[keyId] || '🏆', color: t.color || '#fbbf24', value: t.value || 0 };
         }
         return null;
     },
@@ -394,21 +424,50 @@ const Ritual = {
         if (!def) return null;
         const icon = def.icon || (TROPHIES[keyId] ? '🏆' : '❔');
         return { kind: 'item', keyItem: true, id: keyId, name: def.name,
-            icon, color: def.color || '#fbbf24', rarity: 'key', value: 0 };
+            icon, color: def.color || '#fbbf24', rarity: 'key',
+            value: this.keyValue(keyId) };
     },
 
-    // How many of a summon item sit in the bucket
+    // Sell price of a summon item. Old saves stored value: 0 — the def is
+    // the source of truth, so those migrate automatically wherever sold.
+    keyValue(keyId) {
+        try {
+            const def = this.itemDef(keyId);
+            const v = def && def.value;
+            return (typeof v === 'number' && v > 0) ? Math.round(v) : 0;
+        } catch (e) { return 0; }
+    },
+
+    // Spendable value of one bucket entry (fish or key), with the key-def
+    // fallback for pre-price saves.
+    entryValue(entry) {
+        try {
+            if (!entry) return 0;
+            if (typeof entry.value === 'number' && entry.value > 0) return Math.round(entry.value);
+            if (entry.keyItem) return this.keyValue(entry.id);
+        } catch (e) {}
+        return 0;
+    },
+
+    // How many UNLOCKED summon items sit in the bucket (spendable /
+    // sellable). Locked 🔒 items are keepers: rituals, crafts and SELL ALL
+    // must never touch them.
     countItem(state, keyId) {
+        return (state.player.bucket || []).filter(f => f && f.keyItem && f.id === keyId && !f.locked).length;
+    },
+
+    // Total copies regardless of lock (stash display).
+    countItemAll(state, keyId) {
         return (state.player.bucket || []).filter(f => f && f.keyItem && f.id === keyId).length;
     },
 
-    // Remove N summon items from the bucket. Returns removed count.
+    // Remove N UNLOCKED summon items from the bucket. Returns removed count.
     consumeItems(state, keyId, count) {
         const bucket = state.player.bucket || [];
         let left = count;
         for (let i = bucket.length - 1; i >= 0 && left > 0; i--) {
             const f = bucket[i];
-            if (f && f.keyItem && f.id === keyId) {
+            if (f && f.keyItem && f.id === keyId && !f.locked) {
                 bucket.splice(i, 1);
                 left--;
             }
@@ -502,6 +561,15 @@ const Ritual = {
     canCraft(state, baitId) {
         const def = this.baitDef(baitId);
         if (!def) return { ok: false, why: 'Unknown bait.' };
+        // Explicit fish + coins recipes go through the Craft engine.
+        if (def.recipe && (def.recipe.fish || def.recipe.coins)) {
+            try {
+                if (typeof Craft !== 'undefined') {
+                    const chk = Craft.check(state, def.recipe);
+                    return chk.ok ? { ok: true } : { ok: false, why: chk.why };
+                }
+            } catch (e) {}
+        }
         this.ensure(state);
         if (def.recipe.key && !(this.countItem(state, def.recipe.key) > 0)) {
             return { ok: false, why: `Needs 1× ${BOSS_KEYS[def.recipe.key].name} (fish one first).` };
@@ -519,6 +587,13 @@ const Ritual = {
         if (!def || !chk.ok) {
             Particles.showFloatingText(state, chk.why || 'Cannot craft.', state.player.x, state.player.y - 50, '#f87171');
             try { audio.playError(); } catch (e) {}
+            return false;
+        }
+        // Explicit recipes (fish + coins) are spent by the Craft engine.
+        if (def.recipe && (def.recipe.fish || def.recipe.coins)) {
+            try {
+                if (typeof Craft !== 'undefined') return Craft.craftBait(state, baitId);
+            } catch (e) {}
             return false;
         }
         if (def.recipe.key) this.consumeItems(state, def.recipe.key, 1);
@@ -609,7 +684,7 @@ const Ritual = {
                 el.innerHTML = `<span style="color:${def.color}">◉</span> ${def.name} ×${n}`;
                 el.className = 'text-sky-300';
             } else {
-                el.innerText = 'No bait';
+                el.innerText = T('hud_no_bait');
                 el.className = 'text-slate-500';
             }
         } catch (e) {}
@@ -696,7 +771,9 @@ const Ritual = {
     // Shared spawn: pad rituals AND the Marlin rite land the boss here.
     // Returns the boss monster (or false). Dormancy + intro length ride
     // along so every arrival stands down for its own cinematic.
-    spawnBoss(state, bossId, introDurSec) {
+    // mode: 'swim' (glide in from the far sea), 'rise' (erupt here from
+    // the water), 'fall' (drop from the sky with an impact).
+    spawnBoss(state, bossId, introDurSec, mode, quietName) {
         const sp = FISH_SPECIES.find(s => s.id === bossId);
         if (!sp) return false;
         // Ritual summons stay on the mainland beach — never on an isle.
@@ -708,8 +785,15 @@ const Ritual = {
         }
         const hpMult = (typeof CONFIG !== 'undefined' && CONFIG.DIFFICULTY && CONFIG.DIFFICULTY.FISH_HP_MULT) || 1;
         const B = CONFIG.WORLD;
-        const px = Utils.clamp(state.player.x + (Math.random() - 0.5) * 120, B.MIN_X + 40, state.waterBoundaryX - 40);
-        const py = Utils.clamp(state.player.y + (Math.random() - 0.5) * 120, B.MIN_Y + 40, B.MAX_Y - 40);
+        // Arrival from the far sea: the boss surfaces out east and GLIDES
+        // ashore to the arena during its intro (see _swimIn + dormant glide
+        // in Combat) — never pops onto the sand beside you.
+        const px = Utils.clamp(state.waterBoundaryX + 320 + Math.random() * 260, state.waterBoundaryX + 60, B.MAX_X - 60);
+        const py = Utils.clamp(state.player.y + (Math.random() - 0.5) * 320, B.MIN_Y + 40, B.MAX_Y - 40);
+        const dur = (typeof introDurSec === 'number' && introDurSec > 0) ? introDurSec : 5;
+        const tx = Utils.clamp(state.player.x + 140, B.MIN_X + 40, state.waterBoundaryX - 60);
+        const ty = Utils.clamp(state.player.y + 40, B.MIN_Y + 40, B.MAX_Y - 40);
+        const swimDist = Math.hypot(tx - px, ty - py) || 1;
         const m = {
             id: 'boss' + Date.now() + Math.random(),
             species: sp,
@@ -717,10 +801,39 @@ const Ritual = {
             hp: Math.round(sp.maxHp * hpMult), maxHp: Math.round(sp.maxHp * hpMult),
             vx: 0, vy: 0, chargeCooldown: 3, isCharging: false,
             _announced: true, // intro plays here, combat won't double it
+            _swimIn: { x: tx, y: ty, spd: swimDist / Math.max(1.5, dur) },
         };
+        const how = mode || 'swim';
+        if (how === 'rise') {
+            // Erupts from the water and SURGES ashore: starts out at sea,
+            // glides in fast trailing spray, grounds at the arena.
+            const sx = Utils.clamp(tx + 280, state.waterBoundaryX + 40, B.MAX_X - 60);
+            m.x = sx; m.y = ty;
+            m._swimIn = { x: tx, y: ty, spd: Math.hypot(tx - sx, 0) / Math.max(1.2, dur * 0.55) };
+        } else if (how === 'fall') {
+            // Drops from the sky: start high above the arena, slam down.
+            // Clamped inside the world so the intro camera never stares
+            // into the black void past the map edge.
+            m.x = tx; m.y = Math.max(ty - 600, B.MIN_Y + 140);
+            m._swimIn = { x: tx, y: ty, spd: 600 / Math.max(1.2, dur * 0.55) };
+            m._introImpact = true;
+        }
+        // Universal arrival: a portal tears open where the boss starts,
+        // and it grows from 25% to full while swimming in. Slow glide —
+        // every boss takes its time, no teleports.
+        m._sizeMult = 0.25;
+        try {
+            state.realmFx = state.realmFx || [];
+            state.realmFx.push({ x: m.x, y: m.y - 30, t0: state.time || 0, dur: Math.max(2, dur * 0.7) });
+            state.delayedBlasts = state.delayedBlasts || [];
+            state.delayedBlasts.push({
+                x: m.x, y: m.y, radius: 150, damage: 0,
+                timer: 0.5, color: '#e9d5ff', shake: 14,
+            });
+        } catch (e) {}
         (state.monstersOnLand = state.monstersOnLand || []).push(m);
         state.activeBoss = m;
-        this.bossIntro(state, sp, px, py, m, introDurSec);
+        this.bossIntro(state, sp, m.x, m.y, m, introDurSec, how, quietName);
         Player.refreshHUD(state);
         if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
         return m;
@@ -731,20 +844,31 @@ const Ritual = {
     // boss. Part 2 (tide music fading out, boss theme fading in) fires when
     // the lock expires — see Combat.update's pending-crossfade check.
     INTRO_CAM_DUR: 10,
+    // Phase gate marks drawn on the boss HP bar (fraction of max HP,
+    // descending). The bar renders a tick per mark so each phase reads.
+    PHASE_MARKS: {
+        stormlord_hydra:  [0.5, 0.4],
+        void_shepherd:    [0.65, 0.3, 0.1],
+        crimson_emperor:  [0.7, 0.3, 0.1],
+        leviathan_priest: [0.4],
+        stormcaller:      [0.4],
+    },
     BOSS_TITLES: {
         stormlord_hydra:  { title: 'THE NINE-HEADED STORM', color: '#10b981', glow: '#6ee7b7' },
         leviathan_priest: { title: 'CHANT OF THE DEEP',     color: '#0ea5e9', glow: '#7dd3fc' },
-        void_shepherd:    { title: 'HAND OF THE ABYSS',     color: '#a855f7', glow: '#d8b4fe' },
+        void_shepherd:    { title: 'THE STAR-EATER',        color: '#a855f7', glow: '#22d3ee' },
         crimson_emperor:   { title: 'THE MOLTEN TYRANT',     color: '#ef4444', glow: '#fbbf24' },
         stormcaller:       { title: 'QUEEN OF THE GALES',    color: '#facc15', glow: '#fef08a' },
     },
 
-    bossIntro(state, sp, px, py, bossRef, durSec) {
+    bossIntro(state, sp, px, py, bossRef, durSec, mode, quietName) {
         try {
             const meta = (this.BOSS_TITLES && this.BOSS_TITLES[sp.id]) || { title: 'BOSS', color: '#ef4444', glow: '#fbbf24' };
             const x = (typeof px === 'number') ? px : state.player.x;
             const y = (typeof py === 'number') ? py : state.player.y;
             const dur = (typeof durSec === 'number' && durSec > 0) ? durSec : (this.INTRO_CAM_DUR || 10);
+            const how = mode || (bossRef && bossRef._introMode) || 'swim';
+            if (bossRef) bossRef._introMode = how;
             // Feel: flash + quake + war-horn (boss roar only — the plain roar
             // underneath was muddying it, and Stormcaller got the wrong one)
             try {
@@ -762,7 +886,15 @@ const Ritual = {
             // for the same window: no movement, no skills, no contact.
             try {
                 state._introCam = { x, y, t: dur, boss: bossRef || null };
-                if (bossRef) bossRef.dormantUntil = (state.time || 0) + dur;
+                if (bossRef) {
+                    bossRef.dormantUntil = (state.time || 0) + dur;
+                    bossRef._introDur = dur;
+                }
+            } catch (e) {}
+            // Sea tint: the whole map grades toward the boss's color for
+            // the length of its arrival (fades on its own clock).
+            try {
+                state.seaTint = { color: meta.color, until: (state.time || 0) + dur };
             } catch (e) {}
             // Music, part 2 is scheduled: when the lock expires the tide
             // music fades out and the boss theme fades in (Combat.update).
@@ -781,8 +913,30 @@ const Ritual = {
                 Particles.spawnParticles(state, x, y, meta.color, 60, { size: 6 });
                 Particles.spawnParticles(state, x, y, meta.glow, 40, { size: 4 });
             } catch (e) {}
-            Particles.showFloatingText(state, `🕯 ${sp.name.toUpperCase()} RISES!`, x, y - 110, '#ef4444');
-            // Giant flaming name banner (DOM, auto-removes)
+            // Arrival-modeFX: rise erupts a water column, fall streaks down
+            // from the sky. (Per-tick motion/FX continue in the dormant
+            // branches of Combat / Enemies / Fishing.)
+            try {
+                if (how === 'rise' && typeof Particles !== 'undefined' && Particles.spawnWaterSplashes) {
+                    for (let i = 0; i < 3; i++) {
+                        Particles.spawnWaterSplashes(state, x + (Math.random() - 0.5) * 120, y + 20, 14);
+                    }
+                    Particles.spawnParticles(state, x, y - 40, '#7dd3fc', 30, { size: 5 });
+                    state.screenShake = Math.max(state.screenShake || 0, 24);
+                } else if (how === 'fall') {
+                    Particles.spawnParticles(state, x, y - 260, '#e2e8f0', 40, { size: 5 });
+                    Particles.spawnParticles(state, x, y - 260, meta.color, 25, { size: 4 });
+                    try { audio.playThunder(); } catch (e) {}
+                }
+            } catch (e) {}
+            if (!quietName) {
+                Particles.showFloatingText(state, `🕯 ${sp.name.toUpperCase()} RISES!`, x, y - 110, '#ef4444');
+            }
+            // Giant flaming name banner (DOM, auto-removes). quietName
+            // skips it AND the floating name above — the caller reveals
+            // the name on its own beat, exactly once (see emperorIntro's
+            // 8s / voidIntro's 9s reveal).
+            if (!quietName) {
             try {
                 const host = document.getElementById('game-container') || document.body;
                 const old = document.getElementById('boss-intro-banner');
@@ -796,6 +950,211 @@ const Ritual = {
                 host.appendChild(div);
                 setTimeout(() => { try { div.remove(); } catch (e) {} }, 3000);
             } catch (e) {}
+            }
+        } catch (e) {}
+    },
+
+    // CRIMSON EMPEROR 10s cinematic (The Unhookable Sovereign):
+    //  0-2s  bite alarm — flashing LEVIATHAN DETECTED + screech + shake
+    //  2-5s  blood water erupts around the arena, fin circles the shore
+    //  5-8s  sky-drop impact (mode 'fall') + tsunami rings both sides
+    //  8-10s name banner + HP bar reveal + red roar shockwave, then FIGHT.
+    // Timers are cosmetic (fightCountdown already froze the fight); if the
+    // boss dies mid-intro the banner still fades harmlessly.
+    emperorIntro(state, m) {
+        try {
+            const sp = m.species;
+            const meta = (this.BOSS_TITLES && this.BOSS_TITLES[sp.id]) || { title: 'SOVEREIGN OF THE BLOOD TIDES', color: '#ef4444', glow: '#fbbf24' };
+            m._hpHiddenUntil = (state.time || 0) + 8;
+            const later = (ms, fn) => setTimeout(() => { try { fn(); } catch (e) {} }, ms);
+            // 0-2s: alarm.
+            [0, 700, 1400].forEach((ms) => later(ms, () => {
+                Particles.showFloatingText(state, '⚠ LEVIATHAN DETECTED ⚠', state.player.x, state.player.y - 110, '#ef4444');
+                state.screenShake = Math.max(state.screenShake || 0, 14);
+                try { audio.playFishScreech(); } catch (e) {}
+            }));
+            // 2-5s: the water turns red + fin circles.
+            [2000, 2900, 3800, 4700].forEach((ms, i) => later(ms, () => {
+                const a = (i / 4) * Math.PI * 2;
+                const fx = m.x + Math.cos(a) * 190, fy = m.y + Math.sin(a) * 120;
+                try {
+                    if (Particles.spawnWaterSplashes) Particles.spawnWaterSplashes(state, fx, fy, 14);
+                    Particles.spawnParticles(state, fx, fy, '#7f1d1d', 22, { size: 5 });
+                    Particles.spawnParticles(state, fx, fy - 30, '#dc2626', 12, { size: 4 });
+                } catch (e) {}
+                if (i === 0) {
+                    Particles.showFloatingText(state, '🩸 THE WATER TURNS RED...', m.x, m.y - 130, '#dc2626');
+                }
+            }));
+            // 6s: tsunami walls left + right of the impact.
+            later(6000, () => {
+                try {
+                    state.delayedBlasts = state.delayedBlasts || [];
+                    [-1, 1].forEach(s => {
+                        state.delayedBlasts.push({
+                            x: m.x + s * 220, y: m.y, radius: 180, damage: 0,
+                            timer: 0.5, color: '#991b1b', shake: 20,
+                        });
+                    });
+                    state.screenShake = Math.max(state.screenShake || 0, 20);
+                } catch (e) {}
+            });
+            // 8s: name + HP reveal + deep-sea roar with red shockwave.
+            later(8000, () => {
+                try {
+                    const host = document.getElementById('game-container') || document.body;
+                    const old = document.getElementById('boss-intro-banner');
+                    if (old) old.remove();
+                    const div = document.createElement('div');
+                    div.id = 'boss-intro-banner';
+                    div.innerHTML =
+                        `<div class="boss-intro-kicker">SOVEREIGN OF THE BLOOD TIDES</div>` +
+                        `<div class="boss-intro-name" style="--boss-color:${meta.color};--boss-glow:${meta.glow};">${sp.name.toUpperCase()}</div>` +
+                        `<div class="boss-intro-sub">${meta.title}</div>`;
+                    host.appendChild(div);
+                    setTimeout(() => { try { div.remove(); } catch (e) {} }, 3200);
+                } catch (e) {}
+                try { audio.playBossRoar(); } catch (e) {}
+                try {
+                    if (typeof Combat !== 'undefined' && Combat.roarShockwave) {
+                        Combat.roarShockwave(state, m.x, m.y, { color: '#ef4444', rings: 5, maxR: 340, shake: 22, gap: 0.16 });
+                    }
+                } catch (e) {}
+            });
+        } catch (e) {}
+    },
+
+    // VOID LEVIATHAN 10s cinematic (Unholy Catch): the portal tears
+    // open FAR AT SEA, the Leviathan steps out of it and swims to the
+    // arena while the sky goes black.
+    //  0-2s  void alarm — flashing VOID ANOMALY DETECTED + violet bolts
+    //  2.5s  portal opens far at sea + starfield; the boss emerges there
+    //  2.5-7s swims portal -> arena, fin circles, sky blacks out
+    //  5.5s  roar + purple shockwave as it closes in
+    //  7.5s  tail-slam wave + name/HP reveal, realm lifts, then FIGHT.
+    voidIntro(state, m) {
+        try {
+            const sp = m.species;
+            const meta = (this.BOSS_TITLES && this.BOSS_TITLES[sp.id]) || { title: 'THE STAR-EATER', color: '#a855f7', glow: '#22d3ee' };
+            m._hpHiddenUntil = (state.time || 0) + 7.5;
+            m._sizeMult = 0.25; // grows out of the portal (see Combat)
+            const later = (ms, fn) => setTimeout(() => { try { fn(); } catch (e) {} }, ms);
+            // Portal far at sea: east of the arena, in open water. The boss
+            // starts INSIDE it and swims in over ~6s.
+            let portal = null;
+            try {
+                const B = (typeof CONFIG !== 'undefined' && CONFIG.WORLD) || { MAX_X: 4500 };
+                const tx = (m._swimIn && typeof m._swimIn.x === 'number') ? m._swimIn.x
+                    : Utils.clamp(state.player.x + 140, 40, (state.waterBoundaryX || 830) - 60);
+                const ty = (m._swimIn && typeof m._swimIn.y === 'number') ? m._swimIn.y : state.player.y;
+                const px = Utils.clamp(tx + 460, (state.waterBoundaryX || 830) + 60, B.MAX_X - 60);
+                portal = { x: px, y: ty };
+                m.x = px; m.y = ty;
+                const d = Math.hypot(tx - px, 0) || 1;
+                m._swimIn = { x: tx, y: ty, spd: d / 6 };
+            } catch (e) {}
+            // Black-sky overlay node (created once, faded in/out on beats).
+            try {
+                const host = document.getElementById('game-container') || document.body;
+                let veil = document.getElementById('void-realm-overlay');
+                if (!veil) {
+                    veil = document.createElement('div');
+                    veil.id = 'void-realm-overlay';
+                    host.appendChild(veil);
+                }
+                veil.style.opacity = '0';
+                later(2500, () => { try { veil.style.opacity = '0.7'; } catch (e) {} });
+                later(9500, () => { try { veil.style.opacity = '0'; } catch (e) {} });
+                later(11000, () => { try { veil.remove(); } catch (e) {} });
+            } catch (e) {}
+            // 0-3s: alarm + rendered violet bolts around the arena.
+            [0, 1000, 2000].forEach((ms) => later(ms, () => {
+                Particles.showFloatingText(state, '🟣 VOID ANOMALY DETECTED', state.player.x, state.player.y - 110, '#c084fc');
+                state.screenShake = Math.max(state.screenShake || 0, 14);
+                try {
+                    if (typeof Combat !== 'undefined' && Combat.strikeLightning) {
+                        Combat.strikeLightning(state, m.x + (Math.random() - 0.5) * 300, m.y + (Math.random() - 0.5) * 200, { color: '#c084fc', shake: 8 });
+                    } else { try { audio.playThunder(); } catch (e) {} }
+                } catch (e) {}
+            }));
+            // 2.5s: the portal TEARS OPEN far at sea + starfield.
+            later(2500, () => {
+                try {
+                    if (!portal) return;
+                    state.realmFx = state.realmFx || [];
+                    state.realmFx.push({ x: portal.x, y: portal.y - 40, t0: state.time || 0, dur: 7.5 });
+                    state.delayedBlasts = state.delayedBlasts || [];
+                    [0, 1, 2].forEach(i => {
+                        state.delayedBlasts.push({
+                            x: portal.x, y: portal.y, radius: 120 + i * 70, damage: 0,
+                            timer: 0.4 + i * 0.3, color: '#4c1d95', shake: 14,
+                        });
+                    });
+                    Particles.showFloatingText(state, '🕳 A VOID PORTAL TEARS OPEN!', portal.x, portal.y - 150, '#c084fc');
+                    state.screenShake = Math.max(state.screenShake || 0, 20);
+                    for (let i = 0; i < 16; i++) {
+                        Particles.spawnParticles(state,
+                            portal.x + (Math.random() - 0.5) * 500, portal.y + (Math.random() - 0.5) * 340,
+                            Math.random() < 0.5 ? '#e9d5ff' : '#7c3aed', 1, { size: 3 });
+                    }
+                } catch (e) {}
+            });
+            // 2.5-5s: it steps out — breach bursts around it.
+            [2900, 3800, 4700].forEach((ms, i) => later(ms, () => {
+                try {
+                    if (Particles.spawnWaterSplashes) Particles.spawnWaterSplashes(state, m.x, m.y + 20, 16);
+                    Particles.spawnParticles(state, m.x, m.y, '#1e293b', 22, { size: 6 });
+                    Particles.spawnParticles(state, m.x, m.y - 34, '#22d3ee', 12, { size: 4 });
+                } catch (e) {}
+                if (i === 0) {
+                    Particles.showFloatingText(state, '🌊 IT STEPS THROUGH!', m.x, m.y - 130, '#22d3ee');
+                }
+            }));
+            // 5.5s: roar + Void Realm starfield while it closes in.
+            // (The portal itself opened far at sea at 2.5s — see above.)
+            later(5500, () => {
+                try { audio.playBossRoar(); } catch (e) {}
+                try {
+                    if (typeof Combat !== 'undefined' && Combat.roarShockwave) {
+                        Combat.roarShockwave(state, m.x, m.y, { color: '#a855f7', rings: 5, maxR: 340, shake: 22, gap: 0.16 });
+                    }
+                } catch (e) {}
+                Particles.showFloatingText(state, '🌌 THE VOID REALM MANIFESTS', m.x, m.y - 130, '#c084fc');
+            });
+            [6000, 6800, 7600].forEach((ms) => later(ms, () => {
+                try {
+                    for (let i = 0; i < 14; i++) {
+                        Particles.spawnParticles(state,
+                            m.x + (Math.random() - 0.5) * 900, m.y + (Math.random() - 0.5) * 600,
+                            Math.random() < 0.5 ? '#e9d5ff' : '#7c3aed', 1, { size: 3 });
+                    }
+                } catch (e) {}
+            }));
+            // 7.5s: tail-slam wave + name/HP reveal.
+            later(7500, () => {
+                try {
+                    state.delayedBlasts = state.delayedBlasts || [];
+                    state.delayedBlasts.push({
+                        x: m.x, y: m.y, radius: 300, damage: 0,
+                        timer: 0.4, color: '#22d3ee', shake: 24,
+                    });
+                    state.screenShake = Math.max(state.screenShake || 0, 24);
+                } catch (e) {}
+                try {
+                    const host = document.getElementById('game-container') || document.body;
+                    const old = document.getElementById('boss-intro-banner');
+                    if (old) old.remove();
+                    const div = document.createElement('div');
+                    div.id = 'boss-intro-banner';
+                    div.innerHTML =
+                        `<div class="boss-intro-kicker">UNHOLY CATCH</div>` +
+                        `<div class="boss-intro-name" style="--boss-color:${meta.color};--boss-glow:${meta.glow};">${sp.name.toUpperCase()}</div>` +
+                        `<div class="boss-intro-sub">${meta.title}</div>`;
+                    host.appendChild(div);
+                    setTimeout(() => { try { div.remove(); } catch (e) {} }, 3200);
+                } catch (e) {}
+                try { audio.playBossRoar(); } catch (e) {}
+            });
         } catch (e) {}
     },
 
@@ -810,20 +1169,48 @@ const Ritual = {
         }
         this.payCost(state, ritual.cost);
         // Short intro (camera beats + countdown below), then the boss wakes.
-        const m = this.spawnBoss(state, bossId, 5);
+        // Arrival mode + length ride on the ritual def; the Emperor and the
+        // Leviathan get full cinematics with delayed name/HP reveals.
+        const isEmperor = bossId === 'crimson_emperor';
+        const isVoid = bossId === 'void_shepherd';
+        const m = this.spawnBoss(state, bossId, ritual.introDur || 5, ritual.intro, isEmperor || isVoid);
         if (!m) return false;
-        this.fightCountdown(state, m);
+        if (isEmperor) {
+            try { this.emperorIntro(state, m); } catch (e) {}
+        }
+        if (isVoid) {
+            try { this.voidIntro(state, m); } catch (e) {}
+        }
+        this.fightCountdown(state, m, { delaySec: ritual.introDur || 5 });
         Player.refreshHUD(state);
         if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
         this.render();
         return true;
     },
 
-    // Ritual-summon fight opener: black fade with READY?, teleport to the
-    // beach beside the boss, then 3-2-1-FIGHT. The boss stays dormant until
-    // the intro window ends, and the player is frozen for the sequence.
-    fightCountdown(state, m) {
+    // Ritual-summon fight opener: READY? then 3-2-1-FIGHT over the live
+    // arena. NO teleport, NO freeze: the player keeps their position and
+    // can move + shoot throughout — but the boss stays dormant (hence
+    // invulnerable) until FIGHT lands, so early shots can't hurt it.
+    // Hooked bosses reuse the same call (the angler never moved anyway).
+    fightCountdown(state, m, opts) {
         try {
+            // noTeleport is legacy (hook flow never teleported) — nobody is
+            // moved anymore, on any path: you fight from where you stand.
+            // Sequencing: intro cinematic (name reveal) plays FIRST, the
+            // countdown starts AFTER it — never on top of it.
+            const delayMs = Math.max(0, Math.min(15000, ((opts && opts.delaySec) || 0) * 1000));
+            if (delayMs > 0) {
+                setTimeout(() => {
+                    try {
+                        // Boss died mid-intro (burn/posion ticked? no — still
+                        // skip the countdown for a corpse.
+                        if (m && (m.isDead || (typeof m.hp === 'number' && m.hp <= 0))) return;
+                        this.fightCountdown(state, m, {});
+                    } catch (e) {}
+                }, delayMs);
+                return;
+            }
             const overlay = document.getElementById('fight-ready-overlay');
             const text = document.getElementById('fight-ready-text');
             const show = (t, cls) => {
@@ -842,35 +1229,30 @@ const Ritual = {
                 overlay.classList.remove('fight-ready-show');
             };
             const p = state.player;
-            // Freeze player + clear incoming fire for a fair cinematic.
-            state._fightFreezeUntil = (state.time || 0) + 5;
+            // No freeze, no teleport: you move and shoot through the whole
+            // countdown. The boss simply can't be hurt until FIGHT lands
+            // (dormantUntil below covers the full 3-2-1 window).
             try {
                 state.bullets = (state.bullets || []).filter(b => b && b.owner !== 'enemy');
             } catch (e) {}
-            show('READY?');
+            // The boss stays down through the whole countdown (covers the
+            // 3-2-1 window even when the intro was short).
+            try {
+                if (m) m.dormantUntil = Math.max(m.dormantUntil || 0, (state.time || 0) + 5.5);
+            } catch (e) {}
+            show(T('fight_ready'));
             try { audio.playUIClick(); } catch (e) {}
-            setTimeout(() => {
-                try {
-                    const B = CONFIG.WORLD;
-                    p.inCave = false;
-                    p.returnPos = null;
-                    p.x = Utils.clamp(m.x - 220, B.MIN_X + 40, state.waterBoundaryX - 40);
-                    p.y = Utils.clamp(m.y + 60, B.MIN_Y + 40, B.MAX_Y - 40);
-                    p.vx = 0; p.vy = 0;
-                    if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
-                } catch (e) {}
-            }, 350);
-            const steps = ['3', '2', '1', 'FIGHT!'];
+            const steps = ['3', '2', '1', T('fight_go')];
             steps.forEach((s, i) => {
                 setTimeout(() => {
-                    show(s, s === 'FIGHT!' ? 'fight-ready-go' : '');
+                    show(s, s === T('fight_go') ? 'fight-ready-go' : '');
                     try {
-                        if (s === 'FIGHT!') audio.playRoar();
+                        if (s === T('fight_go')) audio.playRoar();
                         else audio.playUIClick();
                     } catch (e) {}
-                    if (s === 'FIGHT!') {
+                    if (s === T('fight_go')) {
                         setTimeout(hide, 650);
-                        UI.updateStatusBanner('FIGHT!', 'Boss', 'rose');
+                        UI.updateStatusBanner(T('fight_go'), 'Boss', 'rose');
                     }
                 }, 1300 + i * 800);
             });
@@ -902,15 +1284,27 @@ const Ritual = {
         return !!(modal && !modal.classList.contains('hidden'));
     },
 
-    // Shared stash panel (ritual modal + bait tab): live bucket counts
+    // Shared stash panel (ritual modal + bait tab): live bucket counts.
+    // Shows sell price + locked keepers (locked items can't be spent).
     stashLine(state) {
-        const chip = (color, icon, name, n) =>
-            `<span class="px-2 py-1 rounded-lg text-[10px] font-black border" style="color:${color};border-color:${color}55;background:${color}14">${icon} ${name} ×${n}</span>`;
-        const keys = Object.keys(BOSS_KEYS).map(k =>
-            chip(BOSS_KEYS[k].color, BOSS_KEYS[k].icon, BOSS_KEYS[k].name, this.countItem(state, k))).join('');
+        const chip = (color, icon, name, n, price, locked) => {
+            const lockTxt = locked > 0 ? ` <span style="opacity:0.75">🔒${locked}</span>` : '';
+            const priceTxt = price > 0 ? ` · ${price}c` : '';
+            return `<span class="px-2 py-1 rounded-lg text-[10px] font-black border" style="color:${color};border-color:${color}55;background:${color}14">${icon} ${name} ×${n}${lockTxt}${priceTxt}</span>`;
+        };
+        const keyChip = (k) => {
+            const total = this.countItemAll(state, k);
+            const unlocked = this.countItem(state, k);
+            return chip(BOSS_KEYS[k].color, BOSS_KEYS[k].icon, BOSS_KEYS[k].name, total, this.keyValue(k), total - unlocked);
+        };
         const troIcons = { chalice: '🏆', fang: '🦷', eye: '👁️' };
-        const tros = Object.keys(TROPHIES).map(k =>
-            chip(TROPHIES[k].color, troIcons[k] || '🏆', TROPHIES[k].name, this.countItem(state, k))).join('');
+        const troChip = (k) => {
+            const total = this.countItemAll(state, k);
+            const unlocked = this.countItem(state, k);
+            return chip(TROPHIES[k].color, troIcons[k] || '🏆', TROPHIES[k].name, total, this.keyValue(k), total - unlocked);
+        };
+        const keys = Object.keys(BOSS_KEYS).map(keyChip).join('');
+        const tros = Object.keys(TROPHIES).map(troChip).join('');
         return `<div class="flex gap-1.5 justify-center flex-wrap">${keys}</div>
             <div class="flex gap-1.5 justify-center flex-wrap mt-1.5">${tros}</div>`;
     },
@@ -1095,7 +1489,7 @@ const Ritual = {
         // the chamber (drawCaveInterior) is the whole world — drawing the
         // beach hole here would double-draw far off-screen.
         if (!inCave) {
-        // --- VOID PORTAL: swirling abyss in the NW corner sand.
+        // --- VOID PORTAL: swirling abyss in the SW corner sand.
         // Sealed = cracked rock + faint void seep; open = full vortex.
         this.drawVoidPortal(ctx, h.x, h.y, t, unlocked, nearHole);
         // Cave sign + seal state

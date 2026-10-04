@@ -1,11 +1,13 @@
 {
   "name": "aquatic-havoc",
-  "version": "1.2.5",
+  "version": "1.3.3",
   "description": "Aquatic Havoc — Deep Sea Hunter with Online P2P Multiplayer",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start:protected": "PROTECTED=1 node server.js",
     "dev": "node server.js",
+    "build:protect": "node scripts/build-protect.mjs",
     "build:itch": "node scripts/build-itch.mjs",
     "check": "node scripts/check-load-order.mjs"
   },

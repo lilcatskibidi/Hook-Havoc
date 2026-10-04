@@ -1,7 +1,7 @@
 // ============================================================
 //  GAMEPAD — Xbox + PlayStation (standard mapping covers both).
 //  Left stick move · right stick aim · RT shoot · A cast/reel ·
-//  B interact · X reload · Y index · LB/RB cycle weapons ·
+//  B interact (else item) · X reload · Y index · R3 dash · LB/RB cycle
 //  D-pad slots 1-4 · Start menu. Rumble on hurt + boss arrival.
 //  Polled once per frame from the main loop; fully guarded when no
 //  pad is connected (zero cost, zero throws).
@@ -86,9 +86,12 @@ const GamepadControls = {
     },
 
     // Project a world point back to screen pixels (for the crosshair).
-    // Backing-pixel space, matching Camera.screenToWorld.
+    // Backing-pixel space, matching Camera.screenToWorld (exact inverse).
     worldToScreen(state, wx, wy) {
         try {
+            if (typeof Camera !== 'undefined' && Camera.worldToScreen) {
+                return Camera.worldToScreen(state, wx, wy);
+            }
             const bw = state.canvasWidth || 1;
             const bh = state.canvasHeight || 1;
             const cam = state.camera;
@@ -195,12 +198,30 @@ const GamepadControls = {
         state.mouse.isDown = shooting;
         if (edge(7) && typeof WeaponSystem !== 'undefined') this.pressShoot(state, true);
 
-        // --- A (0): cast / reel (SPACE) ---
-        if (edge(0) && typeof Fishing !== 'undefined') Fishing.onSpaceDown(state);
-        if (release(0) && typeof Fishing !== 'undefined') Fishing.onSpaceUp(state);
+        // --- A (0): cast / reel (SPACE). Mirror the virtual SPACE key
+        // like the touch CAST button — reeling reads state.keys[' '].
+        if (edge(0)) {
+            try { state.keys[' '] = true; this._padKeys[' '] = true; } catch (e) {}
+            if (typeof Fishing !== 'undefined') Fishing.onSpaceDown(state);
+        }
+        if (release(0)) {
+            if (typeof Fishing !== 'undefined') Fishing.onSpaceUp(state);
+            try { state.keys[' '] = false; this._padKeys[' '] = false; } catch (e) {}
+        }
 
-        // --- B (1): interact ---
-        if (edge(1) && typeof Input !== 'undefined') Input.interact(state);
+        // --- B (1): interact, else equipped item ---
+        if (edge(1) && typeof Input !== 'undefined') {
+            let acted = false;
+            try { acted = !!Input.interact(state); } catch (e) {}
+            if (!acted) {
+                try { if (typeof ItemSystem !== 'undefined') ItemSystem.useEquipped(state); } catch (e) {}
+            }
+        }
+
+        // --- R3 (11): dash ---
+        if (edge(11) && typeof Player !== 'undefined') {
+            try { Player.tryDash(state); } catch (e) {}
+        }
 
         // --- X (2): reload ---
         if (edge(2) && typeof WeaponSystem !== 'undefined') WeaponSystem.reload(state);

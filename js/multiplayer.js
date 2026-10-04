@@ -47,7 +47,8 @@ const Multiplayer = {
 
     // code: 'join-reject' | 'version-mismatch' | 'room-full' |
     //   'name-taken' | 'peer-unavailable' | 'p2p-blocked' | 'cloud-error' |
-    //   'host-left' | 'member-left' | 'no-snapshot' | 'bad-pid' | 'send-fail' |
+    //   'diag' | 'skin' | 'host-left' |
+    //   'member-left' | 'no-snapshot' | 'bad-pid' | 'send-fail' |
     //   'skin-fail' | 'sync-ok' | 'sync-restored' | 'info'
     mpLog(code, msg) {
         try {
@@ -102,8 +103,11 @@ const Multiplayer = {
         } catch (e) { return null; }
     },
 
-    // Roster for lobby + HUD: [{id, name, isYou, isHost}]. Host builds it
-    // from members; clients replay the last roster broadcast.
+    // Roster for lobby + TAB list: [{id, name, isYou, isHost, transport,
+    // pingMs}]. Host builds it from TRANSPORT members (always present when
+    // connected) merged with game data — a peer that hasn't sent input
+    // yet (menu/paused/loading) still shows up. Clients replay the last
+    // roster broadcast.
     getRoster() {
         try {
             const out = [];
@@ -111,29 +115,86 @@ const Multiplayer = {
             if (this.isHost || !this.roomCode) {
                 let myName = 'Host';
                 try { myName = this.playerName() || 'Host'; } catch (e) {}
-                out.push({ id: me, name: myName, isYou: true, isHost: true });
-                const order = Array.isArray(this.hostPeerOrder) ? this.hostPeerOrder : Object.keys(this.hostPeers || {});
-                for (const pid of order) {
-                    let nm = 'Player-' + String(pid == null ? '?' : pid).slice(-4);
+                out.push({ id: me, name: myName, isYou: true, isHost: true, transport: null, pingMs: null, skin: { color: this.playerSkin() } });
+                const seen = new Set([me]);
+                const members = (typeof PeerLink !== 'undefined' && Array.isArray(PeerLink.members)) ? PeerLink.members : [];
+                const gameOf = (tid) => {
+                    try { return (PeerLink.peerToPid && PeerLink.peerToPid[tid]) || null; } catch (e) { return null; }
+                };
+                const pushRow = (tid) => {
+                    if (!tid || seen.has(tid)) return;
+                    seen.add(tid);
+                    const gpid = gameOf(tid);
+                    if (gpid) seen.add(gpid);
+                    let nm = 'Player-' + String(tid).slice(-4);
                     try {
-                        if (typeof PeerLink !== 'undefined' && PeerLink.memberNames && PeerLink.memberNames[pid]) {
-                            nm = PeerLink.memberNames[pid];
+                        if (typeof PeerLink !== 'undefined' && PeerLink.memberNames && PeerLink.memberNames[tid]) {
+                            nm = PeerLink.memberNames[tid];
                         }
                     } catch (e) {}
+                    const rp = (gpid && (this.hostPeers || {})[gpid]) || (this.hostPeers || {})[tid] || null;
+                    if (rp && rp.playerName) nm = rp.playerName;
+                    let ping = null;
+                    try {
+                        if (this._peerRtt && typeof this._peerRtt[tid] === 'number') ping = this._peerRtt[tid];
+                    } catch (e) {}
+                    out.push({ id: gpid || tid, name: nm, isYou: false, isHost: false, transport: tid, pingMs: ping, skin: (rp && rp.skin) || null });
+                };
+                // 1) every connected transport member (never invisible), 2)
+                // any game-data peers not linked yet (defensive).
+                for (const tid of members) pushRow(tid);
+                const order = Array.isArray(this.hostPeerOrder) ? this.hostPeerOrder : Object.keys(this.hostPeers || {});
+                for (const pid of order) {
+                    if (seen.has(pid)) continue;
+                    let nm = 'Player-' + String(pid == null ? '?' : pid).slice(-4);
                     const rp = (this.hostPeers || {})[pid];
                     if (rp && rp.playerName) nm = rp.playerName;
-                    out.push({ id: pid, name: nm, isYou: false, isHost: false });
+                    out.push({ id: pid, name: nm, isYou: false, isHost: false, transport: null, pingMs: null });
                 }
             } else {
                 const roster = Array.isArray(this._roomRoster) ? this._roomRoster : [];
-                out.push({ id: 'host', name: this._hostName || 'Host', isYou: false, isHost: true });
+                out.push({ id: 'host', name: this._hostName || 'Host', isYou: false, isHost: true, transport: null, pingMs: (typeof this._rttMs === 'number' ? this._rttMs : null), skin: this._hostSkin || null });
                 for (const m of roster) {
                     if (!m || !m.id) continue;
-                    out.push({ id: m.id, name: m.name || ('Player-' + String(m.id).slice(-4)), isYou: m.id === me, isHost: false });
+                    out.push({ id: m.id, name: m.name || ('Player-' + String(m.id).slice(-4)), isYou: m.id === me, isHost: false, transport: null, pingMs: null, skin: m.skin || null });
                 }
             }
             return out;
         } catch (e) { return []; }
+    },
+
+    // Claim tombstones: ids this client already consumed (picked loot,
+    // despawned a kill). Host snapshots in flight still list them under
+    // lag — without this the same loot/enemy comes back and pays TWICE.
+    // Entries expire after 15s (ids recycle across sessions).
+    _claimedIds: null,
+
+    noteClaimed(id) {
+        try {
+            if (!id) return;
+            if (!this._claimedIds) this._claimedIds = {};
+            this._claimedIds[id] = Date.now();
+        } catch (e) {}
+    },
+
+    isClaimed(id) {
+        try {
+            if (!id || !this._claimedIds) return false;
+            const t = this._claimedIds[id];
+            if (!t) return false;
+            if (Date.now() - t > 15000) { delete this._claimedIds[id]; return false; }
+            return true;
+        } catch (e) { return false; }
+    },
+
+    _pruneClaimed() {
+        try {
+            if (!this._claimedIds) return;
+            const now = Date.now();
+            for (const k of Object.keys(this._claimedIds)) {
+                if (now - this._claimedIds[k] > 15000) delete this._claimedIds[k];
+            }
+        } catch (e) {}
     },
 
     // Room-wide boss lock: a boss ANYWHERE (host sim or a peer's hooked
@@ -195,9 +256,7 @@ const Multiplayer = {
 
     // Client outbox (bullets fired since last input send)
     _outboxBullets: null,
-    _awardSeq: 0,
-    _pendingAwards: null, // host: pid -> { aid, coins, xp }
-    _appliedAwards: null, // client: aid -> true
+    _enemySeq: 0,
     _fxOutbox: null,
     _suppressFxEmit: false,
     _ownBulletIds: null,
@@ -215,6 +274,25 @@ const Multiplayer = {
     // name is remembered and shown to the room every session.
     PID_KEY: 'ah_mp_pid',
     NAME_KEY: 'ah_mp_name',
+    // Diver color skin: per-player body color, picked in the lobby, synced
+    // to the room on every snapshot so each diver looks different.
+    SKIN_KEY: 'ah_mp_skin',
+    DIVER_COLORS: [
+        { id: 'aqua',   name: 'Aqua',   body: '#38bdf8', edge: '#0369a1' },
+        { id: 'coral',  name: 'Coral',  body: '#fb7185', edge: '#9f1239' },
+        { id: 'lime',   name: 'Kelp',   body: '#a3e635', edge: '#3f6212' },
+        { id: 'gold',   name: 'Gold',   body: '#fbbf24', edge: '#92400e' },
+        { id: 'violet', name: 'Violet', body: '#c084fc', edge: '#6b21a8' },
+        { id: 'ghost',  name: 'Ghost',  body: '#e2e8f0', edge: '#475569' },
+        { id: 'onyx',   name: 'Onyx',   body: '#334155', edge: '#020617' },
+        { id: 'snow',   name: 'Snow',   body: '#f8fafc', edge: '#94a3b8' },
+        { id: 'crimson', name: 'Crimson', body: '#ef4444', edge: '#7f1d1d' },
+        { id: 'abyss',  name: 'Abyss',  body: '#2563eb', edge: '#172554' },
+        { id: 'ember',  name: 'Ember',  body: '#fb923c', edge: '#7c2d12' },
+        { id: 'mint',   name: 'Mint',   body: '#2dd4bf', edge: '#134e4a' },
+        { id: 'blossom', name: 'Blossom', body: '#f9a8d4', edge: '#831843' },
+        { id: 'cocoa',  name: 'Cocoa',  body: '#b45309', edge: '#451a03' },
+    ],
     // Per-TAB override (sessionStorage): two tabs on one origin (same
     // localhost, two windows) share localStorage, so without this the
     // 2nd tab's typing would OVERWRITE the host tab's name and every
@@ -266,6 +344,68 @@ const Multiplayer = {
         } catch (e) { return ''; }
     },
 
+    // Diver color skin (per-player body color). Remembered per browser,
+    // changeable in the lobby, synced to the room on every snapshot.
+    playerSkin() {
+        try {
+            const id = localStorage.getItem(this.SKIN_KEY);
+            if (id && this.DIVER_COLORS.some(c => c.id === id)) return id;
+        } catch (e) {}
+        return 'aqua';
+    },
+
+    setSkin(id) {
+        try {
+            if (!this.DIVER_COLORS.some(c => c.id === id)) return this.playerSkin();
+            try { localStorage.setItem(this.SKIN_KEY, id); } catch (e) {}
+            // Stamp the live player too so the next snapshot carries it.
+            try { if (this.state && this.state.player) this.state.player.skinColor = id; } catch (e) {}
+            // Live propagation (no rejoin needed): in-game snapshots carry
+            // it automatically, but the LOBBY roster needs an explicit push.
+            try {
+                if (this.roomCode) {
+                    if (this.isHost) {
+                        if (typeof PeerLink !== 'undefined') PeerLink._broadcastLobby();
+                    } else {
+                        if (typeof PeerLink !== 'undefined') PeerLink.sendToHost({ type: 'skin-update', skin: { color: id } });
+                    }
+                }
+            } catch (e) {}
+            return id;
+        } catch (e) { return 'aqua'; }
+    },
+
+    skinColor(id) {
+        try {
+            const c = this.DIVER_COLORS.find(c => c.id === id);
+            if (c) return c;
+        } catch (e) {}
+        return this.DIVER_COLORS[0];
+    },
+
+    // Instant loadout push: gun-skin prefs, active slot and diver color
+    // ride a tiny reliable message instead of waiting for the next 12Hz
+    // snapshot — under lag, snapshots stall but this still lands. The host
+    // fans it out so B and C see A's change immediately (see
+    // 'skin-update': receive + store, no re-request).
+    pushSkinPrefs() {
+        try {
+            if (!this.roomCode || !this.state || !this.state.player) return;
+            const p = this.state.player;
+            const me = this.localClientId || (this.localPid && this.localPid()) || null;
+            if (!me) return;
+            const msg = {
+                type: 'skin-update',
+                pid: me,
+                skin: { color: (typeof this.playerSkin === 'function') ? this.playerSkin() : 'aqua' },
+                guns: (p.gunSkins && typeof p.gunSkins === 'object') ? { ...p.gunSkins } : {},
+                slot: Math.max(0, Math.min(3, p.activeSlot | 0)),
+            };
+            if (this.isHost) { try { if (typeof PeerLink !== 'undefined') PeerLink.broadcast(msg); } catch (e) {} }
+            else { try { if (typeof PeerLink !== 'undefined') PeerLink.sendToHost(msg); } catch (e) {} }
+        } catch (e) {}
+    },
+
     // ---- MP profile: separate slots + saves, never SP files ----
     // Entering a room snapshots the SP slot, switches to the MP namespace
     // (own slots 1-3) and loads-or-freshens it. Leaving restores SP.
@@ -292,6 +432,8 @@ const Multiplayer = {
                 try { this.mpLog('info', `character restored for server ${this.shortId(this.hostPid)}`); } catch (e) {}
             }
             this.refreshMPHud();
+            // Stamp this tab's diver color so snapshots carry it.
+            try { if (this.state && this.state.player) this.state.player.skinColor = this.playerSkin(); } catch (e) {}
             return true;
         } catch (e) { return false; }
     },
@@ -312,7 +454,15 @@ const Multiplayer = {
                 : (this.state.saveSlot || SaveSystem.getSlot());
             this.state._spSlotBackup = null;
             this.state.mpSaveSlot = null;
-            SaveSystem.load(this.state, backup);
+            // If the backup slot has no save (brand-new player who went
+            // straight to MP), start a clean SP run instead of leaving
+            // the MP character in place — otherwise the next SP save
+            // would persist MP state into an SP slot (contamination that
+            // reads exactly like "my save got wiped/replaced").
+            if (!SaveSystem.load(this.state, backup)) {
+                SaveSystem.freshPlayer(this.state);
+                SaveSystem.save(this.state, backup);
+            }
             this.refreshMPHud();
             return true;
         } catch (e) { return false; }
@@ -499,6 +649,14 @@ const Multiplayer = {
             try {
                 if (this.isHost && this.isConnected) this.sendStateTo(peerId);
             } catch (e) {}
+            // Late-join: the game is already running — send this newcomer
+            // a direct gameStart so they enter the running game instead of
+            // waiting in the lobby for a Start that already happened.
+            try {
+                if (this.isHost && this.isConnected && this._gameStarted && typeof PeerLink !== 'undefined') {
+                    PeerLink.sendTo(peerId, { type: 'gameStart' });
+                }
+            } catch (e) {}
         };
         PeerLink.onMemberLeave = (peerId) => {
             try { this.mpLog('member-left', `${this.shortId(peerId)} left`); } catch (e) {}
@@ -513,8 +671,12 @@ const Multiplayer = {
             this.onPlayerLeft(peerId);
         };
         PeerLink.onHostLeft = () => {
-            this.updateStatus('Host left the game');
-            try { this.mpLog('host-left', 'host connection closed'); } catch (e) {}
+            try {
+                if (this._wasKicked) this.mpLog('info', 'kicked by host — back to menu');
+            } catch (e) {}
+            this.updateStatus(this._wasKicked ? 'Kicked by host' : 'Host left the game');
+            try { this.mpLog(this._wasKicked ? 'info' : 'host-left', this._wasKicked ? 'kicked by host' : 'host connection closed'); } catch (e) {}
+            this._wasKicked = false;
             this.cleanup();
             try { if (this.onHostLeftCb) this.onHostLeftCb(); } catch (e) {}
         };
@@ -579,6 +741,7 @@ const Multiplayer = {
             if (welcome) {
                 if (Array.isArray(welcome.roster)) this._roomRoster = welcome.roster;
                 if (welcome.hostName) this._hostName = welcome.hostName;
+                if (welcome.hostSkin) this._hostSkin = welcome.hostSkin;
                 // Server identity for per-host character scoping: a
                 // DIFFERENT host's room loads a DIFFERENT character file,
                 // never the previous server's inventory.
@@ -610,6 +773,7 @@ const Multiplayer = {
 
     // Sync counters: prove the host->client direction is alive.
     // Host: sent snapshots. Client: received snapshots + age of the last.
+    // _binSent/_jsonSent prove the binary locomotion fast path is live.
     mpStats() {
         try {
             const last = this._lastSyncAt || 0;
@@ -617,6 +781,9 @@ const Multiplayer = {
                 sent: this._sentStates || 0,
                 recv: this._recvStates || 0,
                 lastSyncAgo: last ? Math.round((Date.now() - last) / 1000) : -1,
+                rttMs: this.isHost ? null : (this._rttMs || null),
+                binIn: this._binSent || 0,
+                jsonIn: this._jsonSent || 0,
             };
         } catch (e) { return { sent: 0, recv: 0, lastSyncAgo: -1 }; }
     },
@@ -638,6 +805,31 @@ const Multiplayer = {
     // never enter the game.
     handlePeerMessage(msg, fromId) {
         if (!msg) return;
+        // Binary fast lane (NetCodec 14-byte input ticks): PeerJS may
+        // deliver ArrayBuffer | Uint8Array | Blob depending on browser.
+        // Blob needs an async hop; everything else decodes inline.
+        try {
+            if (typeof NetCodec !== 'undefined' && NetCodec.isBinary(msg)) {
+                if (typeof Blob !== 'undefined' && msg instanceof Blob) {
+                    try {
+                        msg.arrayBuffer().then((ab) => {
+                            try {
+                                const dec = NetCodec.decodeInput(new Uint8Array(ab));
+                                if (dec) this.handlePlayerInput(fromId, dec);
+                            } catch (e) {}
+                        });
+                    } catch (e) {}
+                } else {
+                    const u8 = NetCodec.fromWireSync(msg);
+                    const dec = u8 ? NetCodec.decodeInput(u8) : null;
+                    if (dec) this.handlePlayerInput(fromId, dec);
+                    else {
+                        try { this.mpLog('bad-pid', 'undecodable binary packet dropped'); } catch (e) {}
+                    }
+                }
+                return;
+            }
+        } catch (e) {}
         const kind = (typeof msg.t === 'string') ? msg.t
             : (typeof msg.type === 'string') ? msg.type : null;
         if (!kind) return;
@@ -647,6 +839,7 @@ const Multiplayer = {
                 if (msg.count) this._lobbyCount = msg.count;
                 if (Array.isArray(msg.roster)) this._roomRoster = msg.roster;
                 if (msg.hostName) this._hostName = msg.hostName;
+                if (msg.hostSkin) this._hostSkin = msg.hostSkin;
                 if (!this.isHost) {
                     if ((this._lobbyCount || 1) > was) this.onPlayerJoined();
                     else if ((this._lobbyCount || 1) < was) this.onPlayerLeft();
@@ -673,12 +866,95 @@ const Multiplayer = {
                 // a fresh snapshot — the classic host->client async answer.
                 if (this.isHost) this.sendStateTo(fromId);
                 break;
+            case 'ping': {
+                // RTT probe (fast lane, ephemeral): echo it straight back.
+                try {
+                    const back = { type: 'pong', t0: msg.t0, to: msg.from };
+                    if (this.isHost) {
+                        if (typeof PeerLink !== 'undefined' && PeerLink.sendFastTo) PeerLink.sendFastTo(fromId, back);
+                    } else if (typeof PeerLink !== 'undefined' && PeerLink.sendFastToHost) {
+                        PeerLink.sendFastToHost(back);
+                    }
+                } catch (e) {}
+                break;
+            }
+            case 'pong': {
+                // Authoritative echo of OUR timestamp — same-clock math.
+                try {
+                    const to = this._normPid(msg.to, 'pong');
+                    if (to && this.localClientId && to !== this.localClientId) break;
+                    const rtt = Math.max(0, Date.now() - (msg.t0 || Date.now()));
+                    if (this.isHost) {
+                        if (!this._peerRtt) this._peerRtt = {};
+                        const pid = this._normPid(fromId, 'pong-from') || fromId;
+                        this._peerRtt[pid] = Math.round(this._peerRtt[pid] ? (this._peerRtt[pid] * 0.7 + rtt * 0.3) : rtt);
+                    } else {
+                        this._rttMs = Math.round(this._rttMs ? (this._rttMs * 0.7 + rtt * 0.3) : rtt);
+                    }
+                } catch (e) {}
+                break;
+            }
             case 'gameStart':
                 if (!this.isHost && this.onGameStart) this.onGameStart();
                 break;
             case 'gameStartAck':
                 if (this.isHost && this._startAckResolve) this._startAckResolve();
                 break;
+            case 'skin-update': {
+                // Live loadout change (diver color, gun-skin prefs, active
+                // slot): apply instantly on receipt, don't wait for the
+                // next snapshot. Host stamps it onto the member record AND
+                // fans it out so every other client stores it too —
+                // receive + store, no re-request, no server round-trip.
+                try {
+                    const pid = (msg.pid && String(msg.pid)) || this._normPid(fromId, 'skin-update') || fromId;
+                    if (!pid) break;
+                    let color = null, guns = null, slot = null;
+                    if (msg.skin && typeof msg.skin.color === 'string') color = msg.skin.color.slice(0, 16);
+                    if (msg.guns && typeof msg.guns === 'object') {
+                        guns = {};
+                        for (const k of Object.keys(msg.guns).slice(0, 60)) {
+                            if (msg.guns[k] === 'classic') guns[k] = 'classic';
+                        }
+                    }
+                    if (typeof msg.slot === 'number') slot = Math.max(0, Math.min(3, msg.slot | 0));
+                    if (!color && !guns && slot === null) break;
+                    if (this.isHost) {
+                        let gpid = null;
+                        try { gpid = (typeof PeerLink !== 'undefined' && PeerLink.peerToPid && PeerLink.peerToPid[pid]) || null; } catch (e) {}
+                        const rp = (this.hostPeers && (this.hostPeers[gpid] || this.hostPeers[pid])) || null;
+                        if (rp) {
+                            if (color) rp.skin = { color };
+                            if (guns) rp.gunSkins = guns;
+                            if (slot !== null) rp.activeSlot = slot;
+                        }
+                        try { if (color && typeof PeerLink !== 'undefined' && PeerLink.memberSkins) PeerLink.memberSkins[pid] = { color }; } catch (e) {}
+                        try { if (typeof PeerLink !== 'undefined') PeerLink.relay(msg, fromId); } catch (e) {}
+                        // Roster colors stay fresh — but only on COLOR
+                        // changes, not every weapon switch (lobby spam).
+                        try { if (color && typeof PeerLink !== 'undefined') PeerLink._broadcastLobby(); } catch (e) {}
+                    } else {
+                        const map = this.state && this.state.remotePlayers;
+                        const rp = map && (map[pid] || map[this._normPid(pid, 'skin-pid')]);
+                        if (rp) {
+                            if (color) rp.skin = { color };
+                            if (guns) rp.gunSkins = guns;
+                            if (slot !== null) rp.activeSlot = slot;
+                        }
+                    }
+                } catch (e) {}
+                break;
+            }
+            case 'kicked': {
+                // Host removed us: say why (not "host left"), then run the
+                // normal host-left teardown when the channel closes.
+                try {
+                    this._wasKicked = true;
+                    this.mpLog('info', 'kicked by host');
+                    this.updateStatus('Kicked by host');
+                } catch (e) {}
+                break;
+            }
             case 'announce':
                 // Same text/colors for everyone: relay, then show locally.
                 if (this.isHost) PeerLink.relay(msg, fromId);
@@ -730,11 +1006,27 @@ const Multiplayer = {
         if (!gameState) return;
         gameState = this._wireSafe(gameState);
         if (!gameState) return;
-        // One reliable PeerJS broadcast reaches every member (star topology).
+        // Ephemeral snapshots ride the fast lane (unordered + unreliable):
+        // a dropped frame is obsolete 80ms later, while the reliable
+        // channel would stall EVERYTHING behind a retransmit.
         let reached = 0;
         try {
-            if (typeof PeerLink !== 'undefined') reached = PeerLink.broadcast({ type: 'gameState', state: gameState }) || 0;
+            if (typeof PeerLink !== 'undefined' && PeerLink.broadcastFast) {
+                reached = PeerLink.broadcastFast({ type: 'gameState', state: gameState }) || 0;
+            }
         } catch (e) { reached = 0; }
+        // Members with no fast lane yet (mid-handshake) still get this
+        // snapshot over the reliable channel — nobody ever starves.
+        // Same-timestamp duplicates are dropped by the client's ts gate.
+        // NOTE: keyed by transport id (PeerLink.conns), not game pid.
+        try {
+            if (typeof PeerLink !== 'undefined' && PeerLink.sendTo) {
+                for (const tid of Object.keys(PeerLink.conns || {})) {
+                    const hasFast = PeerLink.fastReady ? PeerLink.fastReady(tid) : false;
+                    if (!hasFast && PeerLink.sendTo(tid, { type: 'gameState', state: gameState })) reached++;
+                }
+            }
+        } catch (e) {}
         if (!reached) {
             // Audible instead of silent: broadcast hitting 0 members means
             // every host->client send is failing (conns closed/not open).
@@ -818,8 +1110,15 @@ const Multiplayer = {
         } catch (e) {}
         let ok = false;
         try {
-            if (typeof PeerLink !== 'undefined') ok = !!PeerLink.sendTo(peerId, { type: 'gameState', state: gameState });
+            if (typeof PeerLink !== 'undefined' && PeerLink.sendFastTo) {
+                ok = !!PeerLink.sendFastTo(peerId, { type: 'gameState', state: gameState });
+            }
         } catch (e) { ok = false; }
+        if (!ok) {
+            try {
+                if (typeof PeerLink !== 'undefined') ok = !!PeerLink.sendTo(peerId, { type: 'gameState', state: gameState });
+            } catch (e) { ok = false; }
+        }
         if (!ok) {
             // Real reason, not a guess: PeerLink records the throw text.
             try {
@@ -894,18 +1193,12 @@ const Multiplayer = {
         for (const [pid, rp] of Object.entries(this.hostPeers || {})) {
             if (rp && typeof rp.x === 'number') players.push(this._packPlayer(rp, pid, rp.label || 'Player ?'));
         }
-        // Pending kill-credit awards for clients (cleared on ack)
-        const awards = {};
-        for (const [pid, a] of Object.entries(this._pendingAwards || {})) {
-            if (a && (a.coins > 0 || a.xp > 0)) awards[pid] = a;
-        }
-
-        // Only send essential state for synchronization (quantized).
         // NOTE: wallets/inventories are PERSONAL — each player owns their
-        // own file. Only the shared world (below) is broadcast.
+        // own file, and every sim pays its own killer locally (no shared
+        // award queue — it re-paid merged totals). Only the shared world
+        // (below) is broadcast.
         const gameState = {
             players,
-            awards,
             // Host player state (authoritative)
             player: {
                 x: RI(p.x),
@@ -923,6 +1216,8 @@ const Multiplayer = {
                 xp: p.xp,
                 equippedWeapons: p.equippedWeapons,
                 weaponAmmo: p.weaponAmmo,
+                gunSkins: p.gunSkins || {},
+                skin: (p.skinColor ? { color: p.skinColor } : null),
                 equippedRod: p.equippedRod ? { id: p.equippedRod.id, tensionMax: p.equippedRod.tensionMax, reelPower: p.equippedRod.reelPower, luck: p.equippedRod.luck } : null,
                 stunTimer: p.stunTimer,
                 slowTimer: p.slowTimer,
@@ -1023,12 +1318,27 @@ const Multiplayer = {
                 leaveHazard: b.leaveHazard,
                 hazardType: b.hazardType
             })),
+            // Sonic roar VFX (visual-only booms, merged by id on receipt).
+            sonicFx: (this.state.sonicBooms || []).slice(-8).map(b => ({
+                id: b.id,
+                x: RI(b.x),
+                y: RI(b.y),
+                age: R1((this.state.time || 0) - (b.t0 || 0)),
+                color: b.color,
+                maxR: RI(b.maxR || 220),
+                rings: b.rings || 3,
+                dur: b.dur || 0.8,
+                lines: b.lines || 14,
+            })),
             // Open-world enemies (host spawns; clients render + touch, host kills).
             // Jumping fish carry their instance overlays (see _instanceSpecies).
             enemies: (this.state.enemies || []).slice(0, 24).map(e => ({
+                // Stable per-spawn id so clients can tombstone their local
+                // despawns (lagged snapshots must not resurrect kills).
+                id: e._mpid || (e._mpid = 'e' + (++this._enemySeq).toString(36) + Date.now().toString(36).slice(-4)),
                 enemyType: e.enemyType,
                 speciesId: e.species ? e.species.id : null,
-                inst: (e.enemyType === 'jumpingFish' && e.species) ? {
+                inst: ((e.enemyType === 'jumpingFish' || e.enemyType === 'hydraSoldier') && e.species) ? {
                     id: e.species.id, name: e.species.name, color: e.species.color,
                     size: e.species.size, shiny: !!e.species.shiny,
                     pattern: e.species.pattern || null, mutation: e.species.mutation || null
@@ -1070,7 +1380,17 @@ const Multiplayer = {
                 spiralRadius: b.spiralRadius || 0,
                 catcherOnly: !!b.catcherOnly
             })),
-            waterBoundaryX: this.state.waterBoundaryX,
+            waterBoundaryX: (function () {
+                // Authoritative shoreline: fixed world X. Sent for compat /
+                // debugging — receivers MUST NOT adopt it blindly (old
+                // builds sent a viewport-derived value that desyncs water
+                // vs sand across aspect ratios; see applyRemoteState).
+                try {
+                    if (typeof CONFIG !== 'undefined' && typeof CONFIG.WATER_BOUNDARY_X === 'number') return CONFIG.WATER_BOUNDARY_X;
+                    if (typeof window !== 'undefined' && typeof window.__fixedWaterBoundaryX === 'function') return window.__fixedWaterBoundaryX();
+                } catch (e) {}
+                return 830;
+            })(),
             time: R1(this.state.time),
             // Shared sky: hour/day/weather ride along so every peer fishes
             // the same conditions (personal Settings visuals stay local).
@@ -1123,6 +1443,68 @@ const Multiplayer = {
             if (typeof PeerLink !== 'undefined') PeerLink.sendToHost({ type: 'syncRequest' });
         } catch (e) {}
     },
+
+    // Rescan the room: client re-asks for a fresh snapshot (+ reopens
+    // the fast lane if it dropped); host rebroadcasts lobby + unicasts a
+    // snapshot to every member. Bound to the TAB list rescan button.
+    rescan() {
+        try {
+            if (!this.roomCode) return false;
+            if (this.isHost) {
+                try { if (typeof PeerLink !== 'undefined' && PeerLink._broadcastLobby) PeerLink._broadcastLobby(); } catch (e) {}
+                try {
+                    if (typeof PeerLink !== 'undefined' && PeerLink.members) {
+                        for (const tid of PeerLink.members) {
+                            try { this.sendStateTo(tid); } catch (e) {}
+                        }
+                    }
+                } catch (e) {}
+                try { if (typeof MultiplayerUI !== 'undefined' && MultiplayerUI.refreshRoster) MultiplayerUI.refreshRoster(); } catch (e) {}
+                this.mpLog('info', 'rescan: lobby + snapshots re-pushed');
+            } else {
+                try { if (typeof PeerLink !== 'undefined' && PeerLink._openFast) PeerLink._openFast(); } catch (e) {}
+                this.sendSyncRequest();
+                this.mpLog('info', 'rescan: fresh snapshot requested');
+            }
+            return true;
+        } catch (e) { return false; }
+    },
+
+    // Host kick by roster row id (game pid or transport id).
+    kickPlayer(rowId) {
+        try {
+            if (!this.isHost || !this.roomCode) return false;
+            let tid = (rowId && typeof PeerLink !== 'undefined' && PeerLink.conns && PeerLink.conns[rowId]) ? rowId : null;
+            if (!tid && typeof PeerLink !== 'undefined' && PeerLink.pidToPeer) {
+                tid = PeerLink.pidToPeer[rowId] || null;
+            }
+            if (!tid) {
+                this.mpLog('send-fail', `kick: no live connection for ${this.shortId(rowId)}`);
+                return false;
+            }
+            if (tid === this.localClientId) return false; // never self-kick
+            let nm = this.shortId(tid);
+            try {
+                const gpid = (PeerLink.peerToPid && PeerLink.peerToPid[tid]) || null;
+                const rp = (gpid && (this.hostPeers || {})[gpid]) || null;
+                if (rp && rp.playerName) nm = rp.playerName;
+                else if (PeerLink.memberNames && PeerLink.memberNames[tid]) nm = PeerLink.memberNames[tid];
+            } catch (e) {}
+            if (typeof PeerLink !== 'undefined' && PeerLink.closePeer) PeerLink.closePeer(tid);
+            // Drop their game data now (the close event also cleans up).
+            try {
+                const gpid = (typeof PeerLink !== 'undefined' && PeerLink.peerToPid && PeerLink.peerToPid[tid]) || null;
+                if (gpid && this.hostPeers) delete this.hostPeers[gpid];
+                if (Array.isArray(this.hostPeerOrder)) this.hostPeerOrder = this.hostPeerOrder.filter(id => id !== gpid && id !== tid);
+                if (this.state && this.state.remotePlayers) {
+                    delete this.state.remotePlayers[gpid];
+                    delete this.state.remotePlayers[tid];
+                }
+            } catch (e) {}
+            this.mpLog('info', `kicked ${nm}`);
+            return true;
+        } catch (e) { return false; }
+    },
     
     // Handle incoming game state (client receives from host)
     handleGameState(remoteState) {
@@ -1153,6 +1535,17 @@ const Multiplayer = {
     applyRemoteState(remoteState) {
         // Lobby roster: everyone the host knows about, minus self
         if (!this.state.remotePlayers) this.state.remotePlayers = {};
+        // AUTHORITATIVE shoreline guard: the surf line is a fixed world
+        // constant. Old hosts sent a viewport-derived value — never adopt
+        // it, or water-vs-sand disagrees per screen again.
+        try {
+            let fixed = 830;
+            try {
+                if (typeof CONFIG !== 'undefined' && typeof CONFIG.WATER_BOUNDARY_X === 'number') fixed = CONFIG.WATER_BOUNDARY_X;
+                else if (typeof window !== 'undefined' && typeof window.__fixedWaterBoundaryX === 'function') fixed = window.__fixedWaterBoundaryX();
+            } catch (e) {}
+            if (this.state) this.state.waterBoundaryX = fixed;
+        } catch (e) {}
         if (Array.isArray(remoteState.players)) {
             const seen = {};
             for (const pl of remoteState.players) {
@@ -1185,7 +1578,8 @@ const Multiplayer = {
         }
         
         // For non-host, we don't override local player but we sync world state.
-        // Progression stays PERSONAL — only kill-credit awards apply here.
+        // Progression stays PERSONAL — every sim pays its own killer
+        // locally (no shared awards).
         if (!this.isHost) {
             // Shared sky: adopt the host's clock so weather/time (and the
             // fish conditions driven by them) match everywhere. Personal
@@ -1218,30 +1612,6 @@ const Multiplayer = {
                         }
                     }
                 } catch (e) {}
-            }
-
-            // Kill-credit awards from the host (acked, applied once)
-            if (remoteState.awards && remoteState.awards[this.localClientId]) {
-                const a = remoteState.awards[this.localClientId];
-                if (!this._appliedAwards) this._appliedAwards = {};
-                if (a && a.aid && !this._appliedAwards[a.aid]) {
-                    this._appliedAwards[a.aid] = true;
-                    this._awardAckPending = a.aid;
-                    const p = this.state.player;
-                    if (a.coins) {
-                        p.coins += a.coins;
-                        if (typeof Particles !== 'undefined') Particles.showFloatingText(this.state, `+${a.coins}c bounty!`, p.x, p.y - 50, '#facc15');
-                    }
-                    if (a.xp && typeof Player !== 'undefined') {
-                        try { Player.addXP(this.state, a.xp); } catch (e) {}
-                    }
-                    if (typeof Player !== 'undefined') {
-                        try { Player.refreshHUD(this.state); } catch (e) {}
-                    }
-                    if (typeof AntiCheat !== 'undefined') {
-                        try { AntiCheat.markLegit(); } catch (e) {}
-                    }
-                }
             }
 
             // Portal seal: adopt the room's unlock (never revoke mine).
@@ -1303,6 +1673,11 @@ const Multiplayer = {
                 this.syncDelayedBlasts(remoteState.delayedBlasts);
             }
 
+            // Sync sonic roar VFX (merged by id — never duplicated)
+            if (sameMap && remoteState.sonicFx) {
+                this.syncSonicFx(remoteState.sonicFx);
+            }
+
             // NOTE: never copy the host's own fishing rig into the client's
             // local fishing sim. The host rig is rendered via the players
             // roster above — copying it here overwrote the client's own
@@ -1343,14 +1718,88 @@ const Multiplayer = {
         }
     },
     
+    // Snapshot merge for client smoothing: resume rendering from the last
+    // smoothed position and retarget to the fresh snapshot (update()
+    // lerps there every frame). New or teleported bodies snap. The map is
+    // rebuilt per sync so vanished bodies never leak.
+    //
+    // FAR-HOST dead reckoning: the snapshot is already old on arrival
+    // (half the RTT in transit + time since it landed). Bodies that carry
+    // velocity (enemies, bullets, skill shots) get their target pushed
+    // forward by that age — capped — so the client renders where things
+    // ARE, not where they were a third of a second ago. Skew-free: age
+    // comes from our own RTT estimate + local arrival clock, never from
+    // comparing two machines' Date.now().
+    _smoothAdopt(list, kind) {
+        if (!Array.isArray(list)) return list;
+        if (!this._smoothMap) this._smoothMap = {};
+        let leadSec = 0;
+        try {
+            const transit = Math.max(0, this._rttMs || 0) / 2;
+            const since = Math.max(0, Date.now() - (this._lastSyncAt || Date.now()));
+            leadSec = Math.min(0.5, (transit + since) / 1000);
+        } catch (e) { leadSec = 0; }
+        const canLead = leadSec > 0.005 && (kind === 'en' || kind === 'bul' || kind === 'prj');
+        const next = {};
+        for (const e of list) {
+            if (!e || typeof e.x !== 'number' || typeof e.y !== 'number') continue;
+            if (e.local) continue; // my own live bodies need no smoothing
+            const id = (e.id !== undefined && e.id !== null) ? e.id : null;
+            let tx = e.x, ty = e.y;
+            // Dead-reckoning lead, capped so a fast missile can't sling
+            // hundreds of pixels past its fix before the next snapshot.
+            if (canLead && typeof e.vx === 'number' && typeof e.vy === 'number') {
+                const sp = Math.hypot(e.vx, e.vy);
+                if (sp > 1) {
+                    const maxLead = Math.min(leadSec, 250 / sp);
+                    tx += e.vx * maxLead;
+                    ty += e.vy * maxLead;
+                }
+            }
+            e._tx = tx; e._ty = ty;
+            if (id === null) continue;
+            const k = kind + ':' + id;
+            const p = this._smoothMap[k];
+            // Teleport test uses the RAW fix (lead excluded): a fast body
+            // with a big lead must not count as teleported.
+            if (p && p.e && typeof p.e.x === 'number' && typeof p.e.y === 'number' &&
+                Math.hypot(e.x - p.e.x, e.y - p.e.y) <= 420) {
+                e.x = p.e.x; e.y = p.e.y;
+            }
+            next[k] = { e };
+        }
+        // Keep still-tracked bodies that weren't in this snapshot (locals).
+        try {
+            for (const k of Object.keys(this._smoothMap)) {
+                if (!next[k]) {
+                    const ref = this._smoothMap[k];
+                    if (ref && ref.e && ref.e.local) next[k] = ref;
+                }
+            }
+        } catch (e) {}
+        this._smoothMap = next;
+        return list;
+    },
+
     // Sync monsters from host — instance overlays (shiny/size/pattern/
     // mutation/name) survive so clients render the catcher's exact fish.
     syncMonsters(remoteMonsters) {
-        // Simple sync - replace with interpolation for smoother results
-        this.state.monstersOnLand = remoteMonsters.map(m => ({
+        // Locally-finished kills stay dead: a lagged snapshot must not
+        // resurrect them into a second carcass (see noteClaimed).
+        let list = remoteMonsters || [];
+        try {
+            this._pruneClaimed();
+            list = list.filter(m => {
+                try {
+                    if (m && m.id && typeof Multiplayer !== 'undefined' && Multiplayer.isClaimed && Multiplayer.isClaimed(m.id)) return false;
+                } catch (e) {}
+                return true;
+            });
+        } catch (e) {}
+        this.state.monstersOnLand = this._smoothAdopt(list.map(m => ({
             ...m,
             species: this._instanceSpecies(m.species) || m.species
-        }));
+        })), 'mon');
     },
     
     // Sync bullets: keep enemy shots + our own local bullets, take the
@@ -1379,6 +1828,7 @@ const Multiplayer = {
             if (b.id && mine.has(b.id)) return;
             this.state.bullets.push({ ...b, owner: 'player', hitSet: new Set() });
         });
+        this._smoothAdopt(this.state.bullets, 'bul');
     },
 
     // Merge host monster skill shots (called with snapshot.enemyBullets)
@@ -1393,30 +1843,54 @@ const Multiplayer = {
             if (b.id && seen.has(b.id)) continue;
             this.state.bullets.push({ ...b, owner: 'enemy', life: b.life || 2.5, radius: b.radius || 6, color: b.color || '#facc15', trail: [] });
         }
+        this._smoothAdopt(this.state.bullets, 'bul');
     },
     
     // Sync loot (ids preserved for first-come delete messages).
     // Summon-item loot has no species — pass it through untouched.
     // Fish loot keeps its instance overlays (see _instanceSpecies).
+    // Plus MY unpicked personal drops (_local): the host sim never saw
+    // them, so wholesale replace would wipe them before I grab them —
+    // keep them alongside the shared list (claimed ids still drop).
     syncLoot(remoteLoot) {
-        this.state.groundLoot = (remoteLoot || []).map(l => {
+        try { this._pruneClaimed(); } catch (e) {}
+        let mine = [];
+        try {
+            mine = (this.state.groundLoot || []).filter(l => {
+                if (!l || !l._local) return false;
+                try { if (typeof Multiplayer !== 'undefined' && Multiplayer.isClaimed && Multiplayer.isClaimed(l.id)) return false; } catch (e) {}
+                return true;
+            });
+        } catch (e) { mine = []; }
+        const fresh = (remoteLoot || []).map(l => {
             if (!l) return null;
+            try { if (typeof Multiplayer !== 'undefined' && Multiplayer.isClaimed && Multiplayer.isClaimed(l.id)) return null; } catch (e) {}
             if (l.item) return { ...l };
             if (!l.species) return null; // malformed — never render-crash
             return { ...l, species: this._slimSpecies(this._instanceSpecies(l.species) || l.species) };
         }).filter(Boolean);
+        this.state.groundLoot = fresh.concat(mine);
     },
 
     // Sync enemies from host (jumping fish keep instance overlays too).
+    // Locally-despawned kills are dropped (see noteClaimed) so a lagged
+    // snapshot can't resurrect them for a second kill credit.
     syncEnemies(remoteEnemies) {
-        this.state.enemies = remoteEnemies.map(e => {
+        try { this._pruneClaimed(); } catch (e) {}
+        const list = (remoteEnemies || []).filter(e => {
+            try {
+                if (e && e.id && typeof Multiplayer !== 'undefined' && Multiplayer.isClaimed && Multiplayer.isClaimed(e.id)) return false;
+            } catch (err) {}
+            return true;
+        });
+        this.state.enemies = this._smoothAdopt(list.map(e => {
             const out = { ...e, hitFlash: e.hitFlash || 0, vx: e.vx || 0, vy: e.vy || 0, leapH: e.leapH || 0 };
-            if (e.enemyType === 'jumpingFish' && (e.speciesId || e.inst)) {
+            if ((e.enemyType === 'jumpingFish' || e.enemyType === 'hydraSoldier') && (e.speciesId || e.inst)) {
                 out.species = this._instanceSpecies(e.inst || { id: e.speciesId })
                     || { id: e.speciesId, name: 'Fish', color: '#38bdf8', size: 16 };
             }
             return out;
-        });
+        }), 'en');
     },
 
     // Sync enemy skill shots from host (host simulates them).
@@ -1455,7 +1929,7 @@ const Multiplayer = {
                 }
             }
         } catch (e) {}
-        this.state.projectiles = incoming.map(b => ({ ...b, trail: [] }));
+        this.state.projectiles = this._smoothAdopt(incoming.map(b => ({ ...b, trail: [] })), 'prj');
         for (const b of mine) this.state.projectiles.push(b);
     },
 
@@ -1490,6 +1964,41 @@ const Multiplayer = {
         }
     },
     
+    // Sync sonic roar VFX: merge by boom id (fresh ones only — a boom
+    // older than its duration already finished rendering remotely).
+    syncSonicFx(remoteFx) {
+        try {
+            if (!Array.isArray(remoteFx) || !remoteFx.length) return;
+            if (!this.state.sonicBooms) this.state.sonicBooms = [];
+            const seen = new Set(this.state.sonicBooms.map(b => b && b.id).filter(Boolean));
+            const now = this.state.time || 0;
+            for (const f of remoteFx) {
+                if (!f || !f.id || seen.has(f.id)) continue;
+                seen.add(f.id);
+                const dur = f.dur || 0.8;
+                const age = (typeof f.age === 'number' && f.age >= 0) ? f.age : 0;
+                if (age >= dur) continue; // already over — don't flash it late
+                const seeds = [];
+                const lines = Math.max(0, Math.min(40, f.lines || 14));
+                // Deterministic fan from the id (no seed wire cost).
+                let h = 0;
+                try { for (const c of String(f.id)) h = (Math.imul(h, 31) + c.charCodeAt(0)) | 0; } catch (e) {}
+                for (let i = 0; i < lines; i++) {
+                    h = (Math.imul(h, 1103515245) + 12345) | 0;
+                    seeds.push(((h >>> 0) % 1000) / 1000 * Math.PI * 2);
+                }
+                this.state.sonicBooms.push({
+                    id: f.id, x: f.x, y: f.y, t0: now - age, dur,
+                    rings: f.rings || 3, maxR: f.maxR || 220,
+                    color: f.color || '#f87171', lines, seeds, flash: true,
+                });
+            }
+            if (this.state.sonicBooms.length > 24) {
+                this.state.sonicBooms.splice(0, this.state.sonicBooms.length - 24);
+            }
+        } catch (e) {}
+    },
+
     // Sync fishing
     syncFishing(remoteFishing) {
         Object.assign(this.state.fishing, remoteFishing);
@@ -1502,9 +2011,23 @@ const Multiplayer = {
     syncBoss(remoteBoss) {
         if (!this.state.activeBoss) {
             this.state.activeBoss = remoteBoss;
-        } else {
-            Object.assign(this.state.activeBoss, remoteBoss);
+            if (this.state.activeBoss && typeof this.state.activeBoss.x === 'number') {
+                this.state.activeBoss._tx = this.state.activeBoss.x;
+                this.state.activeBoss._ty = this.state.activeBoss.y;
+            }
+            return;
         }
+        const cur = this.state.activeBoss;
+        // Last smoothed spot (before the overwrite below).
+        const sx = (typeof cur.x === 'number') ? cur.x : remoteBoss.x;
+        const sy = (typeof cur.y === 'number') ? cur.y : remoteBoss.y;
+        const tx = remoteBoss.x, ty = remoteBoss.y;
+        Object.assign(cur, remoteBoss);
+        if (typeof tx === 'number' && typeof ty === 'number' &&
+            typeof sx === 'number' && Math.hypot(tx - sx, ty - sy) <= 420) {
+            cur.x = sx; cur.y = sy; // resume gliding instead of snapping
+        }
+        cur._tx = tx; cur._ty = ty;
     },
     
     // Find species by ID
@@ -1517,6 +2040,10 @@ const Multiplayer = {
     
     // Send player input to host (client only) — throttled to ~15Hz.
     // Carries fresh bullets, fishing state and grant acks.
+    // HYBRID WIRE: movement-only ticks ride binary (NetCodec, 14 bytes:
+    // bitmask + Int16 pos/aim + seq); anything with payload (bullets, fx,
+    // fishing mode change, awards, skills) rides the JSON path. The host
+    // accepts both — see handlePeerMessage's binary branch.
     sendInput(input) {
         if (this.isHost) return; // Host handles input locally
 
@@ -1529,6 +2056,9 @@ const Multiplayer = {
         // stale/missing transport id can never create a 'peer' ghost copy
         // that trails the real player.
         try { input._from = this.localClientId || null; } catch (e) {}
+        // Monotonic sequence: the fast lane is unordered, so the host
+        // drops stale position fields (bullets/fx stay id-deduped anyway).
+        try { input._seq = (this._inputSeq = (this._inputSeq || 0) + 1); } catch (e) {}
         // Drain fired-bullet outbox (spawn events with ids)
         if (this._outboxBullets && this._outboxBullets.length) {
             input.bullets = this._outboxBullets;
@@ -1582,13 +2112,51 @@ const Multiplayer = {
             input.skillZones = this._skillZoneOutbox.slice(0, 12);
             this._skillZoneOutbox = [];
         }
-        // Kill-credit award ack
-        if (this._awardAckPending) {
-            input.awardAck = this._awardAckPending;
-            this._awardAckPending = null;
+        if (this._skillSonicOutbox && this._skillSonicOutbox.length) {
+            input.sonicFx = this._skillSonicOutbox.slice(0, 6);
+            this._skillSonicOutbox = [];
         }
+        // Binary fast path: pure locomotion only (rod IDLE + no payload).
+        // Any fishing activity keeps the JSON path — the host needs the
+        // bobber/tension/hooked-fish fields binary doesn't carry.
+        // Map slice (mainland/isle/cave) rides JSON only — force a JSON
+        // flush the tick it changes so host culling never goes stale.
+        let mapKey = '';
         try {
-            if (typeof PeerLink !== 'undefined') PeerLink.sendToHost({ type: 'playerInput', input });
+            const pp = (this.state && this.state.player) || {};
+            mapKey = (pp.onIsland || 'm') + '|' + (pp.inCave ? 'c' : 'o');
+        } catch (e) { mapKey = 'm|o'; }
+        try {
+            const hasPayload = !!(input.bullets || (input.fx && input.fx.length) ||
+                input.fishHits || input.skillShots || input.skillZones || input.sonicFx);
+            const fMode = (input.fishing && input.fishing.mode) || 'IDLE';
+            const mapChanged = mapKey !== (this._lastSentMap || 'm|o');
+            if (!hasPayload && fMode === 'IDLE' && !mapChanged && typeof NetCodec !== 'undefined') {
+                const bin = NetCodec.encodeInput(input, this.state);
+                if (bin) {
+                    let sent = false;
+                    try {
+                        if (typeof PeerLink !== 'undefined' && PeerLink.sendFastToHost) {
+                            sent = !!PeerLink.sendFastToHost(bin);
+                        } else if (typeof PeerLink !== 'undefined') {
+                            sent = !!PeerLink.sendToHost(bin);
+                        }
+                    } catch (e) { sent = false; }
+                    if (sent) {
+                        this._binSent = (this._binSent || 0) + 1;
+                        return;
+                    }
+                }
+            }
+        } catch (e) {}
+        try {
+            if (typeof PeerLink !== 'undefined' && PeerLink.sendFastToHost) {
+                PeerLink.sendFastToHost({ type: 'playerInput', input });
+            } else if (typeof PeerLink !== 'undefined') {
+                PeerLink.sendToHost({ type: 'playerInput', input });
+            }
+            this._jsonSent = (this._jsonSent || 0) + 1;
+            try { this._lastSentMap = mapKey; } catch (e) {}
         } catch (e) {}
     },
 
@@ -1604,7 +2172,7 @@ const Multiplayer = {
     // SAME fight. Called with pre-handler array lengths (see triggerSkill).
     // Damage authority stays with the catcher — viewers render visual-only
     // copies that home toward the CATCHER, never toward themselves.
-    mirrorSkill(state, beforeP, beforeH, beforeB) {
+    mirrorSkill(state, beforeP, beforeH, beforeB, beforeS) {
         try {
             if (!this.isClient() || !state) return;
             const me = this.localClientId || null;
@@ -1612,6 +2180,7 @@ const Multiplayer = {
             const R1 = (v) => Math.round((v || 0) * 10) / 10;
             if (!this._skillShotOutbox) this._skillShotOutbox = [];
             if (!this._skillZoneOutbox) this._skillZoneOutbox = [];
+            if (!this._skillSonicOutbox) this._skillSonicOutbox = [];
             if (state.projectiles && beforeP >= 0) {
                 for (let i = beforeP; i < state.projectiles.length && this._skillShotOutbox.length < 12; i++) {
                     const pr = state.projectiles[i];
@@ -1654,6 +2223,24 @@ const Multiplayer = {
             };
             pushZone(state.groundHazards, beforeH, 'hazard');
             pushZone(state.delayedBlasts, beforeB, 'blast');
+            // Sonic roar VFX ride along (same cap, merged by id on receipt).
+            try {
+                const arr = state.sonicBooms;
+                if (arr && beforeS >= 0) {
+                    for (let i = beforeS; i < arr.length && this._skillSonicOutbox.length < 6; i++) {
+                        const b = arr[i];
+                        if (!b || !b.id) continue;
+                        this._skillSonicOutbox.push({
+                            id: b.id, x: R1(b.x), y: R1(b.y),
+                            age: R1((state.time || 0) - (b.t0 || 0)),
+                            color: b.color || '#f87171',
+                            maxR: Math.round(b.maxR || 220),
+                            rings: b.rings || 3, dur: b.dur || 0.8,
+                            lines: b.lines || 14,
+                        });
+                    }
+                }
+            } catch (e) {}
         } catch (e) {}
     },
 
@@ -1694,6 +2281,13 @@ const Multiplayer = {
         }
         const rp = this.hostPeers[pid] || {};
         rp._lastUpdate = Date.now();
+        // Unordered fast lane: only the newest packet may move the body.
+        // Everything idempotent (bullets/fx/acks/zones) still processes.
+        let fresh = true;
+        if (typeof input._seq === 'number') {
+            if (rp._lastSeq !== undefined && input._seq <= rp._lastSeq) fresh = false;
+            else rp._lastSeq = input._seq;
+        }
         // Identity: the sender's chosen name rides every snapshot so the
         // host (and through the roster, everyone) always shows it.
         if (input.playerName && typeof input.playerName === 'string') {
@@ -1705,7 +2299,7 @@ const Multiplayer = {
             rp.onIsland = input.player.onIsland || null;
             rp.inCave = !!input.player.inCave;
         }
-        if (input.player && typeof input.player.x === 'number') {
+        if (input.player && typeof input.player.x === 'number' && fresh) {
             rp.x = input.player.x;
             rp.y = input.player.y;
             if (typeof input.player.hp === 'number') rp.hp = input.player.hp;
@@ -1714,16 +2308,17 @@ const Multiplayer = {
             if (typeof input.player.activeSlot !== 'undefined') rp.activeSlot = input.player.activeSlot;
             if (input.player.equippedWeapons) rp.equippedWeapons = input.player.equippedWeapons;
             if (input.player.gunSkins) rp.gunSkins = input.player.gunSkins;
+            if (input.player.skin && input.player.skin.color) rp.skin = { color: String(input.player.skin.color).slice(0, 16) };
         }
-        if (input.mouse) rp.input = input;
-        else if (input.mouseX !== undefined) rp.input = input;
+        if (input.mouse && fresh) rp.input = input;
+        else if (input.mouseX !== undefined && fresh) rp.input = input;
         rp._pid = pid;
-        if (typeof input.aim === 'number') rp.aim = input.aim;
-        else if (input.player && typeof input.player.aim === 'number') rp.aim = input.player.aim;
+        if (typeof input.aim === 'number' && fresh) rp.aim = input.aim;
+        else if (input.player && typeof input.player.aim === 'number' && fresh) rp.aim = input.player.aim;
         if (typeof input.muzzleFlash === 'number') rp.muzzleFlash = input.muzzleFlash;
         if (typeof input.weaponRecoil === 'number') rp.weaponRecoil = input.weaponRecoil;
         if (typeof input.reloading === 'boolean') rp.reloading = input.reloading;
-        if (input.fishing) rp.fishing = input.fishing;
+        if (input.fishing && fresh) rp.fishing = input.fishing;
         // Forwarded helper hits: my bullets -> someone else's hooked fish
         if (Array.isArray(input.fishHits) && input.fishHits.length) {
             if (!this._fishHitOutbox) this._fishHitOutbox = {};
@@ -1831,11 +2426,34 @@ const Multiplayer = {
                 }
             } catch (e) {}
         }
-        // Award ack: client confirms kill-credit receipt
-        if (input.awardAck && this._pendingAwards) {
-            for (const [apid, a] of Object.entries(this._pendingAwards)) {
-                if (apid === pid && a && a.aid === input.awardAck) delete this._pendingAwards[apid];
-            }
+        // Sonic roar VFX from the catcher's sim (merged by id, then shared
+        // with the room through the normal snapshot).
+        if (Array.isArray(input.sonicFx) && input.sonicFx.length && this.state) {
+            try {
+                if (!this.state.sonicBooms) this.state.sonicBooms = [];
+                const seen = new Set(this.state.sonicBooms.map(b => b && b.id).filter(Boolean));
+                const now = this.state.time || 0;
+                for (const f of input.sonicFx.slice(0, 6)) {
+                    if (!f || !f.id || seen.has(f.id)) continue;
+                    seen.add(f.id);
+                    const dur = f.dur || 0.8;
+                    const age = (typeof f.age === 'number' && f.age >= 0) ? f.age : 0;
+                    if (age >= dur) continue;
+                    const lines = Math.max(0, Math.min(40, f.lines || 14));
+                    const seeds = [];
+                    let h = 0;
+                    try { for (const c of String(f.id)) h = (Math.imul(h, 31) + c.charCodeAt(0)) | 0; } catch (e) {}
+                    for (let i = 0; i < lines; i++) {
+                        h = (Math.imul(h, 1103515245) + 12345) | 0;
+                        seeds.push(((h >>> 0) % 1000) / 1000 * Math.PI * 2);
+                    }
+                    this.state.sonicBooms.push({
+                        id: f.id, x: f.x, y: f.y, t0: now - age, dur,
+                        rings: f.rings || 3, maxR: f.maxR || 220,
+                        color: f.color || '#f87171', lines, seeds, flash: true,
+                    });
+                }
+            } catch (e) {}
         }
         // Shared boss lives: a client's death during the HOST's boss fight
         // consumes one of the room's 10 chances — A, B or C, every death
@@ -1959,6 +2577,8 @@ const Multiplayer = {
             activeSlot: p.activeSlot || 0,
             equippedWeapons: p.equippedWeapons || [],
             gunSkins: p.gunSkins || {},
+            // Per-player look: diver color + gun art prefs (see playerSkin).
+            skin: (p && (p.skin || (p.skinColor ? { color: p.skinColor } : null))) || null,
             muzzleFlash: p.muzzleFlash || 0,
             weaponRecoil: Math.round((p.weaponRecoil || 0) * 10) / 10,
             reloading: !!p.reloading,
@@ -2081,21 +2701,6 @@ const Multiplayer = {
         }
     },
 
-    // Kill credit: a client's killing blow pays THEM (coins + xp).
-    // Queued per-player, acked, applied once.
-    queueAward(pid, coins, xp) {
-        pid = this._normPid(pid, 'queueAward');
-        if (!pid) return;
-        this._awardSeq = (this._awardSeq || 0) + 1;
-        if (!this._pendingAwards) this._pendingAwards = {};
-        const prev = this._pendingAwards[pid];
-        this._pendingAwards[pid] = {
-            aid: this._awardSeq,
-            coins: (prev ? prev.coins : 0) + (coins || 0),
-            xp: (prev ? prev.xp : 0) + (xp || 0)
-        };
-    },
-
     // Host-side peer lookup: transport members OR already-known snapshots.
     _knownPeer(pid) {
         try {
@@ -2139,6 +2744,7 @@ const Multiplayer = {
     // Start periodic state synchronization (host only)
     startStateSync() {
         if (!this.isHost) return;
+        this._gameStarted = true; // late joiners get a direct gameStart
         if (this.stateSendInterval) return; // already running
 
         this.stateSendInterval = setInterval(() => {
@@ -2159,7 +2765,47 @@ const Multiplayer = {
     // `no-snapshot` event instead of a silent frozen world, plus an
     // automatic re-ask (syncRequest -> host unicast reply).
     update(delta) {
-        void delta;
+        const dt = (typeof delta === 'number' && delta > 0) ? Math.min(0.1, delta) : 0.016;
+        // RTT probe every 2s (fast lane): host pings the room, clients
+        // ping the host. Same-clock echo math, smoothed.
+        try {
+            if (this.isConnected && this.roomCode && Date.now() - (this._lastPing || 0) > 2000) {
+                this._lastPing = Date.now();
+                const ping = { type: 'ping', t0: Date.now(), from: this.localClientId || null };
+                if (this.isHost) {
+                    if (typeof PeerLink !== 'undefined' && PeerLink.broadcastFast) PeerLink.broadcastFast(ping);
+                } else if (typeof PeerLink !== 'undefined' && PeerLink.sendFastToHost) {
+                    PeerLink.sendFastToHost(ping);
+                }
+            }
+        } catch (e) {}
+        // Client-side entity smoothing: snapshots land at ~12Hz, frames
+        // render at 60 — lerp synced bodies toward their latest targets
+        // so enemies and bullets glide instead of hopping.
+        try {
+            if (this.isClient() && this.isConnected && this.state && dt > 0) {
+                const k = 1 - Math.pow(0.0001, dt);
+                const smoothList = (list) => {
+                    if (!Array.isArray(list)) return;
+                    for (const e of list) {
+                        if (!e || typeof e._tx !== 'number' || typeof e._ty !== 'number') continue;
+                        if (e.local) continue; // my own bullets are already live
+                        if (typeof e.x !== 'number' || typeof e.y !== 'number') continue;
+                        if (Math.hypot(e._tx - e.x, e._ty - e.y) > 420) {
+                            e.x = e._tx; e.y = e._ty; // teleport/respawn: snap
+                        } else {
+                            e.x += (e._tx - e.x) * k;
+                            e.y += (e._ty - e.y) * k;
+                        }
+                    }
+                };
+                smoothList(this.state.enemies);
+                smoothList(this.state.monstersOnLand);
+                smoothList(this.state.bullets);
+                smoothList(this.state.projectiles);
+                if (this.state.activeBoss) smoothList([this.state.activeBoss]);
+            }
+        } catch (e) {}
         try {
             if (this.isClient() && this.isConnected && this._hasEverSynced) {
                 const last = this._lastSyncAt || 0;
@@ -2238,17 +2884,26 @@ const Multiplayer = {
         this.hostPeerOrder = [];
         this._roomRoster = null;
         this._hostName = 'Host';
+        this._hostSkin = null;
            this._hostPilot = null;
         this.hostPid = null;
         try { if (typeof SaveSystem !== 'undefined' && SaveSystem.setMPScope) SaveSystem.setMPScope(null); } catch (e) {}
         this._lastGameStateTs = 0;
         this._hasEverSynced = false;
+        this._gameStarted = false;
         this._lastSyncAt = 0;
+        this._lastPing = 0;
+        this._rttMs = 0;
+        this._peerRtt = {};
+        this._smoothMap = {};
         this._fxOutbox = [];
         this._fishHitClaims = [];
         this._fishHitOutbox = {};
         this._fishHitApplied = {};
         this._ownBulletIds = {};
+        this._binSent = 0;
+        this._jsonSent = 0;
+        this._lastSentMap = 'm|o';
         if (this.state) {
             this.state.remotePlayer = null;
             this.state.remotePlayers = {};
@@ -2273,7 +2928,15 @@ const Multiplayer = {
             roomCode: this.roomCode,
             playerCount: this._lobbyCount || 1,
             cloud,
-            skins
+            skins,
+            rttMs: this.isHost ? null : (this._rttMs || null),
+            peerRtt: this.isHost ? (this._peerRtt || {}) : null,
+            fastLane: (() => {
+                try {
+                    if (typeof PeerLink !== 'undefined' && PeerLink.fastReady) return PeerLink.fastReady();
+                } catch (e) {}
+                return false;
+            })()
         };
     },
     
@@ -2376,15 +3039,23 @@ const Multiplayer = {
         ctx.ellipse(2, 4, 16, 11, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // Body — same shape as single player, pink so you can tell who's who
+        // Body — same shape as single player, tinted by the diver's lobby
+        // skin color so each player looks different (default pink).
+        let bodyCol = '#f472b6', edgeCol = '#be185d';
+        try {
+            if (rp && rp.skin && rp.skin.color && typeof Multiplayer !== 'undefined') {
+                const c = Multiplayer.skinColor(rp.skin.color);
+                if (c) { bodyCol = c.body; edgeCol = c.edge; }
+            }
+        } catch (e) {}
         const g = ctx.createRadialGradient(-4, -4, 2, 0, 0, 16);
-        g.addColorStop(0, '#f472b6');
-        g.addColorStop(1, '#be185d');
+        g.addColorStop(0, bodyCol);
+        g.addColorStop(1, edgeCol);
         ctx.fillStyle = g;
         ctx.beginPath();
         ctx.arc(0, 0, 16, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = '#f472b6';
+        ctx.strokeStyle = bodyCol;
         ctx.lineWidth = 2;
         ctx.stroke();
 
@@ -2472,6 +3143,13 @@ const Multiplayer = {
         });
         const f = rp.fishing;
         const t = (this.state.time || 0);
+        // Foreign holder identity: THEIR bobber/fish wear THEIR uploads.
+        let fishHolder = null;
+        try {
+            if (typeof Multiplayer !== 'undefined' && Multiplayer.localClientId) {
+                fishHolder = { pid: rp._pid || rp.id, me: Multiplayer.localClientId };
+            }
+        } catch (e) {}
         // Smooth bobber + hooked-fish targets so the line never snaps
         // between quantized 12Hz snapshots (the "broke line" jitter).
         const smoothTo = (key, tx, ty, snap) => {
@@ -2523,7 +3201,7 @@ const Multiplayer = {
             }
             ctx.globalAlpha = 1;
             if (typeof Render !== 'undefined' && Render.drawBobberModel) {
-                try { Render.drawBobberModel(ctx, b.x, b.y + bob, f.bobberModel || 'classic', rodLine, sc, t); } catch (e) {}
+                try { Render.drawBobberModel(ctx, b.x, b.y + bob, f.bobberModel || 'classic', rodLine, sc, t, fishHolder); } catch (e) {}
             }
             ctx.strokeStyle = rodLine;
             ctx.lineWidth = 1.5;
@@ -2572,7 +3250,8 @@ const Multiplayer = {
                         angle: h.rotation || 0,
                         isRaging: !!h.isRaging && !h.isDead,
                         isInflated: !!h.isInflated,
-                        glow: species.rarity === 'legendary' && !h.isDead ? 1 : 0
+                        glow: species.rarity === 'legendary' && !h.isDead ? 1 : 0,
+                        holder: fishHolder
                     });
                 } catch (e) {}
             }

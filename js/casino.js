@@ -55,7 +55,8 @@ const Casino = {
     bindEvents() {
         const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
         on('btn-open-casino', () => this.open());
-        on('btn-open-casino-hud', () => this.open());
+        // NOTE: no HUD shortcut — the casino opens from its world pad (E)
+        // or the shop's Casino tab, like everything else Diegetic.
         document.querySelectorAll('.casino-close').forEach(b => { b.onclick = () => this.close(); });
         document.querySelectorAll('.casino-tab-btn').forEach(btn => {
             btn.onclick = () => {
@@ -484,6 +485,19 @@ const Casino = {
         this.rouletteSpinning = true;
         this.rouletteMsg = 'Spinning...'; this.rouletteMsgColor = 'text-amber-300';
         this.updateTokenDisplay(); this.renderTab();
+        // Server-authoritative pocket: prefetch during the animation so the
+        // final number comes from node:crypto when online (anti-F12).
+        // Falls back to local Math.random on itch.io static / offline.
+        this._serverPocket = null;
+        try {
+            if (typeof SecureServer !== 'undefined') {
+                SecureServer.roll('roulette', totalBet).then(r => {
+                    if (r && Number.isInteger(r.pocket) && r.pocket >= 0 && r.pocket < 38) {
+                        this._serverPocket = r.pocket;
+                    }
+                }).catch(() => {});
+            }
+        } catch (e) {}
         // Animated number cycling (38 pockets, American wheel)
         let ticks = 0;
         const ticker = setInterval(() => {
@@ -503,7 +517,8 @@ const Casino = {
     },
 
     resolveRoulette(totalBet) {
-        const r = Math.floor(Math.random() * 38);
+        const r = (Number.isInteger(this._serverPocket) ? this._serverPocket : Math.floor(Math.random() * 38));
+        this._serverPocket = null;
         this.rouletteNumber = r === 37 ? '00' : r;
         const redNumbers = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
         const isZero = this.rouletteNumber === 0 || this.rouletteNumber === '00';
@@ -548,8 +563,19 @@ const Casino = {
         this.slotsSpinning = true; this.slotsBest = -1; this.slotsWon = false;
         this.slotsResult = 'Spinning...'; this.slotsResultColor = 'text-amber-300';
         this.updateTokenDisplay(); this.renderTab();
-        // Staggered reel reveal animation
-        const final = [this.weightedSlotIndex(), this.weightedSlotIndex(), this.weightedSlotIndex()];
+        // Server-authoritative reels (anti-F12). Prefetch, use when valid.
+        const localFinal = [this.weightedSlotIndex(), this.weightedSlotIndex(), this.weightedSlotIndex()];
+        const final = localFinal;
+        try {
+            if (typeof SecureServer !== 'undefined') {
+                SecureServer.roll('slots', bet).then(sv => {
+                    if (sv && Array.isArray(sv.reels) && sv.reels.length === 3 &&
+                        sv.reels.every(i => Number.isInteger(i) && i >= 0 && i < this.slotSymbols.length)) {
+                        final[0] = sv.reels[0]; final[1] = sv.reels[1]; final[2] = sv.reels[2];
+                    }
+                }).catch(() => {});
+            }
+        } catch (e) {}
         const flicker = setInterval(() => {
             for (let i = 0; i < 3; i++) {
                 if (Date.now() < this['_slotLock' + i]) continue;
@@ -621,8 +647,13 @@ const Casino = {
         this.saveTokens();
     },
 
-    placeFishBet() {
+    async placeFishBet() {
         if (!this.fishBetSelected || this.betAmount > this.tokens) return;
+        // In-flight guard: the server roll awaits network — a lagged
+        // double-click must not place the bet twice.
+        if (this._fishBetBusy) return;
+        this._fishBetBusy = true;
+        try {
         const fish = (this.state.player.caughtFish || []).find(f => f.id === this.fishBetSelected);
         if (!fish) return;
         const odds = (this.FISHBET_ODDS && this.FISHBET_ODDS[fish.rarity]) || { mult: 1, ch: 5 };
@@ -630,7 +661,14 @@ const Casino = {
         const winChance = odds.ch;
         const bet = this.betAmount;
         this.tokens -= bet;
-        const won = Math.random() * 100 < winChance;
+        // Server-authoritative win roll when online (anti-F12).
+        let won = Math.random() * 100 < winChance;
+        try {
+            if (typeof SecureServer !== 'undefined') {
+                const sv = await SecureServer.roll('fishbet', bet, { rarity: fish.rarity });
+                if (sv && typeof sv.won === 'boolean') won = sv.won;
+            }
+        } catch (e) {}
         if (won) {
             const winnings = Math.round(bet * rarityMult);
             this.tokens += winnings + bet;
@@ -646,6 +684,9 @@ const Casino = {
         }
         this.fishBetSelected = null;
         this.updateTokenDisplay(); this.renderTab(); this.saveTokens();
+        } finally {
+            this._fishBetBusy = false;
+        }
     },
 
     highlowStreak: 0,
@@ -661,13 +702,21 @@ const Casino = {
         this.renderTab();
     },
 
-    highlowGuess(higher) {
+    async highlowGuess(higher) {
         const entryBet = this.highlowPot > 0 ? 0 : this.betAmount;
         if (entryBet > this.tokens) return;
         if (entryBet > 0) { this.tokens -= entryBet; this.highlowPot = entryBet; }
         const suits = ['♠', '♥', '♦', '♣'];
         const values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-        this.highlowNextCard = { suit: suits[Math.floor(Math.random() * 4)], value: values[Math.floor(Math.random() * 13)] };
+        // Server-authoritative next card when online (anti-F12).
+        let next = null;
+        try {
+            if (typeof SecureServer !== 'undefined') {
+                const sv = await SecureServer.roll('highlow', Math.max(1, this.highlowPot || entryBet || 1));
+                if (sv && sv.card && values.includes(sv.card.value) && suits.includes(sv.card.suit)) next = sv.card;
+            }
+        } catch (e) {}
+        this.highlowNextCard = next || { suit: suits[Math.floor(Math.random() * 4)], value: values[Math.floor(Math.random() * 13)] };
         const valueOrder = { '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14 };
         const currentVal = valueOrder[this.highlowCard.value];
         const nextVal = valueOrder[this.highlowNextCard.value];

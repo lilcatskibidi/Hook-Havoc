@@ -1,6 +1,22 @@
 const Fishing = {
+    // Boss hooked fish (hydra etc.): never flees, never escapes on death.
+    isBossFish(fish) {
+        try {
+            return !!(fish && fish.species && (fish.species.isBoss || fish.species.rarity === 'boss'));
+        } catch (e) { return false; }
+    },
+
     onSpaceDown(state) {
         if (!state.player || state.player.isDead || state.player.hp <= 0) return;
+        // Void Leviathan LAND PULL tug-of-war: SPACE mashes the break-free
+        // meter instead of casting (see Player.update voidDrag).
+        try {
+            if (state.player.voidDrag && state.player.voidDrag.timer > 0) {
+                state.player.voidDrag.mash++;
+                state.screenShake = Math.max(state.screenShake || 0, 3);
+                return;
+            }
+        } catch (e) {}
         // No casting during the boss-fight countdown.
         if (typeof state._fightFreezeUntil === 'number' && state.time < state._fightFreezeUntil) return;
         // No casting mid ferry ride.
@@ -38,11 +54,11 @@ const Fishing = {
             } else if (onPier) {
                 // casting from the pier: always fine (deck is over water)
             } else if (distToWater > 160 || distToWater < -20) {
-                Particles.showFloatingText(state, "Move closer to the shore!", p.x, p.y - 30, '#f87171');
+                Particles.showFloatingText(state, T('t_near_water'), p.x, p.y - 30, '#f87171');
                 return;
             }
             if (p.bucket && p.bucket.length >= p.bucketCapacity) {
-                Particles.showFloatingText(state, "Bucket Full! Sell in shop.", p.x, p.y - 30, '#f87171');
+                Particles.showFloatingText(state, T('t_bucket_full'), p.x, p.y - 30, '#f87171');
                 return;
             }
             f.mode = 'CASTING';
@@ -53,6 +69,50 @@ const Fishing = {
             // fired, so no bait is eaten (bait is consumed in triggerBite).
             this.retakeBobber(state);
         }
+    },
+
+    // Deck landing spot: when YOU stand on a deck (mainland bridge /
+    // isle pier), catches must come onto the planks. Returns the nearest
+    // deck point to the fish + which deck, or null on open sand play.
+    deckSpotFor(state, p, fish) {
+        try {
+            if (typeof WorldSystem === 'undefined' || !p || !fish) return null;
+            if (!WorldSystem.islandOf(state)) {
+                if (WorldSystem.onBridge && WorldSystem.bridgeDef &&
+                    WorldSystem.onBridge(state, p.x, p.y)) {
+                    const b = WorldSystem.bridgeDef(state);
+                    return {
+                        kind: 'bridge',
+                        x: Utils.clamp(fish.x, b.x0, b.x1),
+                        y: Utils.clamp(fish.y, b.y - 46, b.y + 46),
+                    };
+                }
+                return null;
+            }
+            if (WorldSystem.islandPier && WorldSystem.onIslandPier &&
+                WorldSystem.islandPier(state) &&
+                WorldSystem.onIslandPier(state, p.x, p.y, 60)) {
+                const pier = WorldSystem.islandPier(state);
+                return {
+                    kind: 'pier',
+                    x: Utils.clamp(fish.x, pier.x0, pier.x1),
+                    y: Utils.clamp(fish.y, pier.y - pier.half, pier.y + pier.half),
+                };
+            }
+        } catch (e) {}
+        return null;
+    },
+
+    // Step banner vs fight bars: the tutorial steps live at the TOP;
+    // the tension/drag bars own the BOTTOM. While a fish is hooked the
+    // bars REPLACE the banner (no redundant text crowding the fight).
+    syncBanner(state) {
+        try {
+            const banner = document.getElementById('status-banner');
+            if (!banner) return;
+            if (state.fishing.mode === 'HOOKED') banner.classList.add('hidden');
+            else banner.classList.remove('hidden');
+        } catch (e) {}
     },
 
     // SPACE while waiting: reel the bobber home, keep your bait.
@@ -75,8 +135,8 @@ const Fishing = {
         f.castFrom = null;
         f.castTo = null;
         f.castT = 0;
-        Particles.showFloatingText(state, 'Bobber back — bait kept!', p.x, p.y - 40, '#7dd3fc');
-        UI.updateStatusBanner('Stand near water & Hold <span class="key">SPACE</span> to Cast!', 'Step 1', 'amber');
+        Particles.showFloatingText(state, T('t_bobber_back'), p.x, p.y - 40, '#7dd3fc');
+        UI.updateStatusBanner(T('step1_html'), T('step1_tag'), 'amber');
         return true;
     },
 
@@ -131,7 +191,7 @@ const Fishing = {
                 f.mode = 'IDLE';
                 f.castPower = 0;
                 f.castDir = 1;
-                Particles.showFloatingText(state, 'No water that way — aim at the sea!', state.player.x, state.player.y - 30, '#f87171');
+                Particles.showFloatingText(state, T('t_no_water'), state.player.x, state.player.y - 30, '#f87171');
                 try { audio.playError(); } catch (e) {}
                 return;
             }
@@ -184,7 +244,7 @@ const Fishing = {
         if (typeof Particles !== 'undefined') {
             Particles.spawnWaterSplashes(state, f.bobber.x, f.bobber.y, 8);
         }
-        UI.updateStatusBanner('Waiting for a bite... (tap <span class="key">SPACE</span> to pull back, keeps bait)', 'Step 2');
+        UI.updateStatusBanner(T('step2_html'), T('step2_tag'));
     },
 
     escapeFish(state, message = "FISH ESCAPED!") {
@@ -269,6 +329,13 @@ const Fishing = {
             Particles.showFloatingText(state, '✨ SHINY! Worth 3x! ✨', f.bobber.x, f.bobber.y - 60, '#fde047');
             try { audio.playLevelUp(); } catch (e) {}
         }
+        // Hook-time achievements: the whale counts the moment it bites
+        try {
+            if (typeof Achievements !== 'undefined') {
+                if (species.id === 'colossal_whale') Achievements.unlock('whale_watcher');
+                if (species.shiny) Achievements.unlock('catch_shiny');
+            }
+        } catch (e) {}
         const maxHp = species.maxHp || 100;
         const staminaMax = species.staminaMax || 100;
 
@@ -334,9 +401,73 @@ const Fishing = {
             try { audio.playSnap(); } catch (e) {}
             state.screenShake = 14;
             Particles.showFloatingText(state, '💥 LINE SNAPPED!', f.bobber.x, f.bobber.y - 60, '#ef4444');
-            // Cinematic arrival for the hooked horror
+            // Cinematic arrival for the hooked horror: roar + swim already
+            // out at sea + the same 3-2-1 mutual freeze as ritual bosses
+            // (no teleport — the angler stays on the rod).
+            // HYDRA gets the full 10s: GIANT offshore roar FIRST (camera
+            // glides player -> roar on its own), then bolts, rise, reveal.
             try {
-                if (typeof Ritual !== 'undefined' && Ritual.bossIntro) Ritual.bossIntro(state, species, f.bobber.x, f.bobber.y, f.hookedFish);
+                const isHydra = species.id === 'stormlord_hydra';
+                if (isHydra) {
+                    const rx = Utils.clamp(f.bobber.x + 520, (state.waterBoundaryX || 830) + 60, (CONFIG.WORLD.MAX_X || 4500) - 60);
+                    try {
+                        if (typeof Combat !== 'undefined' && Combat.roarShockwave) {
+                            Combat.roarShockwave(state, rx, f.bobber.y, { color: '#10b981', rings: 6, maxR: 480, shake: 24 });
+                        }
+                    } catch (e) {}
+                    try { audio.playBossRoar(); } catch (e) {}
+                    Particles.showFloatingText(state, '🌊 SOMETHING ROARS OFFSHORE...', state.player.x, state.player.y - 90, '#10b981');
+                }
+                if (typeof Ritual !== 'undefined' && Ritual.bossIntro) {
+                    Ritual.bossIntro(state, species, f.bobber.x, f.bobber.y, f.hookedFish, isHydra ? 10 : 5, 'rise');
+                    // Camera starts on YOU, then glides to the roar — the
+                    // lock tracks the boss, so the pan plays itself.
+                    if (isHydra) {
+                        try {
+                            if (state._introCam) { state._introCam.x = state.player.x; state._introCam.y = state.player.y; }
+                        } catch (e) {}
+                    }
+                }
+                if (isHydra) {
+                    state.screenShake = Math.max(state.screenShake || 0, 24);
+                    // Storm summons: rendered bolts hammer the hook point
+                    // for the first seconds while it rises.
+                    try {
+                        if (typeof Combat !== 'undefined' && Combat.strikeLightning) {
+                            for (let i = 0; i < 4; i++) {
+                                setTimeout(() => {
+                                    try {
+                                        Combat.strikeLightning(state,
+                                            f.bobber.x + (Math.random() - 0.5) * 260,
+                                            f.bobber.y + (Math.random() - 0.5) * 160,
+                                            { color: '#fef08a', shake: 10 });
+                                    } catch (e) {}
+                                }, i * 700);
+                            }
+                        }
+                        if (typeof Particles !== 'undefined' && Particles.spawnWaterSplashes) {
+                            for (let i = 0; i < 4; i++) {
+                                Particles.spawnWaterSplashes(state,
+                                    f.bobber.x + (Math.random() - 0.5) * 220, f.bobber.y + 10, 16);
+                            }
+                        }
+                    } catch (e) {}
+                    if (typeof Combat !== 'undefined' && Combat.roarShockwave) {
+                        // Reveal blast lands as dormancy lifts (theatre).
+                        state.delayedBlasts = state.delayedBlasts || [];
+                        state.delayedBlasts.push({
+                            x: f.bobber.x, y: f.bobber.y, radius: 340, damage: 0,
+                            timer: 9.4, color: '#ef4444', shake: 24,
+                        });
+                        state.delayedBlasts.push({
+                            x: f.bobber.x, y: f.bobber.y, radius: 220, damage: 0,
+                            timer: 9.6, color: '#f87171', shake: 20,
+                        });
+                    }
+                }
+            } catch (e) {}
+            try {
+                if (typeof Ritual !== 'undefined' && Ritual.fightCountdown) Ritual.fightCountdown(state, f.hookedFish, { noTeleport: true, delaySec: species.id === 'stormlord_hydra' ? 10 : 5 });
             } catch (e) {}
             UI.updateStatusBanner(
                 `<b>${species.name}</b> is too strong — LINE SNAPPED! It circles below. <b>Shoot it!</b>`,
@@ -524,6 +655,7 @@ const Fishing = {
 
     update(state, delta) {
         const f = state.fishing;
+        try { this.syncBanner(state); } catch (e) {}
 
         // Host owns enemy skill shots — clients only take the hits (intake)
         const isMPClient = (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient());
@@ -532,7 +664,9 @@ const Fishing = {
         }
 
         if (!state.player || state.player.isDead || state.player.hp <= 0) {
-            if (f.mode !== 'IDLE') {
+            // Bosses hold the field for a corpse — no escapeFish here
+            // (see updateHooked's death branch + Player.die).
+            if (f.mode !== 'IDLE' && !this.isBossFish(f.hookedFish)) {
                 this.escapeFish(state, "Player died!");
             }
             return;
@@ -578,8 +712,9 @@ const Fishing = {
         const rod = p.equippedRod || { reelPower: 80, tensionMax: 100 };
         const B = CONFIG.WORLD;
 
-        // Reel loop management + reel tick (no line, no reeling for bosses)
-        const isReelingNow = !!state.keys[' '] && !fish.lineBroken;
+        // Reel loop management + reel tick (no line, no reeling for bosses;
+        // never while dead — the corpse holds no rod).
+        const isReelingNow = !!state.keys[' '] && !fish.lineBroken && !p.isDead && (p.hp || 0) > 0;
         if (isReelingNow && !fish.isDead && fish.dragState !== 'BEACHED') {
             try { audio.startReelLoop(); } catch (e) {}
             fish._reelTickTimer = (fish._reelTickTimer || 0) - delta;
@@ -599,6 +734,18 @@ const Fishing = {
         }
 
         if (p.isDead || p.hp <= 0) {
+            // BOSSES NEVER FLEE A CORPSE (hydra included): hold the sea
+            // phase, bleed off tension, reset the escape clock, and wait for
+            // your return. Chances are counted in Player.die (10 deaths and
+            // even a boss tires of waiting).
+            if (this.isBossFish(fish)) {
+                fish.seaTimer = 0;
+                fish.warnedSeaEscape = false;
+                fish.warnedSeaEscape2 = false;
+                f.lineTension = Math.max(0, f.lineTension - CONFIG.TENSION_DECAY_RATE * 2 * delta);
+                UI.updateStatusBanner(`<b>${fish.species.name}</b> circles your corpse... it WAITS. Respawn and finish it!`, 'Boss', 'rose');
+                return;
+            }
             try { audio.playSnap(); } catch (e) {}
             state.screenShake = 10;
             this.escapeFish(state, "YOU DIED - FISH ESCAPED!");
@@ -685,19 +832,25 @@ const Fishing = {
             // Stun/freeze from guns pauses fish skills & movement in water too
             if (fish.stunTimer > 0) fish.stunTimer -= delta;
             if (fish.freezeTimer > 0) fish.freezeTimer -= delta;
-            // Burn / poison DoT in water (gun effects fixed)
+            // Burn / poison DoT in water (gun effects fixed) — paused
+            // while dormant: the intro cinematic is invulnerable theatre,
+            // damage resumes when the boss wakes.
             if (fish.burnTimer > 0) {
                 fish.burnTimer -= delta;
-                const dps = fish.burnDps || 12;
-                fish.hp -= dps * delta;
-                fish.stamina -= dps * 0.5 * delta;
-                if (Math.random() < 0.2) Particles.spawnParticles(state, fish.x, fish.y, '#f97316', 1, { size: 3 });
+                if (!dormant) {
+                    const dps = fish.burnDps || 12;
+                    fish.hp -= dps * delta;
+                    fish.stamina -= dps * 0.5 * delta;
+                    if (Math.random() < 0.2) Particles.spawnParticles(state, fish.x, fish.y, '#f97316', 1, { size: 3 });
+                }
             }
             if (fish.poisonTimer > 0) {
                 fish.poisonTimer -= delta;
-                const dps = fish.poisonDps || 10;
-                fish.hp -= dps * delta;
-                if (Math.random() < 0.1) Particles.showFloatingText(state, `-${Math.round(dps * delta)}`, fish.x, fish.y - 25, '#84cc16');
+                if (!dormant) {
+                    const dps = fish.poisonDps || 10;
+                    fish.hp -= dps * delta;
+                    if (Math.random() < 0.1) Particles.showFloatingText(state, `-${Math.round(dps * delta)}`, fish.x, fish.y - 25, '#84cc16');
+                }
             }
             if (fish.slowTimer > 0) fish.slowTimer -= delta;
             if (fish.hp <= 0) { this.killHookedFish(state); return; }
@@ -710,8 +863,11 @@ const Fishing = {
                     mythic: 0.9,
                     boss: 1.6
                 };
+                // Hydra spams: shorter fuse between volleys (its pressure
+                // is fire-rate, not single big hits).
+                const isHydra = fish.species && fish.species.id === 'stormlord_hydra';
                 const rarity = (fish.species && fish.species.rarity) ? fish.species.rarity : 'common';
-                fish.skillCooldown = cooldowns[rarity] || 3.0;
+                fish.skillCooldown = isHydra ? 1.0 : (cooldowns[rarity] || 3.0);
                 this.triggerSkill(state, fish);
             }
             fish.rageTimer -= delta;
@@ -721,6 +877,19 @@ const Fishing = {
                 if (fish.isRaging) {
                     try { audio.playFishScreech(); } catch (e) {}
                 }
+            }
+            // Sea-intro theatre: rising bosses churn the water above them.
+            if (dormant && fish._introMode === 'rise') {
+                try {
+                    fish._introFxT = (fish._introFxT || 0) - delta;
+                    if (fish._introFxT <= 0) {
+                        if (typeof Particles !== 'undefined' && Particles.spawnWaterSplashes) {
+                            Particles.spawnWaterSplashes(state, fish.x + (Math.random() - 0.5) * 100, fish.y, 4);
+                        }
+                        state.screenShake = Math.max(state.screenShake || 0, 5);
+                        fish._introFxT = 0.25;
+                    }
+                } catch (e) {}
             }
         }
 
@@ -745,6 +914,48 @@ const Fishing = {
             // (Dormant arrivals hang motionless until the intro releases.)
             if (!dormant) {
             const isHydraSea = fish.species && fish.species.id === 'stormlord_hydra';
+            // HYDRA PHASE 2 at half HP: breaches the shore and keeps
+            // fighting on land with a meaner moveset (see pickSkill).
+            // Host/solo converts; MP clients keep their personal sea
+            // instance (the shared P2 body rides the host snapshot).
+            if (isHydraSea && !fish._p2 && (fish.hp / (fish.maxHp || 1)) <= 0.5) {
+                fish._p2 = true;
+                try { audio.playBossRoar(); } catch (e) {}
+                try {
+                    if (typeof Combat !== 'undefined' && Combat.roarShockwave) {
+                        Combat.roarShockwave(state, fish.x, fish.y, { color: '#ef4444', rings: 5, maxR: 320, shake: 22 });
+                    }
+                } catch (e) {}
+                Particles.showFloatingText(state, '🌊 THE HYDRA STORMS THE SHORE!', fish.x, fish.y - 90, '#ef4444');
+                try {
+                    const soloOrHost = !(typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient());
+                    if (soloOrHost) {
+                        let bx = state.waterBoundaryX - 70, by = p.y;
+                        try {
+                            if (typeof WorldSystem !== 'undefined' && WorldSystem.lootClamp) {
+                                const c = WorldSystem.lootClamp(state, p.x - 120, p.y + 40);
+                                bx = c.x; by = c.y;
+                            }
+                        } catch (e) {}
+                        const m = {
+                            id: 'boss' + Date.now() + Math.random(),
+                            species: fish.species,
+                            x: bx, y: by,
+                            hp: Math.max(1, Math.round(fish.hp)), maxHp: fish.maxHp,
+                            vx: 0, vy: 0, chargeCooldown: 2, isCharging: false,
+                            phase: 2, isEnraged: true, enrageTimer: 999,
+                            _announced: true, // custom P2 cinematic above, no fallback banner
+                            _introMode: 'rise',
+                            dormantUntil: (state.time || 0) + 3,
+                        };
+                        (state.monstersOnLand = state.monstersOnLand || []).push(m);
+                        state.activeBoss = m;
+                        if (typeof Ritual !== 'undefined' && Ritual.fightCountdown) Ritual.fightCountdown(state, m);
+                    }
+                } catch (e) {}
+                try { this.escapeFish(state, ''); } catch (e) {}
+                return;
+            }
             const ang = (fish.orbitAngle = (fish.orbitAngle || Math.random() * Math.PI * 2) + delta * (isHydraSea ? 0.95 : 0.55));
             const R = isHydraSea ? 360 : 300;
             const weave = isHydraSea ? Math.sin(state.time * 2.2) * 90 : 0;
@@ -907,15 +1118,75 @@ const Fishing = {
             try { audio.playSplash(); } catch (e) {}
             state.screenShake = 5;
             Particles.spawnParticles(state, fish.x, fish.y, '#fef3c7', 14);
-            Particles.showFloatingText(state, "BEACHED!", fish.x, fish.y - 40, '#facc15');
-            UI.updateStatusBanner("It's on the sand! Keep reeling to finish dragging it in!", 'Step 4', 'amber');
+            Particles.showFloatingText(state, T('t_beached'), fish.x, fish.y - 40, '#facc15');
+            UI.updateStatusBanner(T('t_keep_reeling'), T('t_beached_tag'), 'amber');
         }
+
+        // Deck landing: when YOU stand on a deck (mainland bridge / isle
+        // pier), the catch must physically slide onto YOUR planks. Without
+        // this, BEACHED fired at 130-190px out in open water and loot
+        // teleported to the far shore — the "invisible wall" on the bridge.
+        let deckSpot = null, onDeck = false;
+        try {
+            deckSpot = this.deckSpotFor(state, p, fish);
+            if (deckSpot) {
+                onDeck = Math.hypot(fish.x - deckSpot.x, fish.y - deckSpot.y) < 40;
+                if (fish.dragState === 'BEACHING' && !onDeck) {
+                    const ddx = deckSpot.x - fish.x, ddy = deckSpot.y - fish.y;
+                    const dd = Math.hypot(ddx, ddy) || 1;
+                    const homing = 900 * delta;
+                    fish.vx += (ddx / dd) * homing;
+                    fish.vy += (ddy / dd) * homing;
+                }
+            }
+        } catch (e) { deckSpot = null; }
 
         fish.x += fish.vx * delta;
         fish.y += fish.vy * delta;
 
+        // TITAN SLAM landing (whale breach): the fish hangs skyward, then
+        // comes down ON THE ANGLER — earthquake blast at the player's feet.
+        // Sidestep the impact ring: it lands where you STAND, not where
+        // you WERE, so keep moving.
+        if (fish._slamT && fish._slamT > 0 && !fish.isDead) {
+            fish._slamT -= delta;
+            if (Math.random() < 0.5 && typeof Particles !== 'undefined') {
+                Particles.spawnParticles(state, fish.x, fish.y, '#bae6fd', 2, { size: 4 });
+            }
+            if (fish._slamT <= 0) {
+                fish._slamT = 0;
+                fish.vy = 1500; // crashing back down
+                const px = p.x, py = p.y;
+                const slamDmg = fish._slamDmg || Math.round((fish.species.attack || 100) * 2);
+                state.delayedBlasts.push({
+                    x: px, y: py, radius: 150, damage: slamDmg,
+                    timer: 0.45, color: '#93c5fd', shake: 30,
+                    leaveHazard: true, hazardType: 'mud', hazardDps: 22, hazardDuration: 4.0
+                });
+                // Aftershock ring
+                state.delayedBlasts.push({
+                    x: px, y: py, radius: 90, damage: Math.round(slamDmg * 0.6),
+                    timer: 0.9, color: '#fbbf24', shake: 20,
+                    leaveHazard: false
+                });
+                state.screenShake = Math.max(state.screenShake || 0, 30);
+                try { audio.playExplosion(); } catch (e) {}
+                try { audio.playThunder(); } catch (e) {}
+                Particles.spawnParticles(state, px, py, '#d6b98c', 30, { size: 6 });
+                Particles.spawnParticles(state, px, py, '#93c5fd', 20, { size: 5 });
+                Particles.showFloatingText(state, '💥 EARTHQUAKE!', px, py - 70, '#fbbf24');
+                UI.updateStatusBanner('The whale breached on YOU! Keep moving when it leaps!', 'Quake', 'rose');
+            }
+        }
+
         if (fish.dragState === 'BEACHING' || fish.dragState === 'BEACHED') {
-            const sandFriction = Math.pow(CONFIG.DRAG_LAND_RESISTANCE, delta * 60);
+            // Swimming up onto YOUR deck is still swimming: water friction
+            // until the fish overlaps the planks, sand friction after.
+            // (Land friction from 190px out was half the "wall" feeling.)
+            let deckSwim = false;
+            try { deckSwim = !!(deckSpot && !onDeck); } catch (e) {}
+            const res = deckSwim ? CONFIG.DRAG_WATER_RESISTANCE : CONFIG.DRAG_LAND_RESISTANCE;
+            const sandFriction = Math.pow(res, delta * 60);
             fish.vx *= sandFriction;
             fish.vy *= sandFriction;
         } else {
@@ -977,7 +1248,14 @@ const Fishing = {
                         ? (WorldSystem.onBridge(state, p.x, p.y) || WorldSystem.onBridge(state, fish.x, fish.y)) : false);
             } catch (e) {}
             const grabR = offMain ? 130 : 70;
-            const closeEnough = distToP < grabR || (fishOnLand && distToP < grabR + 60) || (!offMain && dxToShore < -30);
+            let closeEnough = distToP < grabR || (fishOnLand && distToP < grabR + 60) || (!offMain && dxToShore < -30);
+            // Deck landing gate: while the fish is still swimming toward
+            // YOUR planks, hold BEACHING even inside grab range — the catch
+            // completes on deck contact (or touching you), never remotely
+            // in open water. Genuine sand landings pass straight through.
+            try {
+                if (deckSpot && !onDeck && !fishOnLand && distToP > 48) closeEnough = false;
+            } catch (e) {}
 
             if (closeEnough || (fish.isDead && (offMain ? distToP < 130 : dxToShore < 0))) {
                 fish.dragState = 'BEACHED';
@@ -1084,8 +1362,9 @@ const Fishing = {
         if (fish.dragState === 'BEACHING') {
             const dragHud = document.getElementById('drag-hud');
             if (dragHud) dragHud.classList.remove('hidden');
-            // Piers + isles: progress = distance closed since beaching
-            // (the surf-line bar is meaningless off the mainland beach).
+            // Piers + isles: progress = distance closed since beaching.
+            // Threshold-aware: the bar hits 100% exactly where BEACHED
+            // fires (grab radius / surf line), never stalls at 50-90%.
             let progress = 0;
             try {
                 const offBeach = (typeof WorldSystem !== 'undefined' &&
@@ -1093,23 +1372,42 @@ const Fishing = {
                      (WorldSystem.onBridge && WorldSystem.onBridge(state, p.x, p.y))));
                 if (offBeach) {
                     const from = fish.beachFrom || 1;
-                    progress = Utils.clamp(1 - Math.hypot(p.x - fish.x, p.y - fish.y) / from, 0, 1);
+                    // Deck landing: measure fish→planks, not fish→you, so
+                    // the bar fills as it slides up onto the deck.
+                    let deck = null;
+                    try { deck = this.deckSpotFor(state, p, fish); } catch (e) {}
+                    if (deck) {
+                        const dd = Math.hypot(fish.x - deck.x, fish.y - deck.y);
+                        if (fish.beachDeckFrom == null || fish.beachDeckFrom < dd) fish.beachDeckFrom = dd;
+                        const df = fish.beachDeckFrom || 1;
+                        progress = df < 60 ? (dd < 40 ? 1 : 0.9)
+                            : Utils.clamp(1 - dd / df, 0, 1);
+                    } else {
+                        const grab = 130; // mirrors the offMain grabR below
+                        const dist = Math.hypot(p.x - fish.x, p.y - fish.y);
+                        progress = from <= grab ? 1 : Utils.clamp((from - dist) / (from - grab), 0, 1);
+                    }
                 } else {
                     const startX = state.waterBoundaryX + 35;
-                    const endX = state.waterBoundaryX - 40;
+                    const endX = state.waterBoundaryX - 30; // BEACHED fires at dxToShore < -30
                     progress = Utils.clamp((startX - fish.x) / (startX - endX), 0, 1);
                 }
             } catch (e) {
                 const startX = state.waterBoundaryX + 35;
-                const endX = state.waterBoundaryX - 40;
+                const endX = state.waterBoundaryX - 30;
                 progress = Utils.clamp((startX - fish.x) / (startX - endX), 0, 1);
             }
 
             const dragBar = document.getElementById('drag-bar');
-            if (dragBar) dragBar.style.width = `${progress * 100}%`;
-
             const dragDist = document.getElementById('drag-dist');
-            if (dragDist) dragDist.innerText = `${Math.round(progress * 100)}%`;
+            // DOM-write guard (see UI.updateTensionBar): the bar moves in
+            // whole percents; skip identical frames.
+            const dpct = Math.round(progress * 100);
+            if (this._dragPct !== dpct) {
+                this._dragPct = dpct;
+                if (dragBar) dragBar.style.width = `${dpct}%`;
+                if (dragDist) dragDist.innerText = `${dpct}%`;
+            }
         } else if (fish.dragState === 'IN_WATER') {
             const dragHud = document.getElementById('drag-hud');
             if (dragHud) dragHud.classList.add('hidden');
@@ -1128,11 +1426,12 @@ const Fishing = {
                 // In co-op the catcher's sim owns the fight: fresh shots
                 // are tagged (owner = catcher) and, for clients, mirrored
                 // to the room so EVERY peer sees the skill (see mirrorSkill).
-                let beforeP = -1, beforeH = -1, beforeB = -1;
+                let beforeP = -1, beforeH = -1, beforeB = -1, beforeS = -1;
                 try {
                     if (state.projectiles) beforeP = state.projectiles.length;
                     if (state.groundHazards) beforeH = state.groundHazards.length;
                     if (state.delayedBlasts) beforeB = state.delayedBlasts.length;
+                    if (state.sonicBooms) beforeS = state.sonicBooms.length;
                 } catch (e) {}
                 handler(fish, {
                     state,
@@ -1155,9 +1454,9 @@ const Fishing = {
                             if (isMPClient) pr.local = true; // host snapshot keeps them
                         }
                     }
-                    // Mirror the whole skill (shots + zones) to the room.
+                    // Mirror the whole skill (shots + zones + sonic VFX) to the room.
                     if (me && isMPClient && typeof Multiplayer !== 'undefined' && Multiplayer.mirrorSkill) {
-                        Multiplayer.mirrorSkill(state, beforeP, beforeH, beforeB);
+                        Multiplayer.mirrorSkill(state, beforeP, beforeH, beforeB, beforeS);
                     }
                 } catch (e) {}
             }

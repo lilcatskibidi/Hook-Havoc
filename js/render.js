@@ -55,6 +55,14 @@ const GunSkinLoader = {
         return 'ah_gunskin_' + id;
     },
 
+    // True when the cached art is a player UPLOAD (not neutral shipped
+    // art): uploads render 30% bigger so they match the procedural
+    // models' presence (see drawGun).
+    isUpload(id) {
+        try { return this.cache.has(id) && !this.shipped.has(id); }
+        catch (e) { return false; }
+    },
+
     // Neutral shipped art only (never a per-PC upload): safe to show on
     // FOREIGN bodies in a room — it looks identical for everyone.
     getShipped(id) {
@@ -350,7 +358,7 @@ const Render = {
         this.drawHookedFish(state, ctx);
         this.drawLandMonsters(state, ctx);
         this.drawEnemies(state, ctx);
-        if (!inCave && !onIsland) this.drawShopZones(state, ctx);
+        if (!inCave) this.drawShopZones(state, ctx);
         if (!inCave && !onIsland && typeof NPC !== 'undefined' && NPC.drawWorld) NPC.drawWorld(state, ctx);
         if (!onIsland && typeof Ritual !== 'undefined' && Ritual.drawWorld) Ritual.drawWorld(state, ctx);
         this.drawBullets(state, ctx);
@@ -360,6 +368,11 @@ const Render = {
         } catch (e) {}
         this.drawPlayer(state, ctx);
         this.drawParticles(state, ctx);
+        this.drawSonicBooms(state, ctx);
+        this.drawRealmFx(state, ctx);
+        this.drawLightning(state, ctx);
+        this.drawIntroSpotlight(state, ctx);
+        this.drawSeaTint(state, ctx);
         // Cave darkness + player lantern: after the world + player so the
         // fog settles over rock AND entities, but under floating texts.
         if (inCave && typeof Ritual !== 'undefined' && Ritual.drawCaveFog) Ritual.drawCaveFog(state, ctx);
@@ -499,6 +512,13 @@ const Render = {
         ctx.fillStyle = sun;
         ctx.fillRect(beachStart, beachTop, beachEnd - beachStart, beachBot - beachTop);
         ctx.restore();
+
+        // Spawn camp props (umbrella + fish radar board).
+        try {
+            if (typeof WorldSystem !== 'undefined' && WorldSystem.drawSpawnCamp) {
+                WorldSystem.drawSpawnCamp(state, ctx);
+            }
+        } catch (e) {}
     },
 
     drawWater(state, ctx) {
@@ -514,6 +534,12 @@ const Render = {
         const span = Math.max(1, (B.MAX_X + 2000) - w);
         const fShore = Math.min(0.5, ZE.SHORE / span);
         const fDeep = Math.min(0.9, ZE.SHALLOW / span);
+        // ONE shared sea asset (same hues as the isles — see
+        // WorldSystem.paintSeaBase): tiers only remap the stops.
+        if (typeof WorldSystem !== 'undefined' && WorldSystem.paintSeaBase) {
+            WorldSystem.paintSeaBase(ctx, w, B.MIN_Y - 500, (B.MAX_X - w) + 2000, (B.MAX_Y - B.MIN_Y) + 1000, false,
+                [[0, '#1093b8'], [fShore, '#0c6e94'], [fDeep, '#075985'], [1, '#041f33']]);
+        } else {
         const grad = ctx.createLinearGradient(w, 0, B.MAX_X + 2000, 0);
         grad.addColorStop(0, '#1093b8');
         grad.addColorStop(fShore, '#0c6e94');
@@ -521,6 +547,7 @@ const Render = {
         grad.addColorStop(1, '#041f33');
         ctx.fillStyle = grad;
         ctx.fillRect(w, B.MIN_Y - 500, (B.MAX_X - w) + 2000, (B.MAX_Y - B.MIN_Y) + 1000);
+        }
 
         const depthGrad = ctx.createLinearGradient(0, B.MIN_Y, 0, B.MAX_Y);
         depthGrad.addColorStop(0, 'rgba(2,132,199,0.15)');
@@ -708,6 +735,18 @@ const Render = {
         const B = CONFIG.WORLD;
         const t = state.time;
 
+        // The pier deck punches through the surf: foam/bubbles/edge must
+        // break around it, never wash over the planks. (Pier draws first
+        // via drawUnder, so anything painted here would overlay the deck.)
+        let bridgeBand = null;
+        try {
+            if (typeof WorldSystem !== 'undefined' && WorldSystem.bridgeDef) {
+                const b = WorldSystem.bridgeDef(state);
+                if (b) bridgeBand = { y0: b.y - b.half - 16, y1: b.y + b.half + 16 };
+            }
+        } catch (e) {}
+        const inBand = (y) => !!(bridgeBand && y > bridgeBand.y0 && y < bridgeBand.y1);
+
         const foamGrad = ctx.createLinearGradient(w - 45, 0, w + 30, 0);
         foamGrad.addColorStop(0.00, 'rgba(255, 250, 235, 0)');
         foamGrad.addColorStop(0.20, 'rgba(255, 250, 235, 0.25)');
@@ -715,17 +754,24 @@ const Render = {
         foamGrad.addColorStop(0.80, 'rgba(224, 242, 254, 0.90)');
         foamGrad.addColorStop(1.00, 'rgba(224, 242, 254, 0)');
         ctx.fillStyle = foamGrad;
-        ctx.fillRect(w - 45, B.MIN_Y - 500, 75, (B.MAX_Y - B.MIN_Y) + 1000);
+        if (bridgeBand) {
+            ctx.fillRect(w - 45, B.MIN_Y - 500, 75, (bridgeBand.y0) - (B.MIN_Y - 500));
+            ctx.fillRect(w - 45, bridgeBand.y1, 75, (B.MAX_Y + 500) - bridgeBand.y1);
+        } else {
+            ctx.fillRect(w - 45, B.MIN_Y - 500, 75, (B.MAX_Y - B.MIN_Y) + 1000);
+        }
 
         ctx.save();
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
         ctx.lineWidth = 3;
         ctx.beginPath();
+        let penDown = false;
         for (let y = B.MIN_Y - 100; y < B.MAX_Y + 100; y += 6) {
+            if (inBand(y)) { penDown = false; continue; }
             const wave1 = Math.sin(y * 0.045 + t * 2.2) * 4;
             const wave2 = Math.sin(y * 0.11 - t * 3.1) * 2;
             const x = w + wave1 + wave2;
-            if (y === B.MIN_Y - 100) ctx.moveTo(x, y);
+            if (!penDown) { ctx.moveTo(x, y); penDown = true; }
             else ctx.lineTo(x, y);
         }
         ctx.stroke();
@@ -733,10 +779,12 @@ const Render = {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
+        penDown = false;
         for (let y = B.MIN_Y - 100; y < B.MAX_Y + 100; y += 6) {
+            if (inBand(y)) { penDown = false; continue; }
             const wave = Math.sin(y * 0.06 + t * 1.6 + 0.9) * 5;
             const x = w - 8 + wave;
-            if (y === B.MIN_Y - 100) ctx.moveTo(x, y);
+            if (!penDown) { ctx.moveTo(x, y); penDown = true; }
             else ctx.lineTo(x, y);
         }
         ctx.stroke();
@@ -746,6 +794,7 @@ const Render = {
         ctx.globalAlpha = this._fade(state);
         ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
         for (let y = B.MIN_Y - 50; y < B.MAX_Y + 50; y += 24) {
+            if (inBand(y)) continue;
             const phase = Math.sin(y * 0.02 + t * 1.8) * 0.5 + 0.5;
             const bx = w - 6 - phase * 22;
             const by = y;
@@ -760,10 +809,12 @@ const Render = {
         ctx.strokeStyle = 'rgba(60, 40, 25, 0.35)';
         ctx.lineWidth = 6;
         ctx.beginPath();
+        penDown = false;
         for (let y = B.MIN_Y - 100; y < B.MAX_Y + 100; y += 8) {
+            if (inBand(y)) { penDown = false; continue; }
             const wave = Math.sin(y * 0.04 + t * 1.5) * 3;
             const x = w + wave;
-            if (y === B.MIN_Y - 100) ctx.moveTo(x, y);
+            if (!penDown) { ctx.moveTo(x, y); penDown = true; }
             else ctx.lineTo(x, y);
         }
         ctx.stroke();
@@ -842,10 +893,21 @@ const Render = {
     // Per-rod bobber art. PNG (assets/bobbers/<model>.png or player
     // upload) wins when present, fitted without stretching; otherwise one
     // of the 6 procedural models. accent = rod color, sc = scale, t = time.
-    drawBobberModel(ctx, x, y, model, accent, sc, t) {
+    // holder = { pid, me }: a FOREIGN fisher's bobber wears ONLY that
+    // holder's own art (their upload, still downloading -> procedural
+    // until it lands) — never yours.
+    drawBobberModel(ctx, x, y, model, accent, sc, t, holder) {
         sc = sc || 1;
         accent = accent || '#ef4444';
-        const img = (typeof BobberLoader !== 'undefined' && model) ? BobberLoader.get(model) : null;
+        let img = null;
+        try {
+            const holderPid = (typeof holder === 'string') ? holder : (holder && holder.pid);
+            const myPid = (holder && typeof holder === 'object') ? holder.me : null;
+            if (holderPid && myPid && holderPid !== myPid && typeof PeerSkins !== 'undefined' && PeerSkins.resolveBobber) {
+                img = PeerSkins.resolveBobber(model, holderPid);
+            }
+        } catch (e) { img = null; }
+        if (!img && typeof BobberLoader !== 'undefined' && model) img = BobberLoader.get(model);
         if (img && img.complete && img.naturalWidth > 0) {
             const iw = img.naturalWidth, ih = img.naturalHeight;
             const k = Math.min(30 * sc / iw, 30 * sc / ih);
@@ -1114,6 +1176,9 @@ const Render = {
     drawBossMonster(state, ctx, m) {
         const p = state.player;
         const species = m.species;
+        // Intro grow: bosses that emerge from portals rise from 25% size
+        // to full over their cinematic (see _sizeMult in Combat).
+        const S = species.size * (m._sizeMult || 1);
         const hpRatio = m.hp / (m.maxHp || species.maxHp || 1);
         const phase2 = m.phase === 2;
         const t = state.time;
@@ -1122,7 +1187,7 @@ const Render = {
 
         // Ground aura ring
         ctx.save();
-        const auraR = species.size * 1.9;
+        const auraR = S * 1.9;
         const auraPulse = 1 + Math.sin(t * 3) * 0.08;
         const auraColor = phase2 ? '#dc2626' : species.color;
 
@@ -1145,8 +1210,10 @@ const Render = {
         ctx.setLineDash([]);
         ctx.restore();
 
-        // Phase 2 orbiting flame sparks
-        if (phase2) {
+        // Phase 2+ orbiting sparks — boss aura color when defined
+        // (Void burns violet, Emperor burns red), else ember red.
+        if (m.phase >= 2) {
+            const aura = species.aura2 || '#dc2626';
             ctx.save();
             for (let i = 0; i < 8; i++) {
                 const a = (i / 8) * Math.PI * 2 + t * 1.5;
@@ -1154,11 +1221,12 @@ const Render = {
                 const fx = m.x + Math.cos(a) * rr;
                 const fy = m.y + Math.sin(a) * rr;
                 const flameSize = 4 + Math.sin(t * 8 + i) * 2;
-                ctx.fillStyle = 'rgba(220,38,38,0.8)';
+                ctx.fillStyle = aura;
+                ctx.globalAlpha = 0.8;
                 ctx.beginPath();
                 ctx.arc(fx, fy, flameSize, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.fillStyle = 'rgba(251,191,36,0.7)';
+                ctx.fillStyle = 'rgba(255,255,255,0.7)';
                 ctx.beginPath();
                 ctx.arc(fx, fy, flameSize * 0.5, 0, Math.PI * 2);
                 ctx.fill();
@@ -1170,7 +1238,7 @@ const Render = {
         ctx.save();
         ctx.shadowColor = phase2 ? '#dc2626' : species.color;
         ctx.shadowBlur = 30 + Math.sin(t * 4) * 8;
-        this.drawFishModel(ctx, m.x, m.y, species.size, species, {
+        this.drawFishModel(ctx, m.x, m.y, S, species, {
             angle: angle,
             isRaging: true,
             isInflated: m.isInflated
@@ -1178,7 +1246,7 @@ const Render = {
         ctx.restore();
 
         // Crown
-        const crownY = m.y - species.size - 24;
+        const crownY = m.y - S - 24;
         const crownX = m.x;
         ctx.save();
         ctx.translate(crownX, crownY);
@@ -1199,10 +1267,29 @@ const Render = {
         ctx.fillRect(-10, 4, 20, 2);
         ctx.restore();
 
+        // Self-destruct countdown above the crown (Void P3).
+        try {
+            if (m._selfDestructAt && (m.hp || 0) > 0) {
+                const left = Math.max(0, m._selfDestructAt - (state.time || 0));
+                const mm = Math.floor(left / 60), ss = Math.floor(left % 60);
+                const urgent = left < 10;
+                ctx.save();
+                ctx.textAlign = 'center';
+                ctx.font = `black ${urgent ? 20 : 16}px Work Sans`;
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+                const label = `💥 ${mm}:${String(ss).padStart(2, '0')}`;
+                ctx.strokeText(label, m.x, crownY - 14);
+                ctx.fillStyle = urgent ? '#ef4444' : '#fbbf24';
+                ctx.fillText(label, m.x, crownY - 14);
+                ctx.restore();
+            }
+        } catch (e) {}
+
         // Inline HP bar
-        const barW = species.size * 2.6;
+        const barW = S * 2.6;
         const barH = 8;
-        const barY = m.y - species.size - 46;
+        const barY = m.y - S - 46;
         ctx.save();
         ctx.fillStyle = 'rgba(15,23,42,0.95)';
         ctx.strokeStyle = phase2 ? '#dc2626' : '#f59e0b';
@@ -1293,10 +1380,14 @@ const Render = {
                 renderSeagull(ctx, e);
             } else if (e.enemyType === 'gullMissile' && typeof renderGullMissile === 'function') {
                 renderGullMissile(ctx, e);
-            } else if (e.enemyType === 'jumpingFish' && typeof renderJumpingFish === 'function') {
+            } else if ((e.enemyType === 'jumpingFish' || e.enemyType === 'hydraSoldier') && typeof renderJumpingFish === 'function') {
                 renderJumpingFish(ctx, e);
             } else if (e.enemyType === 'beachCrab' && typeof renderBeachCrab === 'function') {
                 renderBeachCrab(ctx, e);
+            } else if (e.enemyType === 'duneBeetle' && typeof renderDuneBeetle === 'function') {
+                renderDuneBeetle(ctx, e);
+            } else if (e.enemyType === 'sandUrchin' && typeof renderSandUrchin === 'function') {
+                renderSandUrchin(ctx, e);
             }
             
             // Health bar for enemies (boss gets a wider bar)
@@ -1317,7 +1408,10 @@ const Render = {
             const label = e.isBoss ? `⛈ ${(e.bossName || 'STORMCALLER')} (MINIBOSS)` :
                 e.enemyType === 'seagull' ? 'Seagull (loot!)' :
                 e.enemyType === 'gullMissile' ? '!' :
-                e.enemyType === 'jumpingFish' ? `${(e.species && e.species.name) || 'Jumping Fish'}` : 'Beach Crab (loot!)';
+                e.enemyType === 'duneBeetle' ? 'Dune Beetle (loot!)' :
+                e.enemyType === 'sandUrchin' ? 'Sand Urchin (loot!)' :
+                e.enemyType === 'jumpingFish' ? `${(e.species && e.species.name) || 'Jumping Fish'}` :
+                e.enemyType === 'hydraSoldier' ? `🐍 ${(e.species && e.species.name) || 'Hydra Soldier'}` : 'Beach Crab (loot!)';
             ctx.strokeText(label, e.x, e.y - (e.isBoss ? 58 : 35));
             ctx.fillText(label, e.x, e.y - (e.isBoss ? 58 : 35));
         });
@@ -1325,10 +1419,30 @@ const Render = {
 
     // ============================================================
     //  WORLD SHOP / CASINO ZONES — walk in, press E
-    //  SHOP circle = Beach Shop (shop modal opens on Beach tab).
+    //  SHOP circle = main shop (Beach Shop tab was removed).
     // ============================================================
     getShopZones(state) {
         const B = CONFIG.WORLD;
+        // Island trading posts: each isle gets SHOP + CASINO pads by the
+        // dock, so islands play like the mainland beach (no more sailing
+        // home to sell). Ritual circles stay mainland by design.
+        try {
+            if (state && state.player && state.player.onIsland &&
+                typeof WorldSystem !== 'undefined' && WorldSystem.islandOf) {
+                const isl = WorldSystem.islandOf(state);
+                const pier = (WorldSystem.islandPier) ? WorldSystem.islandPier(state) : null;
+                if (isl && isl.room && pier) {
+                    const cx = (isl.room.x0 + isl.room.x1) / 2;
+                    const px = Utils.clamp(pier.x1 - 320, isl.room.x0 + 140, isl.room.x1 - 140);
+                    const clampY = (y) => Utils.clamp(y, isl.room.y0 + 150, isl.room.y1 - 150);
+                    void cx;
+                    return [
+                        { id: 'shop',   x: px, y: clampY(pier.y - 300), radius: 90, color: '#f59e0b', label: 'SHOP',   icon: '🏪' },
+                        { id: 'casino', x: px, y: clampY(pier.y + 300), radius: 90, color: '#e879f9', label: 'CASINO', icon: '🎰' },
+                    ];
+                }
+            }
+        } catch (e) {}
         // Deep inside the beach, away from the surf (playable on any screen
         // width — clamped so the pads never leave the sand).
         const x = Utils.clamp(state.waterBoundaryX - 320, B.MIN_X + 130, state.waterBoundaryX - 110);
@@ -1390,6 +1504,15 @@ const Render = {
             ctx.strokeText(hint, z.x, z.y + 22);
             ctx.fillStyle = near ? '#fef08a' : z.color;
             ctx.fillText(hint, z.x, z.y + 22);
+            // Circled-E badge above the pad (radar style) when in range.
+            if (near) {
+                const bob = Math.sin(t * 4) * 3;
+                ctx.font = 'black 17px Work Sans';
+                ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+                ctx.strokeText('ⓔ', z.x, z.y - z.radius - 18 + bob);
+                ctx.fillStyle = '#fef08a';
+                ctx.fillText('ⓔ', z.x, z.y - z.radius - 18 + bob);
+            }
             ctx.restore();
         }
     },
@@ -1535,13 +1658,21 @@ const Render = {
         ctx.fill();
 
         const g = ctx.createRadialGradient(-4, -4, 2, 0, 0, p.radius);
-        g.addColorStop(0, '#38bdf8');
-        g.addColorStop(1, '#0369a1');
+        // In MP rooms the body wears your lobby diver color; solo stays blue.
+        let bodyCol = '#38bdf8', edgeCol = '#0369a1', ringCol = '#0ea5e9';
+        try {
+            if (typeof Multiplayer !== 'undefined' && Multiplayer.roomCode && Multiplayer.playerSkin) {
+                const c = Multiplayer.skinColor(Multiplayer.playerSkin());
+                if (c) { bodyCol = c.body; edgeCol = c.edge; ringCol = c.body; }
+            }
+        } catch (e) {}
+        g.addColorStop(0, bodyCol);
+        g.addColorStop(1, edgeCol);
         ctx.fillStyle = g;
         ctx.beginPath();
         ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = '#0ea5e9';
+        ctx.strokeStyle = ringCol;
         ctx.lineWidth = 2;
         ctx.stroke();
 
@@ -1624,7 +1755,7 @@ const Render = {
         // Custom PNG skin: fitted into the 80x40 gun footprint at (22, 0),
         // aspect preserved, never stretched. Falls through to procedural.
         const skinPref = (p.gunSkins && p.gunSkins[w.id]) || 'auto';
-        let skinImg = null;
+        let skinImg = null, skinZoom = 1;
         if (w.skin !== false && skinPref !== 'classic' && typeof GunSkinLoader !== 'undefined') {
             // holder = { pid, me } or pid string: a FOREIGN body in a room
             // wears ONLY that holder's own custom art (else neutral shipped
@@ -1634,13 +1765,20 @@ const Render = {
             const myPid = (holder && typeof holder === 'object') ? holder.me : null;
             if (holderPid && myPid && holderPid !== myPid && typeof PeerSkins !== 'undefined' && PeerSkins.resolveGun) {
                 skinImg = PeerSkins.resolveGun(skinId, holderPid) || GunSkinLoader.getShipped(skinId);
+                // Remote art is always somebody's upload: render it big.
+                if (skinImg && skinImg !== GunSkinLoader.getShipped(skinId)) skinZoom = 1.3;
             } else {
                 skinImg = GunSkinLoader.get(skinId);
+                // Uploads render 30% bigger to match the procedural models;
+                // neutral shipped art keeps its authored size.
+                try {
+                    if (skinImg && GunSkinLoader.isUpload && GunSkinLoader.isUpload(skinId)) skinZoom = 1.3;
+                } catch (e) {}
             }
         }
         if (skinImg && skinImg.complete && skinImg.naturalWidth > 0) {
             const iw = skinImg.naturalWidth, ih = skinImg.naturalHeight;
-            const k = Math.min(80 / iw, 40 / ih);
+            const k = Math.min(80 / iw, 40 / ih) * skinZoom;
             ctx.drawImage(skinImg, 22 - iw * k / 2, -ih * k / 2, iw * k, ih * k);
         } else switch (w.type) {
 
@@ -1996,6 +2134,56 @@ const Render = {
         }
     },
 
+    // Custom fish PNGs often ship with transparent padding (export
+    // margins, full-scene uploads) — contain-fit would then render them
+    // mini next to procedural models. Trim to the opaque bbox ONCE per
+    // image (cached); failures fall back to the raw image.
+    _pngTrimCache: null,
+    _trimmedFish(img) {
+        try {
+            if (!this._pngTrimCache) this._pngTrimCache = new Map();
+            if (this._pngTrimCache.has(img)) return this._pngTrimCache.get(img);
+            let out = img;
+            try {
+                const w = img.naturalWidth, h = img.naturalHeight;
+                if (w > 0 && h > 0 && w * h <= 8 * 1000 * 1000) {
+                    const tmp = document.createElement('canvas');
+                    tmp.width = w; tmp.height = h;
+                    const t = tmp.getContext('2d', { willReadFrequently: true });
+                    t.drawImage(img, 0, 0);
+                    const px = t.getImageData(0, 0, w, h).data;
+                    let x0 = w, y0 = h, x1 = -1, y1 = -1;
+                    for (let y = 0; y < h; y += 2) {
+                        for (let x = 0; x < w; x += 2) {
+                            if (px[(y * w + x) * 4 + 3] > 8) {
+                                if (x < x0) x0 = x;
+                                if (x > x1) x1 = x;
+                                if (y < y0) y0 = y;
+                                if (y > y1) y1 = y;
+                            }
+                        }
+                    }
+                    // Only adopt the trim when it actually removes padding
+                    // (guard against fully-transparent / noise specks).
+                    if (x1 > x0 && y1 > y0) {
+                        const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+                        if (bw < w * 0.98 || bh < h * 0.98) {
+                            const cv = document.createElement('canvas');
+                            cv.width = Math.max(1, bw + 4);
+                            cv.height = Math.max(1, bh + 4);
+                            const c = cv.getContext('2d');
+                            c.drawImage(tmp, Math.max(0, x0 - 2), Math.max(0, y0 - 2), cv.width, cv.height, 0, 0, cv.width, cv.height);
+                            out = cv;
+                        }
+                    }
+                }
+            } catch (e) { out = img; }
+            if (this._pngTrimCache.size > 120) this._pngTrimCache.clear();
+            this._pngTrimCache.set(img, out);
+            return out;
+        } catch (e) { return img; }
+    },
+
     // Shop snapshot: render the ACTUAL gun model (procedural or custom PNG
     // skin) to an offscreen canvas and return a dataURL <img> source, so
     // buyers see what they're buying. Cached per weapon+skin-revision.
@@ -2073,8 +2261,251 @@ const Render = {
         ctx.globalAlpha = 1;
     },
 
-    drawFloatingTexts(state, ctx) {
-        if (!state.floatingTexts) return;
+    // Sonic boom render: anime roar VFX in world space — impact flash,
+    // staggered ripple rings, radiating speed lines, one rotating dashed
+    // "air distortion" ring. Pure visual, driven by state.time.
+    drawSonicBooms(state, ctx) {
+        let list = null;
+        try { list = state.sonicBooms; } catch (e) { return; }
+        if (!list || !list.length) return;
+        const t = state.time || 0;
+        ctx.save();
+        ctx.lineCap = 'round';
+        for (const b of list) {
+            try {
+                const p = (t - (b.t0 || 0)) / (b.dur || 0.8);
+                if (!(p >= 0) || p >= 1) continue;
+                const maxR = b.maxR || 220;
+                const col = b.color || '#f87171';
+                const ease = 1 - Math.pow(1 - p, 3);
+                // 1. Impact frame: hot white-core flash, first 18%.
+                if (b.flash !== false && p < 0.18) {
+                    const fp = p / 0.18;
+                    ctx.globalAlpha = (1 - fp) * 0.55;
+                    ctx.fillStyle = '#ffffff';
+                    ctx.beginPath();
+                    ctx.arc(b.x, b.y, maxR * 0.32 * (0.4 + 0.6 * fp), 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalAlpha = (1 - fp) * 0.35;
+                    ctx.fillStyle = col;
+                    ctx.beginPath();
+                    ctx.arc(b.x, b.y, maxR * 0.42 * (0.4 + 0.6 * fp), 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                // 2. Ripple rings: staggered, fading, white-hot core line.
+                const rings = Math.max(1, b.rings || 3);
+                for (let i = 0; i < rings; i++) {
+                    const rp = p * 1.25 - i * 0.09;
+                    if (rp <= 0 || rp >= 1) continue;
+                    const r = Math.max(1, maxR * (1 - Math.pow(1 - rp, 3)));
+                    const a = (1 - rp) * 0.75;
+                    ctx.globalAlpha = a;
+                    ctx.strokeStyle = col;
+                    ctx.lineWidth = 2 + 7 * (1 - rp);
+                    ctx.beginPath();
+                    ctx.arc(b.x, b.y, r, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.globalAlpha = a * 0.7;
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.arc(b.x, b.y, Math.max(1, r - 4), 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+                // 3. Speed lines: radiate outward, stretch then dissolve.
+                const seeds = b.seeds || [];
+                ctx.globalAlpha = (1 - p) * 0.9;
+                ctx.strokeStyle = col;
+                ctx.lineWidth = 3;
+                for (let i = 0; i < seeds.length; i++) {
+                    const a = seeds[i];
+                    const r0 = maxR * (0.15 + 0.75 * ease);
+                    const len = 12 + maxR * 0.22 * (1 - p);
+                    ctx.beginPath();
+                    ctx.moveTo(b.x + Math.cos(a) * r0, b.y + Math.sin(a) * r0);
+                    ctx.lineTo(b.x + Math.cos(a) * (r0 + len), b.y + Math.sin(a) * (r0 + len));
+                    ctx.stroke();
+                }
+                // 4. Distortion shimmer: rotating dashed ring (bent air).
+                ctx.globalAlpha = (1 - p) * 0.5;
+                ctx.strokeStyle = col;
+                ctx.lineWidth = 2;
+                try { ctx.setLineDash([16, 12]); } catch (e) {}
+                try { ctx.lineDashOffset = -p * 90; } catch (e) {}
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, maxR * (0.3 + 0.7 * ease), 0, Math.PI * 2);
+                ctx.stroke();
+                try { ctx.setLineDash([]); } catch (e) {}
+            } catch (e) {}
+        }
+        ctx.globalAlpha = 1;
+        ctx.restore();
+    },
+
+    // Void realm portal: black-hole core + counter-rotating rune rings
+    // + infalling star motes. Pure visual, driven by state.time.
+    drawRealmFx(state, ctx) {
+        let list = null;
+        try { list = state.realmFx; } catch (e) { return; }
+        if (!list || !list.length) return;
+        const t = state.time || 0;
+        ctx.save();
+        ctx.lineCap = 'round';
+        for (const g of list) {
+            try {
+                const p = (t - (g.t0 || 0)) / (g.dur || 6);
+                if (!(p >= 0) || p >= 1) continue;
+                const R = 150;
+                const fade = p < 0.12 ? p / 0.12 : (p > 0.85 ? (1 - p) / 0.15 : 1);
+                // Black core.
+                ctx.globalAlpha = 0.85 * fade;
+                const core = ctx.createRadialGradient(g.x, g.y, 4, g.x, g.y, R * 0.55);
+                core.addColorStop(0, 'rgba(0,0,0,0.95)');
+                core.addColorStop(0.7, 'rgba(20,4,40,0.75)');
+                core.addColorStop(1, 'rgba(20,4,40,0)');
+                ctx.fillStyle = core;
+                ctx.beginPath();
+                ctx.arc(g.x, g.y, R * 0.55, 0, Math.PI * 2);
+                ctx.fill();
+                // Accretion glow rim (blood-red for kill-pits).
+                ctx.globalAlpha = 0.8 * fade;
+                ctx.strokeStyle = g.pit ? '#dc2626' : '#a855f7';
+                ctx.lineWidth = g.pit ? 7 : 5;
+                ctx.beginPath();
+                ctx.arc(g.x, g.y, R * 0.55, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.globalAlpha = 0.6 * fade;
+                ctx.strokeStyle = '#22d3ee';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(g.x, g.y, R * 0.55 + 7, 0, Math.PI * 2);
+                ctx.stroke();
+                // Counter-rotating rune rings.
+                for (let k = 0; k < 2; k++) {
+                    ctx.globalAlpha = (0.55 - k * 0.15) * fade;
+                    ctx.strokeStyle = k ? '#e9d5ff' : '#7c3aed';
+                    ctx.lineWidth = 3 - k;
+                    try { ctx.setLineDash([22 - k * 6, 14]); } catch (e) {}
+                    try { ctx.lineDashOffset = (k ? 1 : -1) * t * (40 + k * 25); } catch (e) {}
+                    ctx.beginPath();
+                    ctx.arc(g.x, g.y, R * (0.68 + k * 0.16), 0, Math.PI * 2);
+                    ctx.stroke();
+                    try { ctx.setLineDash([]); } catch (e) {}
+                }
+                // Infalling star motes (12 deterministic seeds).
+                ctx.fillStyle = '#e9d5ff';
+                for (let i = 0; i < 12; i++) {
+                    const a = (i / 12) * Math.PI * 2 + t * 1.4;
+                    const rr = R * (0.95 - ((t * 0.35 + i * 0.13) % 0.55));
+                    ctx.globalAlpha = 0.85 * fade;
+                    ctx.beginPath();
+                    ctx.arc(g.x + Math.cos(a) * rr, g.y + Math.sin(a) * rr, 2.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            } catch (e) {}
+        }
+        ctx.globalAlpha = 1;
+        ctx.restore();
+    },
+
+    // Lightning bolts: jagged sky-to-ground strikes with a hot core +
+    // colored glow + ground flash. Pure visual, driven by state.time.
+    drawLightning(state, ctx) {
+        let list = null;
+        try { list = state.lightnings; } catch (e) { return; }
+        if (!list || !list.length) return;
+        const t = state.time || 0;
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        for (const l of list) {
+            try {
+                const p = (t - (l.t0 || 0)) / (l.dur || 0.35);
+                if (!(p >= 0) || p >= 1) continue;
+                const segs = l.seeds || l.segs || [];
+                if (segs.length < 2) continue;
+                const a = 1 - p;
+                const w = (l.width || 5);
+                // Colored glow pass.
+                ctx.globalAlpha = a * 0.55;
+                ctx.strokeStyle = l.color || '#fef08a';
+                ctx.lineWidth = w * 2.4;
+                ctx.shadowColor = l.color || '#fef08a';
+                ctx.shadowBlur = 24;
+                ctx.beginPath();
+                ctx.moveTo(segs[0][0], segs[0][1]);
+                for (let i = 1; i < segs.length; i++) ctx.lineTo(segs[i][0], segs[i][1]);
+                ctx.stroke();
+                // White-hot core pass.
+                ctx.globalAlpha = a * 0.95;
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = Math.max(1.5, w * 0.8);
+                ctx.shadowBlur = 0;
+                ctx.beginPath();
+                ctx.moveTo(segs[0][0], segs[0][1]);
+                for (let i = 1; i < segs.length; i++) ctx.lineTo(segs[i][0], segs[i][1]);
+                ctx.stroke();
+                // Ground flash disc.
+                ctx.globalAlpha = a * 0.5;
+                ctx.fillStyle = l.color || '#fef08a';
+                ctx.beginPath();
+                ctx.arc(l.x, l.y, 46 * (0.5 + 0.5 * a), 0, Math.PI * 2);
+                ctx.fill();
+            } catch (e) {}
+        }
+        ctx.globalAlpha = 1;
+        ctx.shadowBlur = 0;
+        ctx.restore();
+    },
+
+    // Intro spotlight: while a boss is dormant in its cinematic, a warm
+    // theatrical light follows it so the arrival never plays in darkness
+    // (night, veil, off-map edges). Reads live state — no sync needed.
+    drawIntroSpotlight(state, ctx) {
+        try {
+            let bx = null, by = null;
+            const ab = state.activeBoss;
+            if (ab && ab.hp > 0 && ab.dormantUntil && (state.time || 0) < ab.dormantUntil &&
+                typeof ab.x === 'number') { bx = ab.x; by = ab.y; }
+            else {
+                const hf = state.fishing && state.fishing.hookedFish;
+                if (hf && hf.species && hf.species.isBoss && hf.dormantUntil &&
+                    (state.time || 0) < hf.dormantUntil && typeof hf.x === 'number') { bx = hf.x; by = hf.y; }
+            }
+            if (bx === null) return;
+            const pulse = 0.75 + 0.25 * Math.sin((state.time || 0) * 3);
+            const R = 300 * pulse;
+            const g = ctx.createRadialGradient(bx, by, 10, bx, by, R);
+            g.addColorStop(0, 'rgba(255,244,214,0.20)');
+            g.addColorStop(0.6, 'rgba(255,244,214,0.07)');
+            g.addColorStop(1, 'rgba(255,244,214,0)');
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(bx, by, R, 0, Math.PI * 2);
+            ctx.fill();
+        } catch (e) {}
+    },
+
+    // Sea tint: while a boss arrives, the whole visible map grades
+    // toward its color (set in bossIntro, expires on its own clock).
+    drawSeaTint(state, ctx) {
+        try {
+            const st = state.seaTint;
+            if (!st || !st.color) return;
+            const left = (st.until || 0) - (state.time || 0);
+            if (left <= 0) { state.seaTint = null; return; }
+            const a = Math.min(0.38, 0.14 + 0.24 * Math.min(1, left / 3));
+            const v = this._view(state, ctx, 600);
+            const g = ctx.createLinearGradient(0, v.y0, 0, v.y1);
+            g.addColorStop(0, 'rgba(0,0,0,0)');
+            g.addColorStop(0.45, this._hexWithAlpha(st.color, a * 0.6));
+            g.addColorStop(1, this._hexWithAlpha(st.color, a));
+            ctx.fillStyle = g;
+            ctx.fillRect(v.x0, v.y0, v.x1 - v.x0, v.y1 - v.y0);
+        } catch (e) {}
+    },
+
+    drawFloatingTexts(state, ctx) {        if (!state.floatingTexts) return;
         state.floatingTexts.forEach(t => {
             ctx.globalAlpha = Math.min(1, t.life);
             ctx.font = 'bold 15px Work Sans';
@@ -2110,7 +2541,7 @@ const Render = {
     //  FISH MODEL DISPATCH
     // ============================================================
     drawFishModel(ctx, x, y, size, species, opts = {}) {
-        const { angle = 0, isRaging = false, isInflated = false, glow = 0 } = opts;
+        const { angle = 0, isRaging = false, isInflated = false, glow = 0, holder = null } = opts;
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(angle);
@@ -2125,20 +2556,40 @@ const Render = {
             ctx.shadowBlur = 20 * glow;
         }
 
-        // Custom art is OPT-IN only: player upload (by species id) wins,
-        // then explicit species.image. Everything else is procedural —
-        // no network request, no 404.
+        // Custom art is OPT-IN only. Local bodies: your upload (by species
+        // id) wins, then explicit species.image. FOREIGN bodies (opts.holder
+        // = { pid, me }): the HOLDER's upload wins, then the shared shipped
+        // species.image — never YOUR upload on THEIR fish.
+        // Everything else is procedural — no network request, no 404.
         if (typeof FishImageLoader !== 'undefined') {
-            const customImg = FishImageLoader.get(species.id);
+            let holderPid = null, myPid = null, foreign = false;
+            try {
+                holderPid = (typeof holder === 'string') ? holder : (holder && holder.pid);
+                myPid = (holder && typeof holder === 'object') ? holder.me : null;
+                foreign = !!(holderPid && myPid && holderPid !== myPid);
+            } catch (e) {}
+            let customImg = null;
+            if (foreign && typeof PeerSkins !== 'undefined' && PeerSkins.resolveFish) {
+                customImg = PeerSkins.resolveFish(species.id, holderPid);
+            } else {
+                customImg = FishImageLoader.get(species.id);
+            }
             const imgId = customImg ? species.id
                 : (typeof species.image === 'string' && species.image.length > 0 ? species.image : null);
             const img = imgId ? (customImg || FishImageLoader.get(imgId)) : null;
             if (img && img.complete && img.naturalWidth > 0) {
                 // Contain (never stretch): any shape — square, 1900x800,
                 // portrait — fits inside the s*2.5 box keeping its pixels.
-                const iw = img.naturalWidth, ih = img.naturalHeight;
-                const k = (s * 2.5) / Math.max(iw, ih);
-                ctx.drawImage(img, -iw * k / 2, -ih * k / 2, iw * k, ih * k);
+                // Transparent margins are trimmed first (cached), so an
+                // upload with padding doesn't render mini next to the
+                // procedural models.
+                const timg = this._trimmedFish(img);
+                const iw = timg.width, ih = timg.height;
+                // Player uploads render 50% bigger so they match the
+                // procedural models' presence; shipped art keeps its size.
+                const uploadZoom = (customImg && img === customImg) ? 1.5 : 1;
+                const k = (s * 2.5 * uploadZoom) / Math.max(iw, ih);
+                ctx.drawImage(timg, -iw * k / 2, -ih * k / 2, iw * k, ih * k);
                 // Shiny aura still applies on top of custom art
                 if (species.shiny) {
                     ctx.strokeStyle = '#fde047';
@@ -2696,36 +3147,83 @@ const Render = {
         }
     },
 
+    // Tapered limb: a filled ribbon along a quadratic curve, wide at the
+    // root and pointed at the tip. Unlike round strokes it reads as ONE
+    // connected body part — no floating tubes or detached segments.
+    _taperedLimb(ctx, x0, y0, cx, cy, x1, y1, w0, w1, fill) {
+        const N = 7;
+        const L = [], Rr = [];
+        for (let i = 0; i <= N; i++) {
+            const u = i / N, v = 1 - u;
+            const px = v * v * x0 + 2 * v * u * cx + u * u * x1;
+            const py = v * v * y0 + 2 * v * u * cy + u * u * y1;
+            const dx = 2 * v * (cx - x0) + 2 * u * (x1 - cx);
+            const dy = 2 * v * (cy - y0) + 2 * u * (y1 - cy);
+            const dl = Math.hypot(dx, dy) || 1;
+            const hw = (w0 + (w1 - w0) * u) / 2;
+            L.push([px - dy / dl * hw, py + dx / dl * hw]);
+            Rr.push([px + dy / dl * hw, py - dx / dl * hw]);
+        }
+        ctx.fillStyle = fill;
+        ctx.beginPath();
+        ctx.moveTo(L[0][0], L[0][1]);
+        for (let i = 1; i <= N; i++) ctx.lineTo(L[i][0], L[i][1]);
+        for (let i = N; i >= 0; i--) ctx.lineTo(Rr[i][0], Rr[i][1]);
+        ctx.closePath();
+        ctx.fill();
+    },
+
+    // KRAKEN: arms FIRST (roots tucked under the mantle), then mantle
+    // over the roots, head lobe, beak + eyes last. Nothing floats: every
+    // part overlaps the part beneath it.
     _drawKraken(ctx, s, col, acc) {
+        const t = performance.now() / 400;
+        // 8 tapered arms radiating from under the mantle
+        for (let i = 0; i < 8; i++) {
+            const a = (i / 8) * Math.PI * 2 + 0.2;
+            const wave = Math.sin(t * 2 + i * 1.3) * s * 0.25;
+            const wx = Math.cos(a + Math.PI / 2), wy = Math.sin(a + Math.PI / 2);
+            this._taperedLimb(ctx,
+                Math.cos(a) * s * 0.35, Math.sin(a) * s * 0.35,
+                Math.cos(a) * s * 1.5 + wx * wave, Math.sin(a) * s * 1.5 + wy * wave,
+                Math.cos(a) * s * 2.3 + wx * wave * 1.6, Math.sin(a) * s * 2.3 + wy * wave * 1.6,
+                s * 0.3, s * 0.02, acc);
+        }
+        // suckers: light dots riding the two lower arm pairs
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        for (let i = 0; i < 8; i++) {
+            const a = (i / 8) * Math.PI * 2 + 0.2;
+            for (let k = 1; k <= 3; k++) {
+                const d = s * (0.7 + k * 0.45);
+                ctx.beginPath();
+                ctx.arc(Math.cos(a) * d, Math.sin(a) * d, Math.max(1.2, s * 0.05), 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        // mantle dome over the arm roots
         ctx.fillStyle = col;
         ctx.beginPath();
-        ctx.ellipse(-s * 0.3, 0, s * 1.1, s * 0.85, 0, 0, Math.PI * 2);
+        ctx.ellipse(-s * 0.25, 0, s * 1.05, s * 0.8, 0, 0, Math.PI * 2);
         ctx.fill();
-
-        ctx.strokeStyle = acc;
-        ctx.lineWidth = s * 0.22;
-        ctx.lineCap = 'round';
-        const t = performance.now() / 400;
-        for (let i = 0; i < 8; i++) {
-            const a = (i / 8) * Math.PI * 2;
-            const wave = Math.sin(t + i) * s * 0.3;
-            ctx.beginPath();
-            ctx.moveTo(Math.cos(a) * s * 0.6, Math.sin(a) * s * 0.6);
-            ctx.quadraticCurveTo(
-                Math.cos(a) * s * 1.8 + wave,
-                Math.sin(a) * s * 1.8 + wave,
-                Math.cos(a) * s * 2.5,
-                Math.sin(a) * s * 2.5
-            );
-            ctx.stroke();
-        }
-
+        // head lobe at the front, overlapping the mantle
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.ellipse(s * 0.55, 0, s * 0.5, s * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // beak under the head
+        ctx.fillStyle = '#1c0a00';
+        ctx.beginPath();
+        ctx.moveTo(s * 0.75, -s * 0.14);
+        ctx.lineTo(s * 0.98, 0);
+        ctx.lineTo(s * 0.75, s * 0.14);
+        ctx.closePath(); ctx.fill();
+        // eyes on the head (never on the mantle)
         ctx.fillStyle = '#fbbf24';
-        ctx.beginPath(); ctx.arc(s * 0.35, -s * 0.3, s * 0.22, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(s * 0.35, s * 0.3, s * 0.22, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 0.5, -s * 0.32, s * 0.2, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 0.5, s * 0.32, s * 0.2, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#000';
-        ctx.beginPath(); ctx.arc(s * 0.42, -s * 0.3, s * 0.1, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(s * 0.42, s * 0.3, s * 0.1, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 0.56, -s * 0.32, s * 0.09, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 0.56, s * 0.32, s * 0.09, 0, Math.PI * 2); ctx.fill();
     },
 
     _drawKoi(ctx, s, col, acc) {
@@ -3293,70 +3791,80 @@ const Render = {
         ctx.fill();
     },
 
-    // --- SQUID (mantle, tentacles, big eyes) ---
+    // --- SQUID (arms trail behind, head + mantle lead) ---
+    // Painter order = anatomy order: tapered arms first with roots deep
+    // inside the head zone, head cap over the roots, mantle over the head,
+    // fins overlapping the mantle edge, eyes on the head. Every root and
+    // every fin base is buried under the next part — nothing floats.
     _drawSquid(ctx, s, col, acc) {
         const t = performance.now() / 400;
 
-        ctx.strokeStyle = acc;
-        ctx.lineWidth = Math.max(2, s * 0.12);
-        ctx.lineCap = 'round';
+        // 8 short arms: roots fanned across the head base (-x), tips back
         for (let i = 0; i < 8; i++) {
-            const a = (i / 8) * Math.PI * 1.2 - Math.PI * 0.6;
-            const wave = Math.sin(t * 3 + i) * s * 0.2;
-            ctx.beginPath();
-            ctx.moveTo(-s * 0.2, 0);
-            ctx.quadraticCurveTo(
-                -s * 0.8 + Math.cos(a) * s * 0.3,
-                Math.sin(a) * s * 0.5 + wave,
-                -s * 1.5 + Math.cos(a) * s * 0.5,
-                Math.sin(a) * s * 0.9 + wave
-            );
-            ctx.stroke();
+            const spread = ((i / 7) - 0.5) * 2; // -1..1 across the head
+            const wave = Math.sin(t * 3 + i * 1.1) * s * 0.18;
+            this._taperedLimb(ctx,
+                -s * 0.15, spread * s * 0.3,
+                -s * 0.9, spread * s * 0.75 + wave,
+                -s * 1.6, spread * s * 1.05 + wave * 1.5,
+                s * 0.2, s * 0.02, acc);
         }
-        ctx.lineWidth = Math.max(1.5, s * 0.08);
+        // 2 long feeders: thinner, longer, outer pair
         for (let i = 0; i < 2; i++) {
             const dir = i === 0 ? -1 : 1;
-            ctx.beginPath();
-            ctx.moveTo(-s * 0.2, 0);
-            ctx.quadraticCurveTo(
-                -s * 1.2, dir * s * 0.6 + Math.sin(t * 2 + i) * s * 0.3,
-                -s * 2.2, dir * s * 0.3 + Math.sin(t * 2.5 + i) * s * 0.4
-            );
-            ctx.stroke();
+            const wave = Math.sin(t * 2 + i * 2) * s * 0.28;
+            this._taperedLimb(ctx,
+                -s * 0.15, dir * s * 0.18,
+                -s * 1.2, dir * s * 0.7 + wave,
+                -s * 2.3, dir * s * 0.4 + wave * 1.4,
+                s * 0.13, s * 0.015, acc);
         }
 
+        // head cap: buries every arm root
         ctx.fillStyle = col;
         ctx.beginPath();
-        ctx.moveTo(s * 1.2, 0);
-        ctx.quadraticCurveTo(s * 0.8, -s * 0.9, -s * 0.2, -s * 0.7);
-        ctx.quadraticCurveTo(-s * 0.6, 0, -s * 0.2, s * 0.7);
-        ctx.quadraticCurveTo(s * 0.8, s * 0.9, s * 1.2, 0);
+        ctx.ellipse(-s * 0.1, 0, s * 0.55, s * 0.62, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // mantle: overlaps the head's front half, tip leads at +x
+        ctx.beginPath();
+        ctx.moveTo(s * 1.25, 0);
+        ctx.quadraticCurveTo(s * 0.85, -s * 0.85, s * 0.05, -s * 0.62);
+        ctx.quadraticCurveTo(s * 0.45, 0, s * 0.05, s * 0.62);
+        ctx.quadraticCurveTo(s * 0.85, s * 0.85, s * 1.25, 0);
         ctx.closePath();
         ctx.fill();
 
+        // dorsal stripe stays on the mantle
         ctx.fillStyle = acc;
         ctx.beginPath();
-        ctx.moveTo(s * 0.8, -s * 0.2);
-        ctx.quadraticCurveTo(0, -s * 0.6, -s * 0.3, 0);
-        ctx.quadraticCurveTo(0, -s * 0.3, s * 0.8, -s * 0.2);
+        ctx.moveTo(s * 0.85, -s * 0.18);
+        ctx.quadraticCurveTo(s * 0.3, -s * 0.55, s * 0.05, -s * 0.3);
+        ctx.quadraticCurveTo(s * 0.3, -s * 0.28, s * 0.85, -s * 0.18);
         ctx.closePath();
         ctx.fill();
 
+        // side fins: bases tucked INTO the mantle edge, not floating past it
+        ctx.beginPath();
+        ctx.moveTo(s * 0.55, -s * 0.5);
+        ctx.lineTo(s * 1.0, -s * 0.95);
+        ctx.lineTo(s * 0.95, -s * 0.42);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(s * 0.55, s * 0.5);
+        ctx.lineTo(s * 1.0, s * 0.95);
+        ctx.lineTo(s * 0.95, s * 0.42);
+        ctx.closePath();
+        ctx.fill();
+
+        // eyes on the head (beside the mantle base, not mid-mantle)
         ctx.fillStyle = '#fff';
-        ctx.beginPath(); ctx.arc(s * 0.5, -s * 0.35, s * 0.25, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(s * 0.5, s * 0.35, s * 0.25, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 0.12, -s * 0.42, s * 0.22, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 0.12, s * 0.42, s * 0.22, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#000';
-        ctx.beginPath(); ctx.arc(s * 0.55, -s * 0.35, s * 0.12, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(s * 0.55, s * 0.35, s * 0.12, 0, Math.PI * 2); ctx.fill();
-
-        ctx.fillStyle = acc;
-        ctx.beginPath();
-        ctx.moveTo(s * 1.1, -s * 0.1);
-        ctx.lineTo(s * 1.7, -s * 0.6);
-        ctx.lineTo(s * 1.7, s * 0.6);
-        ctx.lineTo(s * 1.1, s * 0.1);
-        ctx.closePath();
-        ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 0.16, -s * 0.42, s * 0.11, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 0.16, s * 0.42, s * 0.11, 0, Math.PI * 2); ctx.fill();
     },
 
     // --- PREHISTORIC (massive jaws, armored, ancient) ---

@@ -11,5 +11,22 @@ const Utils = {
     smooth(current, target, speed, dt) {
         const t = 1 - Math.pow(1 - speed, dt * 60);
         return current + (target - current) * t;
+    },
+    // Loop fallback: run a per-frame system without ever letting it kill
+    // the game loop. Errors log throttled (once per 5s per system) instead
+    // of throwing every frame into a freeze.
+    _loopErrAt: {},
+    safeTick(sys, fn) {
+        try {
+            fn();
+        } catch (e) {
+            try {
+                const now = Date.now();
+                if (!this._loopErrAt[sys] || now - this._loopErrAt[sys] > 5000) {
+                    this._loopErrAt[sys] = now;
+                    console.error(`[loop-guard] ${sys} threw (game continues):`, (e && e.message) || e);
+                }
+            } catch (ee) {}
+        }
     }
 };

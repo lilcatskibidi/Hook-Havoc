@@ -49,6 +49,30 @@ const TouchControls = {
         return this.isTouchDevice();
     },
 
+    // ---- UI tier: scale touch controls + hooks for CSS per phone size ----
+    // xs: small phones (<=380px min-dim) · sm: phones · md: large phones /
+    // small tablets · lg: tablets/desktop. CSS keys off body[data-uitier]
+    // so one stylesheet covers Android fragmentation + iPhones + iPads.
+    // Also re-applies the manual UI SIZE % (Settings) on top.
+    applyUiTier() {
+        try {
+            let w = 0, h = 0;
+            try {
+                if (window.visualViewport && window.visualViewport.width > 2) {
+                    w = window.visualViewport.width;
+                    h = window.visualViewport.height;
+                }
+            } catch (e) {}
+            if (!(w > 2)) w = window.innerWidth || 0;
+            if (!(h > 2)) h = window.innerHeight || 0;
+            const m = Math.min(w, h) || 800;
+            const tier = m <= 380 ? 'xs' : m <= 640 ? 'sm' : m <= 1024 ? 'md' : 'lg';
+            document.body.dataset.uitier = tier;
+            document.body.dataset.orient = (h < w) ? 'land' : 'port';
+            try { if (typeof Settings !== 'undefined' && Settings.applyUiScale) Settings.applyUiScale(); } catch (e) {}
+            return tier;
+        } catch (e) { return 'lg'; }
+    },
     // ---- perf autodetect: weak device -> low tier ----
     detectPerf() {
         try {
@@ -87,6 +111,15 @@ const TouchControls = {
             this._bound = true;
             this._bindJoystick(state);
             this._bindButtons(state);
+        }
+        // UI tier always applies (CSS hooks), even on desktop
+        try { this.applyUiTier(); } catch (e) {}
+        if (!this._tierBound) {
+            this._tierBound = true;
+            window.addEventListener('resize', () => { try { this.applyUiTier(); } catch (e) {} });
+            try {
+                if (window.visualViewport) window.visualViewport.addEventListener('resize', () => { try { this.applyUiTier(); } catch (e) {} });
+            } catch (e) {}
         }
         if (!this.shouldShow()) {
             this.active = false;
@@ -164,27 +197,36 @@ const TouchControls = {
 
     _press(el, down, up) {
         if (!el) return;
+        const buzz = (ms) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} };
         el.addEventListener('touchstart', (e) => {
             e.preventDefault();
             try { if (typeof audio !== 'undefined' && audio.init) audio.init(); } catch (err) {}
+            try { el.classList.add('active-touch'); } catch (err) {}
+            buzz(8);
             try { down(); } catch (err) {}
         }, { passive: false });
         const release = (e) => {
             if (e) e.preventDefault();
+            try { el.classList.remove('active-touch'); } catch (err) {}
             try { if (up) up(); } catch (err) {}
         };
         el.addEventListener('touchend', release);
         el.addEventListener('touchcancel', release);
+        el.addEventListener('contextmenu', (e) => { try { e.preventDefault(); } catch (err) {} });
         // Mouse fallback (desktop testing / hybrid laptops)
-        el.addEventListener('mousedown', (e) => { e.preventDefault(); try { down(); } catch (err) {} });
-        el.addEventListener('mouseup', () => { try { if (up) up(); } catch (err) {} });
+        el.addEventListener('mousedown', (e) => { e.preventDefault(); try { el.classList.add('active-touch'); } catch (err) {} try { down(); } catch (err) {} });
+        el.addEventListener('mouseup', () => { try { el.classList.remove('active-touch'); } catch (err) {} try { if (up) up(); } catch (err) {} });
+        el.addEventListener('mouseleave', () => { try { el.classList.remove('active-touch'); } catch (err) {} });
     },
 
     _bindButtons(state) {
-        // CAST = SPACE (cast / reel / pull bobber back)
+        // CAST = SPACE (cast / reel / pull bobber back). The virtual SPACE
+        // key MUST mirror the press: hooked-fish reeling reads
+        // state.keys[' '] every frame (keyboard holds it natively; touch
+        // and gamepad must set it or mobile can never reel).
         this._press(this._zone('touch-cast'),
-            () => { if (typeof Fishing !== 'undefined') Fishing.onSpaceDown(state); },
-            () => { if (typeof Fishing !== 'undefined') Fishing.onSpaceUp(state); });
+            () => { try { state.keys[' '] = true; } catch (e) {} if (typeof Fishing !== 'undefined') Fishing.onSpaceDown(state); },
+            () => { if (typeof Fishing !== 'undefined') Fishing.onSpaceUp(state); try { state.keys[' '] = false; } catch (e) {} });
         // FIRE = hold to shoot (auto-aims; semi-autos re-fire on a timer)
         this._press(this._zone('touch-fire'),
             () => {
@@ -196,7 +238,7 @@ const TouchControls = {
                 this.fireHeld = false;
                 try { state.mouse.isDown = false; } catch (e) {}
             });
-        // E interact
+        // E interact (items are used via the F key / item-bar slot tap)
         this._press(this._zone('touch-act'),
             () => { if (typeof Input !== 'undefined') Input.interact(state); });
         // R reload
@@ -210,11 +252,55 @@ const TouchControls = {
                     else if (typeof Player !== 'undefined') Player.selectWeapon(state, (state.player.activeSlot + 1) % 4);
                 } catch (e) {}
             });
-        // Menu
-        this._press(this._zone('touch-menu'),
-            () => { if (typeof Input !== 'undefined') Input.toggleMenu(state); });
+        // Dash (Q on keyboard)
+        this._press(this._zone('touch-dash'),
+            () => { try { if (typeof Player !== 'undefined') Player.tryDash(state); } catch (e) {} });
+        // Camera zoom (Z/X on keyboard, wheel on desktop)
+        const zoomBy = (d) => {
+            try {
+                if (typeof CONFIG === 'undefined' || !state.camera) return;
+                state.camera.targetZoom = Utils.clamp(
+                    (state.camera.targetZoom || 1) + d,
+                    CONFIG.CAMERA_ZOOM_MIN, CONFIG.CAMERA_ZOOM_MAX);
+                const zl = document.getElementById('zoom-level');
+                if (zl) zl.innerText = (state.camera.targetZoom || 1).toFixed(1) + 'x';
+            } catch (e) {}
+        };
+        this._press(this._zone('touch-zoom-in'), () => zoomBy(0.25));
+        this._press(this._zone('touch-zoom-out'), () => zoomBy(-0.25));
     },
 
+    // CAST button mirrors the rod state: IDLE=CAST · charging=THROW ·
+    // waiting/hooked=REEL. Updated once per frame (cheap string guard).
+    _castLabel: '',
+    syncCastLabel(state) {
+        try {
+            const el = this._zone('touch-cast');
+            if (!el) return;
+            const mode = (state && state.fishing && state.fishing.mode) || 'IDLE';
+            let key = 'touch_cast', txt = 'CAST';
+            try {
+                if (typeof T === 'function') {
+                    if (mode === 'CASTING') key = 'touch_release';
+                    else if (mode === 'WAITING_BITES' || mode === 'HOOKED' || mode === 'CAST_FLY') key = 'touch_reel';
+                    txt = T(key);
+                } else {
+                    txt = mode === 'CASTING' ? 'THROW' : (mode === 'IDLE' ? 'CAST' : 'REEL');
+                }
+            } catch (e) {
+                txt = mode === 'CASTING' ? 'THROW' : (mode === 'IDLE' ? 'CAST' : 'REEL');
+            }
+            if (txt !== this._castLabel || el.textContent !== txt) {
+                this._castLabel = txt;
+                el.textContent = txt;
+                // Reel state glows amber so thumbs know "hold to reel".
+                try {
+                    el.classList.toggle('is-reel',
+                        mode === 'WAITING_BITES' || mode === 'HOOKED' || mode === 'CAST_FLY');
+                } catch (e) {}
+            }
+        } catch (e) {}
+    },
     // Aim at the nearest threat, then fire through the normal pipeline
     // (spread, ammo, recoil, MP sync all behave like a mouse shot).
     shootAimed(state) {
@@ -239,6 +325,7 @@ const TouchControls = {
 
     update(state, delta) {
         if (!this.active) return;
+        try { this.syncCastLabel(state); } catch (e) {}
         if (!state.player || state.player.isDead || state.paused) {
             this.fireHeld = false;
             try {
@@ -248,6 +335,8 @@ const TouchControls = {
                         this._padKeys[k] = false;
                     }
                 }
+                // Virtual SPACE from the CAST button must never stick
+                state.keys[' '] = false;
                 state.mouse.isDown = false;
             } catch (e) {}
             return;

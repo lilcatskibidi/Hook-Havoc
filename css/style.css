@@ -409,15 +409,17 @@ body {
 .fight-ready-overlay {
     position: absolute; inset: 0; z-index: 55;
     display: flex; align-items: center; justify-content: center;
-    background: #000;
-    opacity: 0; transition: opacity 0.45s ease; pointer-events: auto;
+    /* Transparent: the countdown floats OVER the live arena (the old
+       opaque black hid the whole intro cinematic). */
+    background: transparent;
+    opacity: 0; transition: opacity 0.45s ease; pointer-events: none;
 }
 .fight-ready-overlay.hidden { opacity: 0; pointer-events: none; }
 .fight-ready-overlay.fight-ready-show { opacity: 1; }
 .fight-ready-text {
     font-family: 'Teko', sans-serif; font-weight: 700;
     font-size: clamp(64px, 12vw, 140px); letter-spacing: 0.06em; color: #fff;
-    text-shadow: 0 0 30px rgba(255,255,255,0.35), 0 5px 0 #000;
+    text-shadow: 0 0 30px rgba(255,255,255,0.35), 0 5px 0 #000, 0 0 90px rgba(0,0,0,0.9);
     animation: fightReadyPop 0.4s cubic-bezier(0.2, 2.2, 0.4, 1);
 }
 .fight-ready-text.fight-ready-go {
@@ -430,12 +432,62 @@ body {
     100% { transform: scale(1); opacity: 1; }
 }
 
-#gameCanvas { touch-action: none; }
+#gameCanvas { touch-action: none; display: block; width: 100% !important; height: 100% !important; }
 
-/* Dynamic viewport height (mobile address bars) */
+/* Dynamic viewport height (mobile address bars) + itch.io iframe safe layout.
+   The game MUST fill exactly its container (tab or itch iframe) — never
+   force min-height:100dvh on #game-container (that overflows small iframes
+   and, combined with body justify-center, pushes canvas+UI down ~half a
+   screen on mobile). Shoreline/world logic is viewport-independent, so
+   letterboxing here is purely visual. */
 html, body { height: 100%; }
-body { min-height: 100vh; min-height: 100dvh; }
-#game-container { min-height: 100vh; min-height: 100dvh; }
+body {
+    min-height: 100vh;
+    min-height: 100dvh;
+    /* dvh wins where supported (mobile address bar); h-screen (100vh)
+       from Tailwind is overridden here to avoid the jump. */
+    height: 100vh;
+    height: 100dvh;
+    overscroll-behavior: none;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+#game-container {
+    min-height: 0 !important;
+    width: 100%;
+    height: 100%;
+    margin: auto;
+    /* Keep the desktop letterbox, but never exceed the real viewport —
+       on phones/itch the container is exactly the screen/iframe. */
+    max-width: min(1600px, 100vw);
+    max-height: min(950px, 100vh);
+    max-height: min(950px, 100dvh);
+}
+@supports (height: 100dvh) {
+    #game-container {
+        max-height: min(950px, 100dvh);
+    }
+}
+/* Phones + short landscape + itch small embeds: full-bleed, square corners,
+   no desktop letterbox. */
+@media (max-width: 760px), (max-height: 520px) {
+    #game-container {
+        max-width: 100vw;
+        max-height: 100vh;
+        max-height: 100dvh;
+        border-radius: 0 !important;
+        border-left: none !important;
+        border-right: none !important;
+    }
+}
+
+/* ================= VOID REALM (boss intro overlay) ==================
+   Black-purple sky that swallows the arena while the Void Leviathan
+   arrives. Pointer-transparent, under banners/HUD, auto-removed. */
+#void-realm-overlay {
+    position: absolute; inset: 0; z-index: 14; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 38%, rgba(20,4,40,0.45) 62%, rgba(2,0,10,0.8) 100%);
+    opacity: 0; transition: opacity 3s ease;
+}
 
 /* ================= SMALL-SCREEN COMPACT HUD ==================
    Phones (narrow portrait) and landscape (short height): shrink the
@@ -443,9 +495,10 @@ body { min-height: 100vh; min-height: 100dvh; }
 @media (max-width: 760px), (max-height: 520px) {
     #top-hud { padding: 6px !important; gap: 6px !important; }
     #top-hud .w-72 { width: 12.5rem !important; }
-    #top-hud .stat-chip { display: none !important; }
-    #top-hud .stat-chip:nth-child(1),
-    #top-hud .stat-chip:nth-child(2) { display: flex !important; }
+    /* ALL stat chips stay visible (coins/luck/bucket/level/bait/clock)
+       but compact + wrapping — hiding them deleted mobile info. */
+    #top-hud .stat-chip { display: flex !important; padding: 2px 6px !important; font-size: 11px !important; }
+    #top-hud > div > .flex.gap-2 { flex-wrap: wrap !important; gap: 4px !important; }
     #top-hud .glass-panel { border-radius: 12px !important; }
     #active-weapon { padding: 8px !important; gap: 8px !important; bottom: 8px !important; right: 8px !important; }
     #active-weapon #weapon-icon-box { width: 34px !important; height: 34px !important; font-size: 18px !important; }
@@ -454,9 +507,14 @@ body { min-height: 100vh; min-height: 100dvh; }
     #weapon-toolbar { bottom: 8px !important; left: 8px !important; padding: 4px !important; }
     #weapon-toolbar .weapon-slot { width: 40px !important; height: 40px !important; }
     #zoom-chip { display: none !important; }
-    #status-banner { bottom: 64px !important; max-width: 94vw !important; font-size: 11px !important; padding: 6px 10px !important; }
-    #fight-list { display: none !important; }
-    #quest-tracker { display: none !important; }
+    #status-banner { top: 64px !important; bottom: auto !important; max-width: 94vw !important; font-size: 11px !important; padding: 6px 10px !important; }
+    /* Fish-HP cards + quest tracker stay VISIBLE on phones (compact) —
+       hiding them deleted the fight readout on mobile. :not(.hidden)
+       keeps the game's own show/hide logic intact (no empty panels). */
+    #fight-list:not(.hidden) { display: block !important; top: 120px !important; right: 6px !important; width: 44vw !important; max-width: 220px !important; }
+    #fight-list .glass-panel { padding: 6px !important; }
+    #fight-list-rows { max-height: 26vh !important; }
+    #quest-tracker:not(.hidden) { display: block !important; top: 120px !important; left: 6px !important; width: 46vw !important; max-width: 230px !important; font-size: 11px !important; padding: 6px 8px !important; }
     #main-menu { padding: 8px !important; }
     #touch-joy { bottom: 132px !important; width: 108px !important; height: 108px !important; }
     #touch-btns { bottom: 126px !important; }
@@ -466,7 +524,31 @@ body { min-height: 100vh; min-height: 100dvh; }
     .boss-intro-name { font-size: clamp(38px, 12vw, 70px) !important; }
 }
 
-/* ================= TOUCH CONTROLS ================= */
+/* ============ DEVICE-TIER TOUCH SIZING (body[data-uitier]) ============
+   Viewport media queries can't tell a small phone from a small window;
+   the JS tier can (see TouchControls.applyUiTier). xs/sm = real phones:
+   touch controls shrink ~50% so they stop eating the screen. */
+body[data-uitier="xs"] #touch-joy, body[data-uitier="sm"] #touch-joy { width: 62px !important; height: 62px !important; bottom: 118px !important; left: 10px !important; }
+body[data-uitier="xs"] #touch-joy-knob, body[data-uitier="sm"] #touch-joy-knob { width: 28px !important; height: 28px !important; margin: -14px 0 0 -14px !important; }
+body[data-uitier="xs"] #touch-btns, body[data-uitier="sm"] #touch-btns { bottom: 112px !important; right: 8px !important; }
+body[data-uitier="xs"] .touch-row-big, body[data-uitier="sm"] .touch-row-big { gap: 6px !important; margin-bottom: 6px !important; }
+body[data-uitier="xs"] .touch-row-small, body[data-uitier="sm"] .touch-row-small { gap: 5px !important; }
+body[data-uitier="xs"] .touch-big, body[data-uitier="sm"] .touch-big { width: 44px !important; height: 44px !important; font-size: 11px !important; }
+body[data-uitier="xs"] .touch-small, body[data-uitier="sm"] .touch-small { width: 32px !important; height: 32px !important; font-size: 11px !important; }
+
+/* ============ MANUAL UI SCALE (Settings → UI SIZE, Minecraft-style) ============
+   #game-container carries --ui-scale (manual % × tier factor). Everything
+   below zooms off it — HUD, touch controls, ALL modals and the main menu
+   itself — while the canvas stays 1:1 so aim math never shifts. */
+#top-hud, #weapon-toolbar, #item-bar, #active-weapon, #zoom-chip, #pad-chip,
+#fight-list, #boss-bar, #quest-tracker, #status-banner, #tension-hud, #drag-hud,
+#catch-popup-container, #touch-ui, #beach-shop-indicator,
+#shop-modal > div, #index-modal > div, #inventory-modal > div, #npc-modal > div,
+#casino-modal > div, #death-menu > div, #ritual-modal > div, #radar-modal > div,
+#feedback-modal > div, #pause-menu > div, #tablist-overlay > div,
+#intro-overlay > div, #main-menu .menu-card, #boot-overlay > div, #teleport-overlay > div {
+    zoom: var(--ui-scale, 1);
+}
 #touch-ui { position: absolute; inset: 0; z-index: 25; pointer-events: none; }
 #touch-ui.hidden { display: none; }
 #touch-joy {
@@ -636,3 +718,152 @@ body { min-height: 100vh; min-height: 100dvh; }
         z-index: 50;
     }
 }
+
+/* ================= UI TIERS — one stylesheet, every phone =================
+   body[data-uitier] is set by TouchControls.applyUiTier from the real
+   viewport (visualViewport): xs <=380 · sm <=640 · md <=1024 · lg above.
+   LAST in the file so clamp()/tier rules win over the fixed base sizes.
+   clamp() keeps odd Android widths sane; env() keeps buttons off the
+   home-bar / notch on iPhone + Android gesture bars. */
+#touch-joy {
+    left: max(14px, env(safe-area-inset-left, 0px));
+    bottom: max(110px, calc(env(safe-area-inset-bottom, 0px) + 110px));
+    width: clamp(104px, 30vw, 132px);
+    height: clamp(104px, 30vw, 132px);
+}
+#touch-btns {
+    right: max(12px, env(safe-area-inset-right, 0px));
+    bottom: max(104px, calc(env(safe-area-inset-bottom, 0px) + 104px));
+}
+.touch-big {
+    width: clamp(66px, 19vw, 86px);
+    height: clamp(66px, 19vw, 86px);
+    font-size: clamp(12px, 3.6vw, 15px);
+}
+.touch-small {
+    width: clamp(44px, 12.5vw, 54px);
+    height: clamp(44px, 12.5vw, 54px);
+}
+/* xs — small phones: ultra-compact HUD, banner floats above the buttons */
+body[data-uitier="xs"] #top-hud { padding: 4px !important; gap: 4px !important; }
+body[data-uitier="xs"] #status-banner { top: 56px !important; bottom: auto !important; font-size: 10px !important; max-width: 92vw !important; }
+body[data-uitier="xs"] #tension-hud { width: 92vw !important; max-width: 300px !important; }
+body[data-uitier="xs"] #drag-hud { width: 86vw !important; max-width: 260px !important; }
+body[data-uitier="xs"] #weapon-toolbar .weapon-slot { width: 36px !important; height: 36px !important; }
+body[data-uitier="xs"] #active-weapon { padding: 6px !important; gap: 6px !important; }
+body[data-uitier="xs"] #active-weapon #weapon-desc { display: none !important; }
+/* md — large phones / small tablets: roomier targets */
+body[data-uitier="md"] .touch-big { width: 92px !important; height: 92px !important; font-size: 15px !important; }
+body[data-uitier="md"] .touch-small { width: 56px !important; height: 56px !important; }
+body[data-uitier="md"] #touch-joy { width: 140px !important; height: 140px !important; }
+/* landscape phones: pull controls in, keep the playfield clear */
+body[data-orient="land"] #touch-btns { bottom: max(70px, calc(env(safe-area-inset-bottom, 0px) + 70px)) !important; }
+body[data-orient="land"] #touch-joy { bottom: max(76px, calc(env(safe-area-inset-bottom, 0px) + 76px)) !important; width: 104px !important; height: 104px !important; }
+body[data-orient="land"] #status-banner { top: 46px !important; bottom: auto !important; font-size: 11px !important; }
+/* Fight HUD stays bottom-CENTER in landscape too (compact): the top-right
+   corner belongs to the fight list (fish HP cards). */
+body[data-orient="land"] #tension-hud {
+    width: min(52vw, 220px) !important;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 96px) !important;
+}
+body[data-orient="land"] #drag-hud {
+    width: min(48vw, 200px) !important;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 58px) !important;
+}
+body[data-orient="land"] #fight-list:not(.hidden) { display: block !important; max-width: 44vw !important; }
+
+/* ================= UI SIZE + BOTTOM FIGHT HUD + TOUCH SMOOTH ============
+   --ui-scale is set on #game-container by Settings (manual % x phone
+   tier). Canvas is untouched (aim math uses backing pixels); only DOM
+   HUD layers zoom. Tension/drag live at the BOTTOM so the hooked fish
+   (mid-screen) is never covered. Touch buttons get buttery press
+   feedback via .active-touch (works where :active doesn't fire). */
+#game-container { --ui-scale: 1; }
+#top-hud, #tension-hud, #drag-hud, #status-banner,
+#weapon-toolbar, #item-bar, #active-weapon, #fight-list, #quest-tracker,
+#boss-bar, #mp-hud, #catch-popup-container, #zoom-chip, #pad-chip,
+#beach-shop-indicator {
+    zoom: var(--ui-scale, 1);
+}
+/* Bottom-anchored fight HUD: beat the Tailwind top-* classes */
+#tension-hud {
+    top: auto !important;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 158px) !important;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    will-change: transform, opacity;
+}
+#drag-hud {
+    top: auto !important;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 108px) !important;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    will-change: transform, opacity;
+}
+#tension-bar, #drag-bar { transition: width 0.12s linear !important; }
+#boss-hp-bar, #hp-bar { transition: width 0.18s ease-out !important; }
+/* Touch buttons: smooth press + reel glow */
+.touch-btn {
+    transition: transform 0.09s ease-out, filter 0.09s ease-out, box-shadow 0.12s ease-out;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    will-change: transform;
+}
+.touch-btn:active, .touch-btn.active-touch { filter: brightness(1.35); transform: scale(0.93); }
+.touch-cast.is-reel {
+    background: radial-gradient(circle at 35% 30%, rgba(251,191,36,0.9), rgba(120,53,15,0.9)) !important;
+    box-shadow: 0 0 18px rgba(251,191,36,0.55), inset 0 1px 0 rgba(255,255,255,0.2) !important;
+    animation: reelGlow 0.9s ease-in-out infinite;
+}
+@keyframes reelGlow {
+    0%, 100% { box-shadow: 0 0 12px rgba(251,191,36,0.4), inset 0 1px 0 rgba(255,255,255,0.2); }
+    50% { box-shadow: 0 0 24px rgba(251,191,36,0.75), inset 0 1px 0 rgba(255,255,255,0.2); }
+}
+#touch-joy-knob { transition: none; will-change: transform; }
+#touch-joy { touch-action: none; -webkit-tap-highlight-color: transparent; }
+/* Small screens: shrink every overlay family, not just the top HUD */
+@media (max-width: 760px), (max-height: 520px) {
+    #boss-bar { width: 92vw !important; top: 2px !important; }
+    #boss-bar .glass-panel { padding: 8px !important; }
+    #mp-hud { width: auto !important; max-width: 62vw !important; padding: 6px 8px !important; }
+    #catch-popup-container { top: 26% !important; }
+    .catch-popup { padding: 8px 10px !important; font-size: 12px !important; }
+    #tension-hud { width: min(64vw, 260px) !important; bottom: calc(env(safe-area-inset-bottom, 0px) + 168px) !important; }
+    #drag-hud { width: min(60vw, 230px) !important; bottom: calc(env(safe-area-inset-bottom, 0px) + 118px) !important; }
+    #status-banner { top: 64px !important; bottom: auto !important; }
+    .death-title { font-size: 2rem !important; }
+    #shop-modal .glass-panel, #casino-modal .glass-panel,
+    #index-modal .glass-panel, #feedback-modal .glass-panel { border-radius: 16px !important; }
+}
+/* xs phones: HUD HUD HUD — everything one notch smaller */
+body[data-uitier="xs"] #boss-bar { width: 94vw !important; }
+body[data-uitier="xs"] #mp-hud { max-width: 56vw !important; font-size: 11px !important; }
+body[data-uitier="xs"] #catch-popup-container { top: 24% !important; }
+@media (prefers-reduced-motion: reduce) {
+    .touch-btn, #tension-hud, #drag-hud { transition: none !important; }
+    .touch-cast.is-reel { animation: none !important; }
+}
+/* ================= ITEM + DASH HOTBAR =================
+   Sits UNDER the weapon toolbar (stacked bottom-left): weapons on top,
+   [E item] + [Q dash + cooldown] below. */
+#weapon-toolbar { bottom: 76px !important; }
+#item-bar { position: absolute; left: 24px; bottom: 24px; z-index: 10; pointer-events: auto; }
+#item-bar:empty { display: none; }
+@media (max-width: 760px), (max-height: 520px) {
+    #weapon-toolbar { bottom: 64px !important; left: 8px !important; }
+    #item-bar { left: 8px; bottom: 8px; }
+    #item-bar .w-14 { width: 40px !important; height: 40px !important; }
+}
+
+/* Day-rollover splash (see WorldSystem.showDayBanner) */
+#day-banner {
+    position: absolute; left: 50%; top: 20%; transform: translateX(-50%);
+    z-index: 56; text-align: center; pointer-events: none;
+    padding: 18px 46px; border-radius: 20px;
+    background: rgba(2,6,23,0.92);
+    border: 1px solid rgba(253,224,71,0.5);
+    box-shadow: 0 0 44px rgba(253,224,71,0.35), inset 0 1px 0 rgba(255,255,255,0.08);
+    animation: islandBannerIn 0.5s cubic-bezier(0.2,1.4,0.4,1);
+}
+.day-kicker { font-size: 11px; font-weight: 900; letter-spacing: 0.35em; color: #fde047; }
+.day-name { font-family: Teko, sans-serif; font-size: 52px; letter-spacing: 0.08em; color: #fff;
+    text-shadow: 0 0 22px rgba(253,224,71,0.8), 0 3px 0 #000; line-height: 1; margin: 4px 0; }
+.day-sub { font-size: 12px; font-weight: 600; color: #e2e8f0; }

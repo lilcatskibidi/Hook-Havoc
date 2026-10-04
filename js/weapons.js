@@ -152,8 +152,8 @@ const WEAPONS = [
       sound: 'harpoon', shake: 14, muzzle: 30, recoil: 14 },
 
     { id: 'minigun', name: 'Reel Minigun', icon: 'fa-bolt', type: 'rifle',
-      damage: 15, fireRate: 0.03, range: 560, spread: 0.14, count: 1,
-      price: 32000, desc: 'Spin up. 30% free bullets. Endless lead storm. ~500 DPS.',
+      damage: 25, fireRate: 0.03, range: 560, spread: 0.14, count: 1,
+      price: 32000, desc: 'Spin up. 30% free bullets. Endless lead storm. ~833 DPS.',
       rarity: 'legendary', pellets: 'Full auto',
       auto: true, pierce: false, explosive: false, burn: false,
       ecoCh: 0.30,
@@ -320,7 +320,126 @@ const WEAPONS = [
       rarity: 'mythic', pellets: 'Pierce precision',
       auto: false, pierce: true, explosive: false, burn: false,
       executeMult: 2.0, bossMult: 1.5,
-      sound: 'harpoon', shake: 16, muzzle: 32, recoil: 16 }
+      sound: 'harpoon', shake: 16, muzzle: 32, recoil: 16 },
+
+    // TIER 8 — HARBOR REINFORCEMENTS (rarity-sorted in the shop)
+    { id: 'popgun', name: 'Popgun', icon: 'fa-gun', type: 'pistol',
+      damage: 14, fireRate: 0.12, range: 420, spread: 0.06, count: 1,
+      price: 600, desc: 'Carnival toy, real menace. 10% crits. ~117 DPS.',
+      rarity: 'common', pellets: 'Single',
+      auto: true, pierce: false, explosive: false, burn: false,
+      critCh: 0.10, critMult: 2.0,
+      sound: 'pistol', shake: 1, muzzle: 8, recoil: 1 },
+
+    { id: 'longshot', name: 'Longshot Rifle', icon: 'fa-crosshairs', type: 'rifle',
+      damage: 85, fireRate: 0.5, range: 950, spread: 0.0, count: 1,
+      price: 5200, desc: 'Piercing rounds, harbor scope. 15% crits. ~170 DPS.',
+      rarity: 'rare', pellets: 'Pierce',
+      auto: false, pierce: true, explosive: false, burn: false,
+      critCh: 0.15, critMult: 2.0,
+      sound: 'rifle', shake: 4, muzzle: 12, recoil: 4 },
+
+    { id: 'blunderbuss', name: 'Blunderbuss', icon: 'fa-burst', type: 'shotgun',
+      damage: 12, fireRate: 0.7, range: 380, spread: 0.30, count: 12,
+      price: 6800, desc: 'Bell-mouth chaos. 12 pellets, knocks back hordes. ~206 DPS.',
+      rarity: 'rare', pellets: '12 pellets',
+      auto: false, pierce: false, explosive: false, burn: false,
+      knockMult: 1.8,
+      sound: 'shotgun', shake: 8, muzzle: 20, recoil: 9 },
+
+    { id: 'harpoon_pistol', name: 'Harpoon Pistol', icon: 'fa-location-arrow', type: 'harpoon',
+      damage: 150, fireRate: 0.55, range: 700, spread: 0.01, count: 1,
+      price: 8500, desc: 'Sidearm whaler. Slows hooked horrors. ~273 DPS.',
+      rarity: 'rare', pellets: 'Pierce',
+      auto: false, pierce: true, explosive: false, burn: false, slowHook: 0.7,
+      sound: 'harpoon', shake: 5, muzzle: 10, recoil: 5 },
+
+    { id: 'storm_cell', name: 'Storm Cell', icon: 'fa-bolt', type: 'tesla',
+      damage: 70, fireRate: 0.14, range: 520, spread: 0.07, count: 1,
+      price: 26000, desc: 'Bottled squall. Chains x3 between targets. ~500 DPS.',
+      rarity: 'epic', pellets: 'Chain Lightning',
+      auto: true, pierce: false, explosive: false, burn: false, chain: true,
+      chainMult: 0.7,
+      sound: 'rifle', shake: 3, muzzle: 14, recoil: 2 },
+
+    { id: 'coral_repeater', name: 'Coral Repeater', icon: 'fa-fan', type: 'smg',
+      damage: 26, fireRate: 0.07, range: 520, spread: 0.06, count: 1,
+      price: 30000, desc: 'Living coral spits reef shards that bloom. ~371 DPS.',
+      rarity: 'epic', pellets: 'Auto Reef',
+      auto: true, pierce: false, explosive: false, burn: false, coral: true,
+      coralDps: 10,
+      sound: 'rifle', shake: 2, muzzle: 10, recoil: 2 },
+
+    { id: 'magma_mortar', name: 'Magma Mortar', icon: 'fa-volcano', type: 'launcher',
+      damage: 320, fireRate: 0.9, range: 680, spread: 0.08, count: 1,
+      price: 36000, desc: 'Lobbed magma. Blast + heavy burn pools. ~356 DPS.',
+      rarity: 'epic', pellets: 'Explosive',
+      auto: false, pierce: false, explosive: true, burn: true,
+      burnDps: 35,
+      sound: 'shotgun', shake: 10, muzzle: 22, recoil: 10 },
+
+    { id: 'inkcaster', name: 'Inkcaster', icon: 'fa-droplet', type: 'plasma',
+      damage: 110, fireRate: 0.2, range: 600, spread: 0.05, count: 1,
+      price: 42000, desc: 'Cuttlefish artillery. Venom melts over time. ~550 DPS.',
+      rarity: 'epic', pellets: 'Venom',
+      auto: true, pierce: false, explosive: false, burn: false, poison: true,
+      poisonDpsMult: 0.5,
+      sound: 'harpoon', shake: 4, muzzle: 14, recoil: 4 },
+
+    { id: 'glacier_cannon', name: 'Glacier Cannon', icon: 'fa-snowflake', type: 'cannon',
+      damage: 260, fireRate: 0.5, range: 750, spread: 0.04, count: 1,
+      price: 85000, desc: 'Absolute-zero shells. Deep freeze + executes the brittle. ~520 DPS.',
+      rarity: 'legendary', pellets: 'Frostbite',
+      auto: false, pierce: true, explosive: false, burn: false, freeze: true,
+      freezeTime: 2.0, executeMult: 1.4,
+      sound: 'shotgun', shake: 8, muzzle: 20, recoil: 8 },
+
+    { id: 'vampire_fang', name: 'Vampire Fang', icon: 'fa-droplet', type: 'smg',
+      damage: 60, fireRate: 0.09, range: 560, spread: 0.05, count: 1,
+      price: 95000, desc: 'Drinks what it kills. 25% lifesteal. ~667 DPS.',
+      rarity: 'legendary', pellets: 'Auto Drain',
+      auto: true, pierce: false, explosive: false, burn: false, lifesteal: 0.25,
+      sound: 'rifle', shake: 3, muzzle: 12, recoil: 3 },
+
+    { id: 'thunder_maul', name: 'Thunder Maul', icon: 'fa-gavel', type: 'shotgun',
+      damage: 90, fireRate: 0.4, range: 480, spread: 0.18, count: 6,
+      price: 110000, desc: 'Storm-forged hammer. Stuns + launches crowds. ~1350 DPS close.',
+      rarity: 'legendary', pellets: '6 pellets',
+      auto: false, pierce: false, explosive: false, burn: false, stun: true,
+      stunTime: 1.2, knockMult: 2.0,
+      sound: 'shotgun', shake: 10, muzzle: 22, recoil: 10 },
+
+    { id: 'doom_horn', name: 'Doom Horn', icon: 'fa-bullhorn', type: 'sonic',
+      damage: 220, fireRate: 0.45, range: 700, spread: 0.05, count: 1,
+      price: 130000, desc: 'The last sound things hear. Long stun, executes the dazed. ~489 DPS.',
+      rarity: 'legendary', pellets: 'Doomwave',
+      auto: false, pierce: true, explosive: false, burn: false, stun: true,
+      stunTime: 2.5, executeMult: 1.6,
+      sound: 'shotgun', shake: 10, muzzle: 24, recoil: 10 },
+
+    { id: 'starfall_launcher', name: 'Starfall Launcher', icon: 'fa-star', type: 'launcher',
+      damage: 500, fireRate: 0.8, range: 900, spread: 0.06, count: 1,
+      price: 200000, desc: 'Calls down orbital shards. Blasts chain into meteors. ~625 DPS.',
+      rarity: 'mythic', pellets: 'Explosive',
+      auto: false, pierce: false, explosive: true, burn: true,
+      burnDps: 40, critCh: 0.15, critMult: 2.5,
+      sound: 'shotgun', shake: 14, muzzle: 28, recoil: 14 },
+
+    { id: 'leviathan_caller', name: 'Leviathan Caller', icon: 'fa-water', type: 'harpoon',
+      damage: 800, fireRate: 0.9, range: 1000, spread: 0.0, count: 1,
+      price: 240000, desc: 'Sings in deep-tongue. Drains stamina, +60% vs bosses. ~889 DPS.',
+      rarity: 'mythic', pellets: 'Pierce',
+      auto: false, pierce: true, explosive: false, burn: false, slowHook: 0.5,
+      drainMult: 2.5, bossMult: 1.6,
+      sound: 'harpoon', shake: 12, muzzle: 18, recoil: 10 },
+
+    { id: 'event_horizon', name: 'Event Horizon', icon: 'fa-circle-dot', type: 'void',
+      damage: 950, fireRate: 1.0, range: 1200, spread: 0.0, count: 1,
+      price: 300000, desc: 'Fires bottled nothing. Pierces all, executes +40% vs titans. ~950 DPS.',
+      rarity: 'mythic', pellets: 'Void Pierce',
+      auto: false, pierce: true, explosive: false, burn: false,
+      executeMult: 1.8, bossMult: 1.4,
+      sound: 'harpoon', shake: 18, muzzle: 34, recoil: 18 }
 ];
 
 const BUCKET_UPGRADES = [
@@ -347,7 +466,13 @@ const RODS = [
     { id: 'rod_abyssal', name: 'Abyssal Grapple',    tensionMax: 520, reelPower: 245, luck: 1.50, price: 32000,  desc: 'Legendary. 55% faster bites, 45% stamina save, +45% pull.', rarity: 'legendary', color: '#f59e0b', biteTimeMult: 0.45, staminaSave: 0.45, pullMult: 1.45, bobberModel: 'glow', lineColor: '#f59e0b' },
     { id: 'rod_doom',    name: 'Doombringer',        tensionMax: 580, reelPower: 265, luck: 1.70, price: 45000,  desc: 'The hook is the least scary part.',         rarity: 'mythic',    color: '#ef4444', biteTimeMult: 0.42, staminaSave: 0.5, pullMult: 1.5, bobberModel: 'rocket', lineColor: '#ef4444' },
     { id: 'rod_kraken',  name: 'Kraken Tendril',     tensionMax: 620, reelPower: 280, luck: 1.90, price: 55000,  desc: 'It grips back. 60% faster bites, 50% stamina save, +55% pull.', rarity: 'mythic', color: '#dc2626', biteTimeMult: 0.4, staminaSave: 0.5, pullMult: 1.55, bobberModel: 'rocket', lineColor: '#dc2626' },
-    { id: 'rod_cosmic',  name: 'Cosmic Thread',      tensionMax: 700, reelPower: 310, luck: 2.20, price: 70000,  desc: 'Mythic. 65% faster bites, 55% stamina save, +60% pull. Bends reality.', rarity: 'mythic', color: '#e879f9', biteTimeMult: 0.35, staminaSave: 0.55, pullMult: 1.6, bobberModel: 'glow', lineColor: '#e879f9' }
+    { id: 'rod_cosmic',  name: 'Cosmic Thread',      tensionMax: 700, reelPower: 310, luck: 2.20, price: 70000,  desc: 'Mythic. 65% faster bites, 55% stamina save, +60% pull. Bends reality.', rarity: 'mythic', color: '#e879f9', biteTimeMult: 0.35, staminaSave: 0.55, pullMult: 1.6, bobberModel: 'glow', lineColor: '#e879f9' },
+    { id: 'rod_golem',   name: 'Golem Anchor',        tensionMax: 760, reelPower: 335, luck: 2.40, price: 90000,  desc: 'Dropped by the deep earth. 68% faster bites, 58% stamina save, +65% pull.', rarity: 'legendary', color: '#a8a29e', biteTimeMult: 0.32, staminaSave: 0.58, pullMult: 1.65, bobberModel: 'bulb', lineColor: '#a8a29e' },
+    { id: 'rod_tempest', name: 'Tempest Lash',        tensionMax: 820, reelPower: 360, luck: 2.60, price: 110000, desc: 'Braided stormfront. 70% faster bites, 60% stamina save, +70% pull.', rarity: 'legendary', color: '#38bdf8', biteTimeMult: 0.30, staminaSave: 0.60, pullMult: 1.70, bobberModel: 'rocket', lineColor: '#38bdf8' },
+    { id: 'rod_worldserpent', name: 'Worldserpent Coil', tensionMax: 880, reelPower: 390, luck: 2.90, price: 135000, desc: 'Shed skin of Jormungandr. 72% faster bites, 62% stamina save, +75% pull.', rarity: 'mythic', color: '#4ade80', biteTimeMult: 0.28, staminaSave: 0.62, pullMult: 1.75, bobberModel: 'glow', lineColor: '#4ade80' },
+    { id: 'rod_eventide', name: 'Eventide Filament', tensionMax: 940, reelPower: 420, luck: 3.20, price: 160000, desc: 'Spun from dusk itself. 75% faster bites, 65% stamina save, +80% pull.', rarity: 'mythic', color: '#c084fc', biteTimeMult: 0.25, staminaSave: 0.65, pullMult: 1.80, bobberModel: 'glow', lineColor: '#c084fc' },
+    { id: 'rod_whalefall', name: 'Whalefall Spine',  tensionMax: 1000, reelPower: 450, luck: 3.50, price: 200000, desc: 'A vertebra for a reel seat. Whales answer it. 78% faster bites, 68% stamina save, +85% pull.', rarity: 'mythic', color: '#93c5fd', biteTimeMult: 0.22, staminaSave: 0.68, pullMult: 1.85, bobberModel: 'rocket', lineColor: '#93c5fd' },
+    { id: 'rod_godline', name: 'Godline',            tensionMax: 1150, reelPower: 500, luck: 4.00, price: 280000, desc: 'The line the gods fish with. 80% faster bites, 70% stamina save, +95% pull.', rarity: 'mythic', color: '#fde047', biteTimeMult: 0.20, staminaSave: 0.70, pullMult: 1.95, bobberModel: 'glow', lineColor: '#fde047' }
 ];
 const ARMOR = [
     // Light Armor
@@ -422,6 +547,24 @@ const ARMOR = [
     { id: 'set_abyssal', name: 'Abyssal Sovereign Set', type: 'set', slot: 'armor',
       defense: 100, hpBonus: 500, speedPenalty: 0, fullSetBonus: { hpRegen: 5, damageReduction: 0.25, fearAura: true }, weight: 'Mythic',
       price: 500000, desc: 'Full set: Unkillable. Regenerates. Enemies flee.', rarity: 'mythic', color: '#e879f9', setItems: ['vest_abyssal', 'boots_abyssal', 'helm_abyssal', 'gauntlets_abyssal'] },
+
+    // ---- Event-tide crafts: fish + coins ONLY (no direct buy) ----
+    { id: 'vest_typhoon', name: 'Typhoon Vest', type: 'chest', slot: 'armor',
+      defense: 34, hpBonus: 120, speedPenalty: 8, weight: 'Epic',
+      recipe: { coins: 8000, fish: [{ id: 'tempest_queenfish', n: 1 }, { id: 'typhoon_dart', n: 2 }] },
+      desc: 'Woven storm wall. CRAFT ONLY: queenfish + darts + coins.', rarity: 'epic', color: '#0284c7' },
+    { id: 'gloves_solar', name: 'Solar Grips', type: 'hands', slot: 'armor',
+      defense: 20, hpBonus: 60, reelPowerBonus: 25, weight: 'Epic',
+      recipe: { coins: 12000, fish: [{ id: 'dawnherald_marlin', n: 1 }, { id: 'sunfin_tetra', n: 3 }] },
+      desc: 'Dawn-forged grip. CRAFT ONLY.', rarity: 'epic', color: '#facc15' },
+    { id: 'helm_mistwalker', name: 'Mistwalker Hood', type: 'head', slot: 'armor',
+      defense: 32, hpBonus: 110, luckBonus: 0.4, weight: 'Legendary',
+      recipe: { coins: 20000, fish: [{ id: 'fogmother_eel', n: 2 }, { id: 'mistwisp_eel', n: 3 }] },
+      desc: 'Sees through fog and lies. CRAFT ONLY.', rarity: 'legendary', color: '#a78bfa' },
+    { id: 'boots_bloodtide', name: 'Bloodtide Boots', type: 'feet', slot: 'armor',
+      defense: 28, hpBonus: 90, speedBonus: 15, weight: 'Legendary',
+      recipe: { coins: 20000, fish: [{ id: 'crimson_tidereaver', n: 1 }, { id: 'bloodfin_tetra', n: 2 }] },
+      desc: 'Walks the red tide. CRAFT ONLY.', rarity: 'legendary', color: '#ef4444' },
 ];
 
 const WeaponSystem = {
@@ -698,6 +841,12 @@ const WeaponSystem = {
                 const hitR = hooked.species.size + (hooked.isInflated ? 12 : 0) + 8 + (b.scatter ? 10 : 0);
                 const px = b.x - stepX, py = b.y - stepY;
                 if (this.segHitsCircle(px, py, b.x, b.y, hooked.x, hooked.y, hitR)) {
+                    // Intro dormancy: the cinematic plays, nobody bleeds.
+                    // The shot is still consumed (it did hit *something*).
+                    if (hooked.dormantUntil && state.time < hooked.dormantUntil) {
+                        if (b.hitSet) b.hitSet.add('fish');
+                        if (!b.pierce) consumed = true;
+                    } else {
                     const hr = this.rollHit(b, hooked.hp, hooked.maxHp || hooked.hp, hooked.species);
                     let dmg = hr.dmg;
                     if (hooked.isInflated) dmg = Math.max(1, Math.round(dmg * 0.5));
@@ -740,6 +889,7 @@ const WeaponSystem = {
                         Fishing.killHookedFish(state);
                     }
                     if (!b.pierce) consumed = true;
+                    } // end dormant-else
                 }
             }
 
@@ -749,6 +899,12 @@ const WeaponSystem = {
                     if (b.hitSet && b.hitSet.has(m)) continue;
                     const px = b.x - stepX, py = b.y - stepY;
                     if (this.segHitsCircle(px, py, b.x, b.y, m.x, m.y, m.species.size + 5)) {
+                        // Intro dormancy: cinematic, nobody bleeds.
+                        if (m.dormantUntil && state.time < m.dormantUntil) {
+                            if (b.hitSet) b.hitSet.add(m);
+                            if (!b.pierce) consumed = true;
+                            continue;
+                        }
                         const hr = this.rollHit(b, m.hp, m.maxHp || m.species.maxHp || m.hp, m.species);
                         m.hp -= hr.dmg;
                         try { audio.playHit(); } catch (e) {}

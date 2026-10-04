@@ -8,7 +8,7 @@
 //    screen), with boat-ride intros. New-game drift intro lives here too.
 // ============================================================
 const WorldSystem = {
-    DAY_LENGTH_SEC: 480, // one full 24h day
+    DAY_LENGTH_SEC: 900, // one full 24h day (slowed for readable windows)
     WEATHERS: ['clear', 'clouds', 'rain', 'storm', 'fog'],
 
     // Each isle sits in a SHARED-style big sea (the room water outside the
@@ -16,39 +16,64 @@ const WorldSystem = {
     // distance from the sand edge). The inland waters are what differ per
     // island — each has its own lake shape with the isle rarity bonus.
     // Every isle also gets its own pier (east side) + docked ferry boat.
-    SAND_R: 520, // sand disc radius on every isle (big enough to beach on)
+    // SQUARE ISLES (rounded corners): rect math (AABB/SDF) is exact and
+    // cheap — no ellipse edge cases, no radial teleports, and what-you-see
+    // == what-counts everywhere. SAND_H = half side, SAND_CR = corner radius.
+    // The BEACH band (LAND_M beyond the sand) renders as wet sand.
+    SAND_H: 560, // sand half-side on every isle (big enough to beach on)
+    SAND_CR: 150, // sand corner radius (visual + SDF)
     ISLANDS: [
         {
             id: 'isle_sun', name: 'Sunspill Atoll', icon: '🏝',
-            fee: 800, color: '#fbbf24',
+            fee: 1500, color: '#fbbf24',
             room: { x0: 8800, x1: 10600, y0: 700, y1: 2300 },
-            waters: [{ ox: 0, oy: -40, rx: 260, ry: 200 }],
-            desc: 'Sunny lagoon. Epic fish bite far more often here.',
-            boostRarity: 'epic',
+            waters: [{ ox: 0, oy: -40, hw: 260, hh: 200, cr: 90 }],
+            desc: 'Sunny lagoon. Dawn choruses, sunspells and monsoons brew here.',
             intro: 'The ferryman rows you past the breakers. Gulls thin out, the water turns glass-green, and a pale atoll rises — Sunspill.',
         },
         {
             id: 'isle_mist', name: 'Mistfall Reef', icon: '🌫',
-            fee: 2200, color: '#38bdf8',
+            fee: 1500, color: '#38bdf8',
             room: { x0: 11000, x1: 12800, y0: 700, y1: 2300 },
-            waters: [{ ox: 0, oy: -170, rx: 360, ry: 110 }],
-            desc: 'Foggy reef. Legendary fish haunt the mist.',
-            boostRarity: 'legendary',
+            waters: [{ ox: 0, oy: -170, hw: 360, hh: 110, cr: 55 }],
+            desc: 'Foggy reef. Fog banks roll in; blood moons rise here.',
             intro: 'Rain curtains part. A reef hums in the fog, buoys clanking. The ferryman kills the lamp — Mistfall Reef. Watch the water.',
         },
         {
             id: 'isle_abyss', name: 'Abyssal Maw', icon: '🌀',
-            fee: 4500, color: '#a855f7',
+            fee: 1500, color: '#a855f7',
             room: { x0: 13200, x1: 15000, y0: 700, y1: 2300 },
-            waters: [{ ox: -160, oy: -80, rx: 150, ry: 120 }, { ox: 160, oy: 90, rx: 150, ry: 120 }],
-            desc: 'Storm-wracked rock. Mythic horrors circle below.',
-            boostRarity: 'mythic',
+            waters: [{ ox: -160, oy: -80, hw: 150, hh: 120, cr: 55 }, { ox: 160, oy: 90, hw: 150, hh: 120, cr: 55 }],
+            desc: 'Storm-wracked rock. Typhoons land and the abyss surges here.',
             intro: 'Lightning walks the horizon all the way out. The sea drops away into black — the Abyssal Maw. Nothing here bites lightly.',
         },
     ],
 
     islandById(id) {
         return (this.ISLANDS || []).find(i => i.id === id) || null;
+    },
+
+    // Deterministic 0..1 hash for decoration scatter (seeded per index):
+    // stable across frames (no flicker), varied per island (no cookie
+    // cutter). Never use Math.random() in render code.
+    // NOTE: named _hashN — WorldSystem._hash(str) already exists for
+    // species-id strings; same-name keys would silently overwrite.
+    _hashN(n) {
+        try {
+            let h = (Math.imul(n | 0, 2654435761) ^ 0x9e3779b9) >>> 0;
+            h ^= h >>> 15; h = Math.imul(h, 2246822519) >>> 0;
+            h ^= h >>> 13;
+            return (h >>> 0) / 4294967296;
+        } catch (e) { return 0.5; }
+    },
+
+    // Per-isle seed so the three isles don't scatter identically.
+    _isleSeed(state) {
+        try {
+            const isl = this.islandOf(state);
+            const i = Math.max(0, (this.ISLANDS || []).indexOf(isl));
+            return (i + 1) * 1000;
+        } catch (e) { return 1000; }
     },
 
     islandOf(state) {
@@ -122,9 +147,7 @@ const WorldSystem = {
         if (w.hour >= 24) {
             w.hour -= 24;
             w.day += 1;
-            try {
-                Particles.showFloatingText(state, `☀ DAY ${w.day} — the tide renews`, state.player.x, state.player.y - 70, '#fde047');
-            } catch (e) {}
+            try { this.showDayBanner(state, w.day); } catch (e) {}
         }
         // Weather cycle
         w.weatherT -= delta;
@@ -143,6 +166,8 @@ const WorldSystem = {
             } catch (e) {}
         }
         if (w.flashT > 0) w.flashT -= delta;
+        // Event rotation announcements (change-detected inside).
+        try { this._announceEvents(state); } catch (e) {}
         // Throttled clock repaint (~4x/sec)
         w._clockT = (w._clockT || 0) - delta;
         if (w._clockT <= 0) {
@@ -182,9 +207,8 @@ const WorldSystem = {
             const E = this.ZONE_EDGES || { SHORE: 250, SHALLOW: 650 };
             const isl = this.islandOf(state);
             if (isl) {
-                const c = this.islandCenter(state);
                 if (this.inLakeWater(state, x, y)) return { zone: 'island', d: 0 };
-                const d = c ? (Math.hypot(x - c.cx, y - c.cy) - (this.SAND_R || 380)) : 0;
+                const d = this.sandSDF(state, x, y);
                 if (d < E.SHORE) return { zone: 'shore', d };
                 if (d < E.SHALLOW) return { zone: 'shallow', d };
                 return { zone: 'deep', d };
@@ -221,6 +245,117 @@ const WorldSystem = {
         } catch (e) {
             return { id: 'shore', name: 'SHORE', icon: '🏖' };
         }
+    },
+
+    // ---------- EVENT SYSTEM ----------
+    // Timed + weather-gated bite events. An event is ACTIVE when the sky
+    // matches (weather) and the clock matches (hours, wrap-aware); it
+    // boosts its target species ONLY in its places ('main' = mainland sea,
+    // island ids = that isle). Islands carry NO rarity buff anymore — all
+    // isle luck flows through events + weather, which is exactly what the
+    // radar reads. Announced on change (floating text).
+    EVENTS: [
+        { id: 'dawn_chorus', name: 'DAWN CHORUS', icon: '🌅', weather: 'any', hours: [5, 7], places: ['main', 'isle_sun'],
+          targets: { dawn_runner: 3.0, sunfin_tetra: 2.0, cloudskipper: 2.0 } },
+        { id: 'sunspell', name: 'SUNSPELL', icon: '☀', weather: 'clear', hours: [7, 17], places: ['isle_sun'],
+          targets: { sunscorch_damsel: 3.0, solar_crownfish: 2.5, sunfin_tetra: 2.0 } },
+        { id: 'monsoon', name: 'MONSOON', icon: '🌧', weather: 'rain', hours: null, places: ['main', 'isle_sun'],
+          targets: { monsoon_garpike: 3.0, monsoon_leopardfish: 2.5, drizzle_minnow: 2.0, midnight_rainfish: 2.5 } },
+        { id: 'fog_bank', name: 'FOG BANK', icon: '🌫', weather: 'fog', hours: null, places: ['isle_mist'],
+          targets: { fogmother_eel: 3.0, pale_mistlord: 2.5, fog_guppy: 2.0, mistwisp_eel: 2.5 } },
+        { id: 'blood_moon', name: 'BLOOD MOON', icon: '🌕', weather: 'clear', hours: [20, 23], places: ['isle_mist', 'isle_abyss'],
+          targets: { crimson_tidereaver: 3.0, moonfall_seraph: 2.5, bloodfin_tetra: 2.5, bloodmoon_raya: 2.5 } },
+        { id: 'typhoon', name: 'TYPHOON', icon: '🌀', weather: 'storm', hours: null, places: ['isle_abyss', 'main'],
+          targets: { tempest_queenfish: 3.0, typhoon_wyrm: 2.5, typhoon_dart: 2.5, stormpetrel_fish: 2.0 } },
+        { id: 'abyssal_surge', name: 'ABYSSAL SURGE', icon: '🌊', weather: 'storm', hours: [0, 5], places: ['isle_abyss'],
+          targets: { maelstrom_titan: 3.0, abyssal_anglerfish: 2.5, abyss_lanternfish: 2.0 } },
+    ],
+
+    // Wrap-aware hour window: [22,2] means 22:00→02:00.
+    hourIn(hour, h0, h1) {
+        try {
+            const h = ((Number(hour) % 24) + 24) % 24;
+            if (h0 <= h1) return h >= h0 && h < h1;
+            return h >= h0 || h < h1;
+        } catch (e) { return true; }
+    },
+
+    // Where the player fishes: 'main' or an island id.
+    playerPlace(state) {
+        try {
+            const isl = this.islandOf(state);
+            return isl ? isl.id : 'main';
+        } catch (e) { return 'main'; }
+    },
+
+    // Events whose sky+clock match right now (place checked at bonus time
+    // so the radar can project every island honestly).
+    activeEvents(state) {
+        const out = [];
+        try {
+            const w = this.ensure(state);
+            for (const ev of (this.EVENTS || [])) {
+                if (ev.weather && ev.weather !== 'any' && ev.weather !== w.weather) continue;
+                if (Array.isArray(ev.hours) && ev.hours.length === 2) {
+                    if (!this.hourIn(w.hour, ev.hours[0], ev.hours[1])) continue;
+                }
+                out.push(ev);
+            }
+        } catch (e) {}
+        return out;
+    },
+
+    // Announce event rotation (called from update; change-detected).
+    _announceEvents(state) {
+        try {
+            const ids = this.activeEvents(state).map(e => e.id).sort().join(',');
+            const w = this.ensure(state);
+            if (ids !== (w._evIds || '')) {
+                const before = (w._evIds || '').split(',').filter(Boolean);
+                w._evIds = ids;
+                const now = ids.split(',').filter(Boolean);
+                const fresh = now.filter(id => !before.includes(id));
+                for (const id of fresh) {
+                    const ev = (this.EVENTS || []).find(e => e.id === id);
+                    if (!ev) continue;
+                    const where = (ev.places || []).map(p => p === 'main' ? 'mainland sea' : p).join(' + ');
+                    Particles.showFloatingText(state, `${ev.icon} ${ev.name} — bite frenzy at ${where}!`,
+                        state.player.x, state.player.y - 80, '#fde047');
+                }
+            }
+        } catch (e) {}
+    },
+
+    // Product of matching event boosts for a species HERE (place-gated).
+    eventMult(state, speciesId) {
+        let m = 1;
+        try {
+            if (!speciesId) return 1;
+            const place = this.playerPlace(state);
+            for (const ev of this.activeEvents(state)) {
+                if (ev.places && !ev.places.includes(place)) continue;
+                const t = ev.targets && ev.targets[speciesId];
+                if (typeof t === 'number' && t > 0) m *= t;
+            }
+        } catch (e) {}
+        return m;
+    },
+
+    // Hard spawn gates: strict species bite ONLY inside their window
+    // (e.g. 20:00–23:00 + rain), otherwise their roll weight is 0.
+    // Species without strict fields bite like always.
+    spawnAllowed(sp, state) {
+        try {
+            if (!sp || !sp.strict) return true;
+            const w = this.ensure(state);
+            if (Array.isArray(sp.hours) && sp.hours.length === 2) {
+                if (!this.hourIn(w.hour, sp.hours[0], sp.hours[1])) return false;
+            }
+            if (Array.isArray(sp.weather) && sp.weather.length) {
+                if (!sp.weather.includes(w.weather)) return false;
+            }
+            return true;
+        } catch (e) { return true; }
     },
 
     // ---------- fish condition prefs + spawn bonus ----------
@@ -296,12 +431,15 @@ const WorldSystem = {
                 else if (pref.weather === 'storm' || pref.weather === 'rain') mult *= 0.85;
                 else mult *= 0.9;
             }
-            // island specialty rarity
-            const isl = this.islandOf(state);
-            if (isl && species.rarity === isl.boostRarity) mult *= 2.0;
+            // Event boosts (place-gated): the ONLY island buffs. Rarity
+            // boosts are gone — luck flows through sky + clock + events,
+            // exactly what the radar reads.
+            try {
+                const evm = this.eventMult(state, species.id);
+                if (evm !== 1) mult *= evm;
+            } catch (e) {}
             if (zone === 'deep' && (species.rarity === 'legendary' || species.rarity === 'mythic')) mult *= 1.25;
-            if (zone === 'island' && (species.rarity === 'epic' || species.rarity === 'legendary' || species.rarity === 'mythic')) mult *= 1.35;
-            return Math.max(0.3, Math.min(6, mult));
+            return Math.max(0.3, Math.min(9, mult));
         } catch (e) { return 1; }
     },
 
@@ -408,7 +546,39 @@ const WorldSystem = {
         } catch (e) { return null; }
     },
 
-    // Inland water ellipses, world coords: [{cx,cy,rx,ry}, ...]
+    // Rounded-box SDF (negative inside, 0 on edge) + outward normal.
+    // Exact for square isles/lakes, branchless-cheap, and — unlike the old
+    // radial ellipse push — it resolves along the shallowest axis so
+    // walking a shoreline slides instead of teleport-flinging.
+    _rbox(dx, dy, hw, hh, cr) {
+        const qx = Math.abs(dx) - (hw - cr), qy = Math.abs(dy) - (hh - cr);
+        const ax = Math.max(qx, 0), ay = Math.max(qy, 0);
+        return Math.hypot(ax, ay) + Math.min(Math.max(qx, qy), 0) - cr;
+    },
+
+    _rboxN(dx, dy, hw, hh, cr) {
+        const qx = Math.abs(dx) - (hw - cr), qy = Math.abs(dy) - (hh - cr);
+        if (qx > 0 && qy > 0) {
+            const l = Math.hypot(qx, qy) || 1;
+            return { x: (dx < 0 ? -1 : 1) * qx / l, y: (dy < 0 ? -1 : 1) * qy / l };
+        }
+        if (qx > qy) return { x: dx < 0 ? -1 : 1, y: 0 };
+        return { x: 0, y: dy < 0 ? -1 : 1 };
+    },
+
+    sandHalf() { return this.SAND_H || 560; },
+    sandCorner() { return this.SAND_CR || 150; },
+
+    // Signed distance to the sand edge (square isles).
+    sandSDF(state, x, y) {
+        try {
+            const c = this.islandCenter(state);
+            if (!c) return 1e9;
+            return this._rbox(x - c.cx, y - c.cy, this.sandHalf(), this.sandHalf(), this.sandCorner());
+        } catch (e) { return 1e9; }
+    },
+
+    // Inland water rects, world coords: [{cx,cy,hw,hh,cr}, ...]
     islandWaters(state) {
         try {
             const isl = this.islandOf(state);
@@ -416,7 +586,8 @@ const WorldSystem = {
             if (!isl || !c) return [];
             return (isl.waters || []).map(w => ({
                 cx: c.cx + (w.ox || 0), cy: c.cy + (w.oy || 0),
-                rx: w.rx || 100, ry: w.ry || 80,
+                hw: (w.hw || w.rx) || 100, hh: (w.hh || w.ry) || 80,
+                cr: w.cr || 40,
             }));
         } catch (e) { return []; }
     },
@@ -424,8 +595,7 @@ const WorldSystem = {
     inLakeWater(state, x, y) {
         try {
             for (const w of this.islandWaters(state)) {
-                const dx = (x - w.cx) / Math.max(1, w.rx), dy = (y - w.cy) / Math.max(1, w.ry);
-                if (dx * dx + dy * dy < 1) return true;
+                if (this._rbox(x - w.cx, y - w.cy, w.hw, w.hh, w.cr || 40) < 0) return true;
             }
             return false;
         } catch (e) { return false; }
@@ -437,9 +607,9 @@ const WorldSystem = {
             const isl = this.islandOf(state);
             const c = this.islandCenter(state);
             if (!isl || !c) return null;
-            const R = this.SAND_R || 380;
+            const H = this.sandHalf();
             return {
-                x0: c.cx + R - 20, x1: isl.room.x1 - 120,
+                x0: c.cx + H - 20, x1: isl.room.x1 - 120,
                 y: c.cy, half: 46,
             };
         } catch (e) { return null; }
@@ -473,7 +643,7 @@ const WorldSystem = {
     },
 
     // Any fishable water on the current isle: a lake, or the open sea
-    // around the sand (inside the room, outside the disc).
+    // around the sand (inside the room, outside the square).
     isWaterAt(state, x, y) {
         try {
             const isl = this.islandOf(state);
@@ -483,11 +653,10 @@ const WorldSystem = {
                     y > (B.MIN_Y || 0) + 20 && y < (B.MAX_Y || 9999) - 20;
             }
             if (this.inLakeWater(state, x, y)) return true;
-            const c = this.islandCenter(state);
             const r = isl.room;
-            if (!c || !r) return false;
+            if (!r) return false;
             const inRoom = x > r.x0 + 30 && x < r.x1 - 30 && y > r.y0 + 30 && y < r.y1 - 30;
-            return inRoom && Math.hypot(x - c.cx, y - c.cy) > (this.SAND_R || 380) + 8;
+            return inRoom && this.sandSDF(state, x, y) > 8;
         } catch (e) { return false; }
     },
 
@@ -508,8 +677,7 @@ const WorldSystem = {
             const off = this.LAND_M;
             const isl = this.islandOf(state);
             if (isl) {
-                const c = this.islandCenter(state);
-                if (c && Math.hypot(x - c.cx, y - c.cy) <= (this.SAND_R || 380) + off) return true;
+                if (this.sandSDF(state, x, y) <= off) return true;
                 return this.onIslandPier(state, x, y, off);
             }
             if (x <= (state.waterBoundaryX || 0) + off) return true;
@@ -524,11 +692,13 @@ const WorldSystem = {
             const B = (typeof CONFIG !== 'undefined' && CONFIG.WORLD) || { MIN_X: 40, MAX_X: 4500, MIN_Y: 40, MAX_Y: 3500 };
             const isl = this.islandOf(state);
             if (isl) {
-                const c = this.islandCenter(state);
                 const r = isl.room;
-                if (!c || !r) return false;
+                if (!r) return false;
                 if (x < r.x0 + 20 || x > r.x1 - 20 || y < r.y0 + 20 || y > r.y1 - 20) return false;
-                if (Math.hypot(x - c.cx, y - c.cy) <= (this.SAND_R || 380) + this.LAND_M) return true;
+                // Lagoon water holds floating loot (magnet + rot timer deal
+                // with it) — only the open sea around the square sinks drops.
+                if (this.inLakeWater(state, x, y)) return true;
+                if (this.sandSDF(state, x, y) <= this.LAND_M) return true;
                 return this.onIslandPier(state, x, y, this.LAND_M);
             }
             if (x > (state.waterBoundaryX || 0) + 15 && !this.onBridge(state, x, y)) return false;
@@ -818,6 +988,30 @@ const WorldSystem = {
     },
 
     // ---------- intros ----------
+    // Big day-rollover banner (not a tiny floating line): DAY N + the
+    // morning weather, self-fading like the island splash.
+    showDayBanner(state, day) {
+        try {
+            const host = document.getElementById('game-container') || document.body;
+            const old = document.getElementById('day-banner');
+            if (old) old.remove();
+            const w = this.ensure(state);
+            const wicon = this.weatherIcon(w.weather);
+            const wname = this.weatherName(w.weather);
+            const div = document.createElement('div');
+            div.id = 'day-banner';
+            div.innerHTML =
+                '<div class="day-kicker">☀ A NEW DAY DAWNS ☀</div>' +
+                `<div class="day-name">DAY ${day}</div>` +
+                `<div class="day-sub">${wicon} ${wname} — the tide renews, check the radar!</div>`;
+            host.appendChild(div);
+            setTimeout(() => { try { div.remove(); } catch (e) {} }, 3600);
+            try {
+                Particles.showFloatingText(state, `☀ DAY ${day}`, state.player.x, state.player.y - 70, '#fde047');
+            } catch (e) {}
+        } catch (e) {}
+    },
+
     // Island-discovery splash: big opaque banner (same family as the
     // boss banner), self-fades after ~3.5s. Fires on arrival only.
     showIslandBanner(state, isl) {
@@ -835,7 +1029,7 @@ const WorldSystem = {
             host.appendChild(div);
             try {
                 if (typeof Particles !== 'undefined' && state && state.player) {
-                    Particles.showFloatingText(state, (isl.icon || '🏝') + ' ' + (isl.name || 'Island') + ' — ' + (isl.boostRarity || '').toUpperCase() + ' luck here!',
+                    Particles.showFloatingText(state, (isl.icon || '🏝') + ' ' + (isl.name || 'Island') + ' — events brew here, check the radar!',
                         state.player.x, state.player.y - 110, isl.color || '#fbbf24');
                 }
             } catch (e) {}
@@ -858,7 +1052,7 @@ const WorldSystem = {
             const skip = document.getElementById('btn-intro-skip');
             const pages = [
                 { kicker: '⛵ THE CROSSING', title: 'LEAVING THE SHALLOWS', body: `You pay the ferryman ${isl.fee} coins and climb aboard. The pier shrinks behind you; the water deepens from turquoise to ink.` },
-                { kicker: `${isl.icon} ${isl.name.toUpperCase()}`, title: 'LANDFALL', body: isl.intro + ' Fishing here is its own world — the island bonus favors ' + isl.boostRarity.toUpperCase() + ' fish.' },
+                { kicker: `${isl.icon} ${isl.name.toUpperCase()}`, title: 'LANDFALL', body: isl.intro + ' No rarity is favored here — only sky, clock and events. Read the bite forecast before you cast.' },
             ];
             let idx = 0;
             const paint = () => {
@@ -867,7 +1061,7 @@ const WorldSystem = {
                 if (body) body.innerText = pages[idx].body;
                 if (dots) dots.innerHTML = pages.map((_, i) => `<span class="w-2 h-2 rounded-full ${i === idx ? 'bg-sky-400' : 'bg-slate-600'}"></span>`).join('');
                 if (back) back.style.visibility = idx === 0 ? 'hidden' : 'visible';
-                if (next) next.innerText = idx === pages.length - 1 ? 'Sail! ⛵' : 'Next →';
+                if (next) next.innerText = idx === pages.length - 1 ? T('intro_sail') : T('intro_next');
             };
             ov.classList.remove('hidden');
             ov.classList.add('flex');
@@ -948,9 +1142,82 @@ const WorldSystem = {
         } catch (e) {}
     },
 
+    // Map-aware clamp for NON-player entities (beached monsters, loot,
+    // knockbacks, blink repositions): mainland surf bounds used to yank
+    // everything to x<=wb on the isles — the "beached fish turns invisible
+    // and teleports to the mainland" bug. Decks keep their deck.
+    clampEntity(state, o, size) {
+        try {
+            if (!o) return o;
+            const s = size || 16;
+            const B = (typeof CONFIG !== 'undefined' && CONFIG.WORLD) || { MIN_X: 40, MAX_X: 4500, MIN_Y: 40, MAX_Y: 3500 };
+            // Swim-in arrivals glide through the water (see Ritual.spawnBoss)
+            // — land bounds only grab them once the glide completes.
+            if (o._swimIn) {
+                o.x = Utils.clamp(o.x, (state.waterBoundaryX || 600) + 15, B.MAX_X - 30);
+                o.y = Utils.clamp(o.y, B.MIN_Y + 30, B.MAX_Y - 30);
+                return o;
+            }
+            const isl = this.islandOf(state);
+            if (isl) {
+                const r = isl.room;
+                o.x = Utils.clamp(o.x, r.x0 + s, r.x1 - s);
+                o.y = Utils.clamp(o.y, r.y0 + s, r.y1 - s);
+                return o;
+            }
+            if (this.onBridge && this.bridgeDef && this.onBridge(state, o.x, o.y)) {
+                const b = this.bridgeDef(state);
+                o.x = Utils.clamp(o.x, b.x0 - s, b.x1 + s);
+                o.y = Utils.clamp(o.y, b.y - b.half - s, b.y + b.half + s);
+                return o;
+            }
+            o.x = Utils.clamp(o.x, B.MIN_X + s, (state.waterBoundaryX || 600) - s);
+            o.y = Utils.clamp(o.y, B.MIN_Y + s, B.MAX_Y - s);
+            return o;
+        } catch (e) { return o; }
+    },
+
+    // Map-aware out-of-bounds for enemy projectiles (same bug family:
+    // island shots died instantly past B.MAX_X, so isle monsters and
+    // hooked-fish skills shot blanks).
+    bulletBounds(state) {
+        try {
+            const isl = this.islandOf(state);
+            if (isl) {
+                const r = isl.room;
+                return { x0: r.x0 - 40, x1: r.x1 + 40, y0: r.y0 - 40, y1: r.y1 + 40 };
+            }
+        } catch (e) {}
+        const B = (typeof CONFIG !== 'undefined' && CONFIG.WORLD) || { MIN_X: 40, MAX_X: 4500, MIN_Y: 40, MAX_Y: 3500 };
+        return { x0: B.MIN_X, x1: B.MAX_X, y0: B.MIN_Y, y1: B.MAX_Y };
+    },
+
     // ---------- collision for island rooms ----------
-    // Walkable = sand disc + pier deck. Lakes push you back to the sand;
-    // the open sea around the disc is NOT walkable (fish it, don't swim).
+    // Walkable = sand square + pier deck. Lakes slide you back out along
+    // the shallowest axis (capped per frame — walking a shoreline slides,
+    // a deep knockback eases out over frames, nothing teleports = no fling).
+    // The open sea around the square is NOT walkable (fish it, don't swim).
+    // Push loot/entities out of lagoons (full resolve — placement, no motion
+    // feel). cap <= 0 means no cap.
+    pushOutOfLakes(state, x, y, pad, cap) {
+        try {
+            const waters = this.islandWaters(state);
+            if (!waters.length) return { x, y };
+            for (const w of waters) {
+                const cr = w.cr || 40;
+                const d = this._rbox(x - w.cx, y - w.cy, w.hw, w.hh, cr);
+                if (d < pad) {
+                    const n = this._rboxN(x - w.cx, y - w.cy, w.hw, w.hh, cr);
+                    let push = (pad - d);
+                    if (cap > 0) push = Math.min(push, cap);
+                    x += n.x * push;
+                    y += n.y * push;
+                }
+            }
+            return { x, y };
+        } catch (e) { return { x, y }; }
+    },
+
     collide(state) {
         try {
             const isl = this.islandOf(state);
@@ -958,22 +1225,16 @@ const WorldSystem = {
             const p = state.player;
             const r = isl.room;
             const c = this.islandCenter(state);
-            const R = this.SAND_R || 380;
+            const H = this.sandHalf(), CR = this.sandCorner();
             const rad = (p.radius || 16) + 6;
             const pier = this.islandPier(state);
             // Failsafe: never leave the room.
             p.x = Math.max(r.x0 + 30, Math.min(r.x1 - 30, p.x));
             p.y = Math.max(r.y0 + 30, Math.min(r.y1 - 30, p.y));
-            // Lakes are water: push back out to the sand first.
-            for (const w of this.islandWaters(state)) {
-                const dx = (p.x - w.cx) / Math.max(1, w.rx), dy = (p.y - w.cy) / Math.max(1, w.ry);
-                const q = dx * dx + dy * dy;
-                if (q < 1) {
-                    const a = Math.atan2(p.y - w.cy, p.x - w.cx);
-                    // Step just outside the water edge.
-                    p.x = w.cx + Math.cos(a) * (w.rx + rad + 4);
-                    p.y = w.cy + Math.sin(a) * (w.ry + rad + 4);
-                }
+            // Lakes are water: slide back out to the sand (capped — no fling).
+            if (c) {
+                const out = this.pushOutOfLakes(state, p.x, p.y, rad + 2, 48);
+                p.x = out.x; p.y = out.y;
             }
             // On the pier deck? Clamp to it.
             if (pier && p.x >= pier.x0 - rad && p.x <= pier.x1 + rad &&
@@ -982,14 +1243,15 @@ const WorldSystem = {
                 p.y = Math.max(pier.y - pier.half - rad, Math.min(pier.y + pier.half + rad, p.y));
                 return true;
             }
-            // Otherwise you belong on the sand disc — pull back to its edge.
+            // Otherwise you belong on the sand square — ease back to its
+            // edge (capped like the lakes: no cross-map yanks).
             if (c) {
-                const dx = p.x - c.cx, dy = p.y - c.cy;
-                const d = Math.hypot(dx, dy) || 1;
-                const maxD = R - rad;
-                if (d > maxD) {
-                    p.x = c.cx + (dx / d) * maxD;
-                    p.y = c.cy + (dy / d) * maxD;
+                const d = this.sandSDF(state, p.x, p.y);
+                if (d > -rad) {
+                    const n = this._rboxN(p.x - c.cx, p.y - c.cy, H, H, CR);
+                    const pull = Math.min(d + rad, 48);
+                    p.x -= n.x * pull;
+                    p.y -= n.y * pull;
                 }
             }
             return true;
@@ -1002,10 +1264,154 @@ const WorldSystem = {
             const ws = this.islandWaters(state);
             if (ws && ws.length) {
                 const w = ws[0];
-                return { cx: w.cx, cy: w.cy, rx: w.rx, ry: w.ry };
+                return { cx: w.cx, cy: w.cy, rx: w.hw, ry: w.hh, hw: w.hw, hh: w.hh, cr: w.cr };
             }
             return null;
         } catch (e) { return null; }
+    },
+
+    // Spawn camp: the beach umbrella you washed up under + the fish-radar
+    // board beside it (E to open the bite forecast). Decor only — the
+    // radar entry lives in Input.interact.
+    SPAWN_UMBRELLA: { x: 238, y: 348 },
+    drawSpawnCamp(state, ctx) {
+        try {
+            if (!state || !state.player) return;
+            if (state.player.inCave || state.player.onIsland) return;
+            const u = this.SPAWN_UMBRELLA;
+            const cam = state.camera;
+            if (cam && Math.hypot(cam.x - u.x, cam.y - u.y) > 1400) return;
+            const t = state.time || 0;
+            // sand patch
+            ctx.fillStyle = 'rgba(230,189,130,0.5)';
+            ctx.beginPath(); ctx.ellipse(u.x + 60, u.y + 10, 130, 34, 0, 0, Math.PI * 2); ctx.fill();
+            // Beach umbrella REMODEL: tilted bamboo pole, big 10-panel
+            // canopy with scalloped valance + stitched shading, brass
+            // finial, guy-rope, striped towel and a cooler box. Sways
+            // gently in the sea breeze (t-driven, decor only).
+            const sway = Math.sin(t * 0.9) * 0.022;
+            const tilt = 0.16 + sway;
+            const px = u.x, py = u.y;
+            const topX = px + Math.sin(tilt) * 84, topY = py - Math.cos(tilt) * 84;
+            ctx.save();
+            // shadow
+            ctx.fillStyle = 'rgba(0,0,0,0.22)';
+            ctx.beginPath(); ctx.ellipse(px + 14, py + 4, 66, 14, 0, 0, Math.PI * 2); ctx.fill();
+            // pole (bamboo segments)
+            ctx.strokeStyle = '#8a5a2b';
+            ctx.lineWidth = 7;
+            ctx.lineCap = 'round';
+            ctx.beginPath(); ctx.moveTo(px, py + 2); ctx.lineTo(topX, topY); ctx.stroke();
+            ctx.strokeStyle = 'rgba(60,36,12,0.55)';
+            ctx.lineWidth = 1.5;
+            for (let s = 1; s <= 4; s++) {
+                const bx = px + (topX - px) * (s / 5), by = py + 2 + (topY - py - 2) * (s / 5);
+                ctx.beginPath(); ctx.moveTo(bx - 3, by); ctx.lineTo(bx + 3, by); ctx.stroke();
+            }
+            // guy-rope to a sand peg
+            ctx.strokeStyle = 'rgba(226,232,240,0.7)';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(topX - 8, topY + 6); ctx.lineTo(px - 66, py + 2); ctx.stroke();
+            ctx.fillStyle = '#475569';
+            ctx.fillRect(px - 69, py - 2, 6, 8);
+            // canopy: 10 alternating panels fanning from the crown
+            const R = 62;
+            const cols = ['#0ea5e9', '#f8fafc'];
+            for (let i = 0; i < 10; i++) {
+                const a0 = Math.PI + (i / 10) * Math.PI + tilt * 0.4;
+                const a1 = Math.PI + ((i + 1) / 10) * Math.PI + tilt * 0.4;
+                const grad = ctx.createRadialGradient(topX, topY, 6, topX, topY, R);
+                const base = cols[i % 2];
+                grad.addColorStop(0, base);
+                grad.addColorStop(1, i % 2 ? '#94a3b8' : '#0369a1');
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.moveTo(topX, topY);
+                ctx.arc(topX, topY, R, a0, a1);
+                ctx.closePath(); ctx.fill();
+                // rib
+                ctx.strokeStyle = 'rgba(15,23,42,0.35)';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(topX, topY);
+                ctx.lineTo(topX + Math.cos(a1) * R, topY + Math.sin(a1) * R);
+                ctx.stroke();
+            }
+            // scalloped valance hanging off the rim
+            ctx.fillStyle = 'rgba(248,250,252,0.9)';
+            for (let i = 0; i < 10; i++) {
+                const a = Math.PI + ((i + 0.5) / 10) * Math.PI + tilt * 0.4;
+                const vx = topX + Math.cos(a) * R, vy = topY + Math.sin(a) * R;
+                ctx.beginPath(); ctx.arc(vx, vy + 4, 7, 0, Math.PI); ctx.fill();
+            }
+            // canopy crown highlight
+            ctx.fillStyle = 'rgba(255,255,255,0.28)';
+            ctx.beginPath(); ctx.ellipse(topX - 16, topY - 30, 18, 8, -0.5, 0, Math.PI * 2); ctx.fill();
+            // brass finial ball + spike
+            ctx.fillStyle = '#fbbf24';
+            ctx.beginPath(); ctx.arc(topX, topY - 4, 6, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = '#b45309';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(topX, topY - 10); ctx.lineTo(topX, topY - 20); ctx.stroke();
+            ctx.restore();
+            // striped towel
+            ctx.fillStyle = '#38bdf8';
+            ctx.fillRect(u.x + 28, u.y - 6, 48, 14);
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(u.x + 28, u.y - 6, 48, 4);
+            ctx.fillStyle = '#f472b6';
+            ctx.fillRect(u.x + 28, u.y + 4, 48, 3);
+            // cooler box
+            ctx.fillStyle = '#f97316';
+            ctx.fillRect(u.x - 52, u.y - 14, 26, 18);
+            ctx.fillStyle = '#fed7aa';
+            ctx.fillRect(u.x - 52, u.y - 14, 26, 5);
+            ctx.strokeStyle = '#7c2d12';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(u.x - 52, u.y - 14, 26, 18);
+            // radar board: posts + panel + sonar screen
+            const r = (typeof FishRadar !== 'undefined' && FishRadar.pos) ? FishRadar.pos() : { x: 390, y: 290 };
+            ctx.fillStyle = '#5b4227';
+            ctx.fillRect(r.x - 34, r.y - 6, 8, 46);
+            ctx.fillRect(r.x + 26, r.y - 6, 8, 46);
+            ctx.fillStyle = '#1e293b';
+            ctx.fillRect(r.x - 44, r.y - 66, 88, 62);
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(r.x - 44, r.y - 66, 88, 62);
+            ctx.fillStyle = '#04121f';
+            ctx.fillRect(r.x - 38, r.y - 60, 76, 34);
+            // sonar sweep + blips
+            ctx.strokeStyle = '#22ff88';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            for (let x = 0; x <= 76; x += 4) {
+                const y = Math.sin(x * 0.15 + t * 3) * 8 * Math.sin(x * 0.05 - t * 1.2);
+                if (x === 0) ctx.moveTo(r.x - 38 + x, r.y - 43 + y);
+                else ctx.lineTo(r.x - 38 + x, r.y - 43 + y);
+            }
+            ctx.stroke();
+            const blink = (Math.floor(t * 1.5) % 2) === 0;
+            ctx.fillStyle = blink ? '#fde047' : '#92610a';
+            ctx.beginPath(); ctx.arc(r.x + 28, r.y - 52, 3.5, 0, Math.PI * 2); ctx.fill();
+            // labels
+            ctx.textAlign = 'center';
+            ctx.font = 'black 13px Work Sans';
+            ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+            ctx.strokeText('📡 RADAR', r.x, r.y + 58);
+            ctx.fillStyle = '#7dd3fc';
+            ctx.fillText('📡 RADAR', r.x, r.y + 58);
+            try {
+                if (typeof FishRadar !== 'undefined' && FishRadar.near && FishRadar.near(state)) {
+                    const bob = Math.sin(t * 4) * 3;
+                    ctx.font = 'black 15px Work Sans';
+                    ctx.lineWidth = 4;
+                    ctx.strokeText('ⓔ', r.x, r.y - 78 + bob);
+                    ctx.fillStyle = '#fef08a';
+                    ctx.fillText('ⓔ', r.x, r.y - 78 + bob);
+                }
+            } catch (e) {}
+        } catch (e) {}
     },
 
     // ---------- rendering ----------
@@ -1105,7 +1511,84 @@ const WorldSystem = {
         ctx.strokeText(label, 0, 44);
         ctx.fillStyle = near ? '#fef08a' : '#e7e5e4';
         ctx.fillText(label, 0, 44);
+        // Circled-E badge above the mast when in range (radar style).
+        if (near) {
+            const bob = Math.sin((state.time || 0) * 4) * 3;
+            ctx.font = 'black 17px Work Sans';
+            ctx.lineWidth = 4;
+            ctx.strokeText('ⓔ', 0, -58 + bob);
+            ctx.fillStyle = '#fef08a';
+            ctx.fillText('ⓔ', 0, -58 + bob);
+        }
         ctx.restore();
+    },
+
+    // ONE sea asset for mainland + isles: same stops everywhere, so the
+    // ocean reads as a single body of water (the "background sea" is
+    // literally shared). Mainland tiers remap the same hues by distance;
+    // isles wash shallow→deep outward from the sand square.
+    SEA_STOPS: [[0, '#1093b8'], [0.35, '#0c6e94'], [0.7, '#075985'], [1, '#041f33']],
+
+    paintSeaBase(ctx, x0, y0, w, h, vertical, stops) {
+        try {
+            const g = vertical ? ctx.createLinearGradient(0, y0, 0, y0 + h)
+                : ctx.createLinearGradient(x0, 0, x0 + w, 0);
+            for (const [o, col] of (stops || this.SEA_STOPS)) g.addColorStop(o, col);
+            ctx.fillStyle = g;
+            ctx.fillRect(x0, y0, w, h);
+        } catch (e) {}
+    },
+
+    // Rounded-rect path (manual arcs — works where ctx.roundRect doesn't).
+    _rr(ctx, x0, y0, x1, y1, cr) {
+        const r = Math.max(1, Math.min(cr, (x1 - x0) / 2, (y1 - y0) / 2));
+        ctx.beginPath();
+        ctx.moveTo(x0 + r, y0);
+        ctx.lineTo(x1 - r, y0);
+        ctx.arcTo(x1, y0, x1, y0 + r, r);
+        ctx.lineTo(x1, y1 - r);
+        ctx.arcTo(x1, y1, x1 - r, y1, r);
+        ctx.lineTo(x0 + r, y1);
+        ctx.arcTo(x0, y1, x0, y1 - r, r);
+        ctx.lineTo(x0, y0 + r);
+        ctx.arcTo(x0, y0, x0 + r, y0, r);
+        ctx.closePath();
+    },
+
+    // Static island gradients (sea / shallow / sand / lakes) never change
+    // per island — build once per canvas, not 60×/sec. Gradient
+    // construction walks color stops on the CPU; on software renderers
+    // that was the hottest per-frame cost of the whole island scene.
+    _isleGrads(ctx, isl, c, H, waters) {
+        try {
+            const key = isl.id + ':sq1:' + H + ':' + waters.length;
+            if (!this._gradCache) this._gradCache = {};
+            const hit = this._gradCache[key];
+            if (hit && hit.ctx === ctx) return hit.g;
+            const r = isl.room;
+            const sea = ctx.createLinearGradient(0, r.y0, 0, r.y1);
+            for (const [o, col] of this.SEA_STOPS) sea.addColorStop(o, col);
+            const shal = ctx.createRadialGradient(c.cx, c.cy, H, c.cx, c.cy, H + 260);
+            shal.addColorStop(0, 'rgba(45,212,191,0.20)');
+            shal.addColorStop(1, 'rgba(45,212,191,0)');
+            const GR = H * 1.42;
+            const sand = ctx.createRadialGradient(c.cx, c.cy, 10, c.cx, c.cy, GR);
+            sand.addColorStop(0, '#e6bd82');
+            sand.addColorStop(0.6, '#c99b63');
+            sand.addColorStop(1, '#8a6a42');
+            const lakes = waters.map(w => {
+                const lg = ctx.createRadialGradient(w.cx, w.cy, 6, w.cx, w.cy, Math.max(w.hw, w.hh));
+                lg.addColorStop(0, '#134e4a');
+                lg.addColorStop(0.55, '#0d9488');
+                lg.addColorStop(0.85, '#2dd4bf');
+                lg.addColorStop(1, '#5eead4');
+                return lg;
+            });
+            const g = { sea, shal, sand, lakes };
+            this._gradCache = {};
+            this._gradCache[key] = { ctx, g };
+            return g;
+        } catch (e) { return null; }
     },
 
     drawIslandBase(state, ctx) {
@@ -1114,108 +1597,263 @@ const WorldSystem = {
         const r = isl.room;
         const t = state.time || 0;
         const c = this.islandCenter(state) || { cx: (r.x0 + r.x1) / 2, cy: (r.y0 + r.y1) / 2 };
-        const R = this.SAND_R || 380;
-        // Surrounding sea — SAME water as the mainland (shared-sea feel).
-        const sea = ctx.createLinearGradient(0, r.y0, 0, r.y1);
-        sea.addColorStop(0, '#0c4a6e');
-        sea.addColorStop(0.55, '#075985');
-        sea.addColorStop(1, '#082f49');
-        ctx.fillStyle = sea;
-        ctx.fillRect(r.x0 - 400, r.y0 - 400, (r.x1 - r.x0) + 800, (r.y1 - r.y0) + 800);
-        // Shallow tint ring hugging the sand (shore water looks lighter).
-        const shal = ctx.createRadialGradient(c.cx, c.cy, R, c.cx, c.cy, R + 250);
-        shal.addColorStop(0, 'rgba(45,212,191,0.20)');
-        shal.addColorStop(1, 'rgba(45,212,191,0)');
-        ctx.fillStyle = shal;
-        ctx.beginPath(); ctx.arc(c.cx, c.cy, R + 250, 0, Math.PI * 2); ctx.fill();
-        // Reef ring: dark underwater rocks circling the sand (depth cue).
-        for (let i = 0; i < 26; i++) {
-            const a = (i / 26) * Math.PI * 2 + 0.13;
-            const rr = R + 60 + ((i * 137) % 90);
-            const rx = c.cx + Math.cos(a) * rr, ry = c.cy + Math.sin(a) * rr;
-            const rs = 14 + ((i * 89) % 22);
-            ctx.fillStyle = i % 2 ? 'rgba(12,60,80,0.85)' : 'rgba(8,45,62,0.9)';
-            ctx.beginPath(); ctx.ellipse(rx, ry, rs, rs * 0.62, a, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = 'rgba(45,212,191,0.25)';
-            ctx.beginPath(); ctx.ellipse(rx - rs * 0.2, ry - rs * 0.25, rs * 0.45, rs * 0.22, a, 0, Math.PI * 2); ctx.fill();
+        const H = this.sandHalf(), CR = this.sandCorner();
+        // Hoisted once per frame: every clear/lake test below reuses these
+        // instead of rebuilding the water list 30+ times.
+        const waters = this.islandWaters(state);
+        const G = this._isleGrads(ctx, isl, c, H, waters);
+        // View rect (world coords): scatter outside it is skipped — same
+        // look, far fewer canvas ops when zoomed in.
+        let vx0 = -1e9, vy0 = -1e9, vx1 = 1e9, vy1 = 1e9;
+        try {
+            const cam = state.camera, cv = ctx.canvas;
+            if (cam && cv && cam.zoom > 0) {
+                const hw = cv.width / cam.zoom / 2 + 60, hh = cv.height / cam.zoom / 2 + 60;
+                vx0 = cam.x - hw; vx1 = cam.x + hw;
+                vy0 = cam.y - hh; vy1 = cam.y + hh;
+            }
+        } catch (e) {}
+        const inView = (x, y, m) => (x > vx0 - m && x < vx1 + m && y > vy0 - m && y < vy1 + m);
+        // Surrounding sea — the SHARED asset (same stops as mainland).
+        if (G) { ctx.fillStyle = G.sea; }
+        else {
+            const sea = ctx.createLinearGradient(0, r.y0, 0, r.y1);
+            for (const [o, col] of this.SEA_STOPS) sea.addColorStop(o, col);
+            ctx.fillStyle = sea;
         }
-        // Animated surf foam: two breathing rings on the sand edge.
+        ctx.fillRect(r.x0 - 400, r.y0 - 400, (r.x1 - r.x0) + 800, (r.y1 - r.y0) + 800);
+        // Shallow tint wash hugging the sand (shore water looks lighter).
+        ctx.fillStyle = (G && G.shal) || 'rgba(45,212,191,0.10)';
+        this._rr(ctx, c.cx - H - 260, c.cy - H - 260, c.cx + H + 260, c.cy + H + 260, CR + 200);
+        ctx.fill();
+        // Reef rocks: jittered along the square perimeter (broken ring, not
+        // a necklace). Clamped inside the room so rocks never sit past the
+        // sea fill.
+        const seed = this._isleSeed(state);
+        const PER = 8 * H;
+        for (let i = 0; i < 26; i++) {
+            const h1 = this._hashN(seed + i * 7 + 1), h2 = this._hashN(seed + i * 7 + 2);
+            const h3 = this._hashN(seed + i * 7 + 3), h4 = this._hashN(seed + i * 7 + 4);
+            let u = ((i + 0.13 + (h1 - 0.5) * 0.8) / 26) * PER;
+            u = ((u % PER) + PER) % PER;
+            const side = Math.floor(u / (PER / 4)) % 4;
+            const along = (u % (PER / 4)) / (PER / 4) * 2 * H - H;
+            const off = 60 + h2 * 130;
+            let rx = c.cx, ry = c.cy;
+            if (side === 0) { rx = c.cx + along; ry = c.cy - H - off; }
+            else if (side === 1) { rx = c.cx + H + off; ry = c.cy + along; }
+            else if (side === 2) { rx = c.cx - along; ry = c.cy + H + off; }
+            else { rx = c.cx - H - off; ry = c.cy - along; }
+            // Keep inside the room (sea fill ends at room±400, fish at ±30).
+            rx = Math.max(r.x0 + 60, Math.min(r.x1 - 60, rx));
+            ry = Math.max(r.y0 + 60, Math.min(r.y1 - 60, ry));
+            const rs = 10 + h3 * 26;
+            if (!inView(rx, ry, rs + 8)) continue;
+            ctx.fillStyle = i % 2 ? 'rgba(12,60,80,0.85)' : 'rgba(8,45,62,0.9)';
+            ctx.beginPath(); ctx.ellipse(rx, ry, rs, rs * (0.45 + h4 * 0.35), h1 * 3, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = 'rgba(45,212,191,0.25)';
+            ctx.beginPath(); ctx.ellipse(rx - rs * 0.2, ry - rs * 0.25, rs * 0.45, rs * 0.22, 0, 0, Math.PI * 2); ctx.fill();
+        }
+        // Shore band: the LAND_M square past the sand edge renders as wet
+        // sand — beaching / loot logic keys off it, so the border you SEE
+        // is the border that COUNTS.
+        const LAND_BAND = this.LAND_M || 30;
+        ctx.strokeStyle = 'rgba(160,118,72,0.85)';
+        ctx.lineWidth = LAND_BAND * 2;
+        this._rr(ctx, c.cx - H - LAND_BAND / 2, c.cy - H - LAND_BAND / 2, c.cx + H + LAND_BAND / 2, c.cy + H + LAND_BAND / 2, CR + LAND_BAND / 2);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(120,90,60,0.5)';
+        ctx.lineWidth = 3;
+        this._rr(ctx, c.cx - H - LAND_BAND, c.cy - H - LAND_BAND, c.cx + H + LAND_BAND, c.cy + H + LAND_BAND, CR + LAND_BAND);
+        ctx.stroke();
+        // Animated surf foam: two breathing rounded squares on the band edge.
         for (let k = 0; k < 2; k++) {
             const ph = t * 1.6 + k * Math.PI;
+            const e = LAND_BAND + 4 + Math.sin(ph) * 7 + k * 12;
             ctx.strokeStyle = k ? 'rgba(255,255,255,0.35)' : 'rgba(224,242,254,0.55)';
             ctx.lineWidth = k ? 3 : 6;
-            ctx.beginPath(); ctx.arc(c.cx, c.cy, R + 4 + Math.sin(ph) * 7 + k * 12, 0, Math.PI * 2); ctx.stroke();
+            this._rr(ctx, c.cx - H - e, c.cy - H - e, c.cx + H + e, c.cy + H + e, CR + e);
+            ctx.stroke();
         }
-        // Sea sparkle outside the reef.
+        // Sea sparkle: seeded points in the room, kept off the sand square.
         ctx.fillStyle = 'rgba(186,230,253,0.5)';
         for (let i = 0; i < 40; i++) {
-            const a = (i / 40) * Math.PI * 2 + t * 0.05;
-            const rr = R + 170 + ((i * 211) % 260);
-            const sx = c.cx + Math.cos(a) * rr, sy = c.cy + Math.sin(a) * rr;
+            const h1 = this._hashN(seed + 2000 + i * 3 + 1), h2 = this._hashN(seed + 2000 + i * 3 + 2);
+            const rx0 = r.x0 + 40, rx1 = r.x1 - 40, ry0 = r.y0 + 40, ry1 = r.y1 - 40;
+            const sx = rx0 + h1 * (rx1 - rx0) + Math.sin(t * 0.4 + i) * 6;
+            const sy = ry0 + h2 * (ry1 - ry0) + Math.cos(t * 0.3 + i * 1.3) * 6;
+            if (this.sandSDF(state, sx, sy) < LAND_BAND + 30) continue;
+            if (!inView(sx, sy, 4)) continue;
             const tw = 1 + Math.sin(t * 3 + i * 1.7) * 1;
             if (tw > 1.2) ctx.fillRect(sx, sy, 2.4, 2.4);
         }
-        // sand disc
-        const sand = ctx.createRadialGradient(c.cx, c.cy, 10, c.cx, c.cy, R);
-        sand.addColorStop(0, '#e6bd82');
-        sand.addColorStop(0.7, '#c99b63');
-        sand.addColorStop(1, '#8a6a42');
-        ctx.fillStyle = sand;
-        ctx.beginPath(); ctx.arc(c.cx, c.cy, R, 0, Math.PI * 2); ctx.fill();
-        // Sand texture: speckles + soft dunes (static, position-seeded).
+        // sand square (rounded corners)
+        ctx.fillStyle = G ? G.sand : '#c99b63';
+        if (!G) {
+            const sand = ctx.createRadialGradient(c.cx, c.cy, 10, c.cx, c.cy, H * 1.42);
+            sand.addColorStop(0, '#e6bd82');
+            sand.addColorStop(0.6, '#c99b63');
+            sand.addColorStop(1, '#8a6a42');
+            ctx.fillStyle = sand;
+        }
+        this._rr(ctx, c.cx - H, c.cy - H, c.cx + H, c.cy + H, CR);
+        ctx.fill();
+        // Sand texture: speckles (uniform square scatter) + soft dune bars.
         for (let i = 0; i < 160; i++) {
-            const a = ((i * 2.39996) % (Math.PI * 2));
-            const rr = 40 + ((i * 173) % Math.max(60, R - 60));
-            const sx = c.cx + Math.cos(a) * rr, sy = c.cy + Math.sin(a) * rr * 0.9;
+            const h1 = this._hashN(seed + 3000 + i * 2 + 1), h2 = this._hashN(seed + 3000 + i * 2 + 2);
+            const sx = c.cx + (h1 * 2 - 1) * (H - 30);
+            const sy = c.cy + (h2 * 2 - 1) * (H - 30);
+            if (!inView(sx, sy, 4)) continue;
             ctx.fillStyle = i % 3 ? 'rgba(138,106,66,0.35)' : 'rgba(255,240,210,0.4)';
             ctx.fillRect(sx, sy, 2.5, 2.5);
         }
         ctx.strokeStyle = 'rgba(138,106,66,0.30)';
         ctx.lineWidth = 2;
         for (let k = 0; k < 5; k++) {
-            ctx.beginPath();
-            ctx.ellipse(c.cx, c.cy, R * (0.25 + k * 0.15), R * (0.2 + k * 0.12), 0.4, 0, Math.PI * 2);
+            const ins = H * (0.2 + k * 0.15);
+            this._rr(ctx, c.cx - ins, c.cy - ins * 0.9, c.cx + ins, c.cy + ins * 0.9, Math.max(20, CR * (0.5 + k * 0.1)));
             ctx.stroke();
         }
-        // wet sand rim
+        // wet sand rim (inner edge)
         ctx.strokeStyle = 'rgba(120,90,60,0.8)';
         ctx.lineWidth = 10;
-        ctx.beginPath(); ctx.arc(c.cx, c.cy, R - 5, 0, Math.PI * 2); ctx.stroke();
+        this._rr(ctx, c.cx - H + 2, c.cy - H + 2, c.cx + H - 2, c.cy + H - 2, CR);
+        ctx.stroke();
         ctx.strokeStyle = 'rgba(255,250,235,0.55)';
         ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.arc(c.cx, c.cy, R + 2 + Math.sin(t * 1.6) * 3, 0, Math.PI * 2); ctx.stroke();
-        // inland waters — each isle's own shape (lake / river / ponds)
-        for (const w of this.islandWaters(state)) {
-            const lg = ctx.createRadialGradient(w.cx, w.cy, 8, w.cx, w.cy, Math.max(w.rx, w.ry));
-            lg.addColorStop(0, '#0e7490');
-            lg.addColorStop(1, '#155e75');
-            ctx.fillStyle = lg;
-            ctx.beginPath(); ctx.ellipse(w.cx, w.cy, w.rx, w.ry, 0, 0, Math.PI * 2); ctx.fill();
-            ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        this._rr(ctx, c.cx - H - 2 - Math.sin(t * 1.6) * 3, c.cy - H - 2 - Math.sin(t * 1.6) * 3,
+            c.cx + H + 2 + Math.sin(t * 1.6) * 3, c.cy + H + 2 + Math.sin(t * 1.6) * 3, CR + 2);
+        ctx.stroke();
+        // inland waters — LAGOON green rounded rects, never sea blue.
+        // Sandy rim under the white lip sells the shoreline.
+        for (let wi = 0; wi < waters.length; wi++) {
+            const w = waters[wi];
+            const wcr = w.cr || 40;
+            ctx.fillStyle = 'rgba(214,178,128,0.9)';
+            this._rr(ctx, w.cx - w.hw - 12, w.cy - w.hh - 12, w.cx + w.hw + 12, w.cy + w.hh + 12, wcr + 12);
+            ctx.fill();
+            ctx.fillStyle = (G && G.lakes && G.lakes[wi]) || '#0d9488';
+            this._rr(ctx, w.cx - w.hw, w.cy - w.hh, w.cx + w.hw, w.cy + w.hh, wcr);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255,255,255,0.65)';
             ctx.lineWidth = 3;
-            ctx.beginPath(); ctx.ellipse(w.cx, w.cy, w.rx, w.ry, 0, 0, Math.PI * 2); ctx.stroke();
-            ctx.fillStyle = 'rgba(224,242,254,0.6)';
+            this._rr(ctx, w.cx - w.hw, w.cy - w.hh, w.cx + w.hw, w.cy + w.hh, wcr);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(240,253,250,0.7)';
             for (let i = 0; i < 10; i++) {
-                const a = (i / 10) * Math.PI * 2 + t * 0.2;
-                ctx.fillRect(w.cx + Math.cos(a) * w.rx * 0.8, w.cy + Math.sin(a) * w.ry * 0.8, 2, 2);
+                const h1 = this._hashN(seed + 4000 + wi * 20 + i * 2 + 1);
+                const h2 = this._hashN(seed + 4000 + wi * 20 + i * 2 + 2);
+                const gx = w.cx + (h1 * 2 - 1) * w.hw * 0.8 + Math.sin(t * 0.8 + i) * 4;
+                const gy = w.cy + (h2 * 2 - 1) * w.hh * 0.8 + Math.cos(t * 0.7 + i * 1.3) * 4;
+                if (!inView(gx, gy, 4)) continue;
+                ctx.fillRect(gx, gy, 2, 2);
             }
         }
-        // palms (kept clear of lakes and the east pier lane)
+        // Vegetation + rocks: seeded UNIFORM square scatter — a grown
+        // shore, not a planted row. Palms lean, fronds vary; rocks + grass
+        // tufts fill the gaps. Everything keeps clear of lakes (rounded
+        // rects) and the east pier lane (rect, not angle).
         const pier = this.islandPier(state);
-        for (let i = 0; i < 5; i++) {
-            const a = (i / 5) * Math.PI * 2 + 0.5;
-            if (pier && Math.abs(a) < 0.5) continue; // pier lane stays open
-            const px = c.cx + Math.cos(a) * (R - 90);
-            const py = c.cy + Math.sin(a) * (R - 90);
-            if (this.inLakeWater(state, px, py)) continue;
+        const clearOf = (px, py, pad) => {
+            if (pier && px > pier.x0 - 70 && Math.abs(py - pier.y) < pier.half + 70) return false;
+            for (const w of waters) {
+                if (this._rbox(px - w.cx, py - w.cy, w.hw + pad, w.hh + pad, (w.cr || 40) + pad) < 0) return false;
+            }
+            return true;
+        };
+        const sqScatter = (h1, h2, inset) => ({
+            x: c.cx + (h1 * 2 - 1) * (H - inset),
+            y: c.cy + (h2 * 2 - 1) * (H - inset),
+        });
+        for (let i = 0; i < 9; i++) {
+            const h1 = this._hashN(seed + 500 + i * 5 + 1), h2 = this._hashN(seed + 500 + i * 5 + 2);
+            const h3 = this._hashN(seed + 500 + i * 5 + 3), h4 = this._hashN(seed + 500 + i * 5 + 4);
+            const sp = sqScatter(h1, h2, 90);
+            const px = sp.x, py = sp.y;
+            if (!clearOf(px, py, 60)) continue;
+            if (!inView(px, py - 20, 55)) continue;
+            const lean = (h3 - 0.5) * 10, tall = 24 + h4 * 14;
+            const sc = 0.8 + h2 * 0.5;
             ctx.fillStyle = '#78350f';
-            ctx.fillRect(px - 3, py - 26, 6, 28);
+            ctx.fillRect(px - 3 * sc + lean * 0.4, py - tall, 6 * sc, tall + 2);
             ctx.fillStyle = '#16a34a';
-            for (let k = 0; k < 5; k++) {
-                const fa = (k / 5) * Math.PI * 2 + t * 0.1;
+            const fronds = 4 + Math.floor(h3 * 3);
+            for (let k = 0; k < fronds; k++) {
+                const fa = (k / fronds) * Math.PI * 2 + h1 * 2 + t * 0.1;
+                const fl = (13 + h4 * 8) * sc;
                 ctx.beginPath();
-                ctx.ellipse(px + Math.cos(fa) * 16, py - 28 + Math.sin(fa) * 8, 16, 6, fa, 0, Math.PI * 2);
+                ctx.ellipse(px + lean + Math.cos(fa) * fl, py - tall + Math.sin(fa) * fl * 0.5,
+                    fl, fl * 0.38, fa, 0, Math.PI * 2);
                 ctx.fill();
+            }
+            ctx.fillStyle = '#713f12';
+            ctx.beginPath(); ctx.arc(px + lean, py - tall + 2, 3.4 * sc, 0, Math.PI * 2); ctx.fill();
+        }
+        // shore rocks: grey, half-buried, random tilt
+        for (let i = 0; i < 10; i++) {
+            const h1 = this._hashN(seed + 900 + i * 5 + 1), h2 = this._hashN(seed + 900 + i * 5 + 2);
+            const h3 = this._hashN(seed + 900 + i * 5 + 3);
+            const sp = sqScatter(h1, h2, 50);
+            const px = sp.x, py = sp.y;
+            const rs = 6 + h3 * 14;
+            if (!clearOf(px, py, 40)) continue;
+            if (!inView(px, py, rs + 6)) continue;
+            ctx.fillStyle = 'rgba(100,116,139,0.95)';
+            ctx.beginPath(); ctx.ellipse(px, py, rs, rs * (0.5 + h1 * 0.3), h2 * 3, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = 'rgba(203,213,225,0.5)';
+            ctx.beginPath(); ctx.ellipse(px - rs * 0.25, py - rs * 0.25, rs * 0.4, rs * 0.2, 0, 0, Math.PI * 2); ctx.fill();
+        }
+        // grass tufts: 3 blades each, two greens
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = 'round';
+        for (let i = 0; i < 14; i++) {
+            const h1 = this._hashN(seed + 1300 + i * 5 + 1), h2 = this._hashN(seed + 1300 + i * 5 + 2);
+            const sp = sqScatter(h1, h2, 40);
+            const px = sp.x, py = sp.y;
+            if (!clearOf(px, py, 30)) continue;
+            if (!inView(px, py - 8, 18)) continue;
+            ctx.strokeStyle = i % 2 ? '#22c55e' : '#4ade80';
+            ctx.beginPath();
+            for (let b = -1; b <= 1; b++) {
+                const sway = Math.sin(t * 1.3 + i + b) * 2;
+                ctx.moveTo(px + b * 4, py);
+                ctx.quadraticCurveTo(px + b * 4 + sway, py - 8, px + b * 5 + sway * 1.6, py - 13 - h1 * 5);
+            }
+            ctx.stroke();
+        }
+        // VISUAL BORDER: buoy ring on the room edge — the playable water
+        // ends here. Red/white, bobbing, with a blinking lamp each 4th.
+        // (The room IS the map on isles; past the buoys is off-map void.)
+        for (let i = 0; i < 12; i++) {
+            const h1 = this._hashN(seed + 5000 + i * 2 + 1);
+            const per = 2 * ((r.x1 - r.x0) + (r.y1 - r.y0));
+            let u = ((i + h1 * 0.6) / 12) * per;
+            u = ((u % per) + per) % per;
+            const W2 = (r.x1 - r.x0) / 2 - 70, H2 = (r.y1 - r.y0) / 2 - 70;
+            const mcx = (r.x0 + r.x1) / 2, mcy = (r.y0 + r.y1) / 2;
+            let bx = mcx, by = mcy;
+            if (u < per / 4) { bx = mcx - W2 + (u / (per / 4)) * 2 * W2; by = mcy - H2; }
+            else if (u < per / 2) { bx = mcx + W2; by = mcy - H2 + ((u - per / 4) / (per / 4)) * 2 * H2; }
+            else if (u < per * 3 / 4) { bx = mcx + W2 - ((u - per / 2) / (per / 4)) * 2 * W2; by = mcy + H2; }
+            else { bx = mcx - W2; by = mcy + H2 - ((u - per * 3 / 4) / (per / 4)) * 2 * H2; }
+            if (!inView(bx, by, 30)) continue;
+            const bob = Math.sin(t * 2 + i * 1.7) * 4;
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.beginPath(); ctx.ellipse(bx, by + 12, 12, 4, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#f8fafc';
+            ctx.beginPath(); ctx.ellipse(bx, by + bob, 9, 12, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#dc2626';
+            ctx.beginPath(); ctx.ellipse(bx, by + bob - 2, 9, 5, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#7c2d12';
+            ctx.fillRect(bx - 1.5, by + bob - 22, 3, 10);
+            if ((i + Math.floor(t * 0.7)) % 4 === 0) {
+                ctx.fillStyle = 'rgba(253,224,71,0.9)';
+                ctx.beginPath(); ctx.arc(bx, by + bob - 24, 4, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = 'rgba(253,224,71,0.25)';
+                ctx.beginPath(); ctx.arc(bx, by + bob - 24, 9, 0, Math.PI * 2); ctx.fill();
+            } else {
+                ctx.fillStyle = '#475569';
+                ctx.beginPath(); ctx.arc(bx, by + bob - 24, 3, 0, Math.PI * 2); ctx.fill();
             }
         }
         // isle pier (east) + docked ferry boat
@@ -1229,9 +1867,9 @@ const WorldSystem = {
         ctx.fillText(`${isl.icon} ${isl.name.toUpperCase()}`, c.cx, r.y0 + 130);
         ctx.font = 'bold 12px Work Sans';
         ctx.lineWidth = 3;
-        ctx.strokeText(`boosts ${isl.boostRarity.toUpperCase()} · return ferry is free`, c.cx, r.y0 + 152);
+        ctx.strokeText(`watch the sky · events brew here · return ferry is free`, c.cx, r.y0 + 152);
         ctx.fillStyle = '#e2e8f0';
-        ctx.fillText(`boosts ${isl.boostRarity.toUpperCase()} · return ferry is free`, c.cx, r.y0 + 152);
+        ctx.fillText(`watch the sky · events brew here · return ferry is free`, c.cx, r.y0 + 152);
     },
 
     drawIslePier(state, ctx, pier) {
@@ -1274,6 +1912,14 @@ const WorldSystem = {
         ctx.strokeText(label, bx, by + 38);
         ctx.fillStyle = near ? '#fef08a' : '#e7e5e4';
         ctx.fillText(label, bx, by + 38);
+        if (near) {
+            const bob = Math.sin((state.time || 0) * 4) * 3;
+            ctx.font = 'black 17px Work Sans';
+            ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+            ctx.strokeText('ⓔ', bx, by - 50 + bob);
+            ctx.fillStyle = '#fef08a';
+            ctx.fillText('ⓔ', bx, by - 50 + bob);
+        }
         ctx.restore();
     },
 
@@ -1394,7 +2040,6 @@ const WorldSystem = {
             if (isl) {
                 const c = this.islandCenter(state);
                 const pier = this.islandPier(state);
-                const R = this.SAND_R || 380;
                 if (pier && this.onIslandPier(state, x, y, this.LAND_M)) {
                     // The fish itself is on the pier: land it on the deck.
                     return {
@@ -1402,12 +2047,24 @@ const WorldSystem = {
                         y: Math.max(pier.y - pier.half, Math.min(pier.y + pier.half, y)),
                     };
                 }
+                // Catcher on the pier + loot in nearby water: deck, not a
+                // teleport onto the far side of the disc.
+                try {
+                    if (pier && state.player &&
+                        this.onIslandPier(state, state.player.x, state.player.y, 60)) {
+                        const nx = Math.max(pier.x0, Math.min(pier.x1, x));
+                        const ny = Math.max(pier.y - pier.half, Math.min(pier.y + pier.half, y));
+                        if (Math.hypot(x - nx, y - ny) < 300) return { x: nx, y: ny };
+                    }
+                } catch (e) {}
                 if (c) {
-                    const dx = x - c.cx, dy = y - c.cy;
-                    const d = Math.hypot(dx, dy) || 1;
-                    const maxD = Math.max(40, R - 40);
-                    if (d > maxD) { x = c.cx + (dx / d) * maxD; y = c.cy + (dy / d) * maxD; }
-                    return { x, y };
+                    // Square clamp onto the visible wet-sand band, then out
+                    // of any lagoon (loot rests on sand, never mid-lake).
+                    const H = this.sandHalf() + this.LAND_M - 12;
+                    x = Utils.clamp(x, c.cx - H, c.cx + H);
+                    y = Utils.clamp(y, c.cy - H, c.cy + H);
+                    const out = this.pushOutOfLakes(state, x, y, 14, 0);
+                    return { x: out.x, y: out.y };
                 }
                 const r = isl.room;
                 return {
@@ -1422,6 +2079,17 @@ const WorldSystem = {
                     y: Math.max(b.y - 46, Math.min(b.y + 46, y)),
                 };
             }
+            // Catcher on deck + loot in nearby water: land it on the deck,
+            // never across the map on the far sand (the old teleport).
+            try {
+                const b2 = this.bridgeDef(state);
+                const pp = state.player;
+                if (b2 && pp && !this.islandOf(state) && this.onBridge(state, pp.x, pp.y)) {
+                    const nx = Math.max(b2.x0, Math.min(b2.x1 + 20, x));
+                    const ny = Math.max(b2.y - 46, Math.min(b2.y + 46, y));
+                    if (Math.hypot(x - nx, y - ny) < 320) return { x: nx, y: ny };
+                }
+            } catch (e) {}
             return {
                 x: Math.max(B.MIN_X + rad, Math.min((state.waterBoundaryX || 600) - rad, x)),
                 y: Math.max(B.MIN_Y + rad, Math.min(B.MAX_Y - rad, y)),

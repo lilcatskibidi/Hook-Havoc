@@ -49,6 +49,9 @@ const Achievements = {
             if (ach.reward.xp) {
                 Player.addXP(this.state, ach.reward.xp);
             }
+            // Top achievements pay up to 500k coins / 100k XP in one tick —
+            // re-baseline the tamper guard so it never eats legit rewards.
+            try { if (typeof AntiCheat !== 'undefined') AntiCheat.markLegit(); } catch (e) {}
         }
         
         // Show notification
@@ -87,11 +90,17 @@ const Achievements = {
         const targets = {
             'catch_10': 10,
             'catch_100': 100,
+            'catch_500': 500,
             'catch_1000': 1000,
             'kill_10': 10,
             'kill_100': 100,
+            'kill_500': 500,
+            'kill_crab_25': 25,
+            'kill_gull_50': 50,
+            'kill_beetle_20': 20,
             'kill_boss': 1,
             'kill_5_bosses': 5,
+            'kill_10_bosses': 10,
             'level_10': 10,
             'level_25': 25,
             'level_50': 50,
@@ -118,6 +127,7 @@ const Achievements = {
         const totalCaught = p.totalFishCaught || 0;
         this.setProgress('catch_10', totalCaught);
         this.setProgress('catch_100', totalCaught);
+        this.setProgress('catch_500', totalCaught);
         this.setProgress('catch_1000', totalCaught);
         if (totalCaught > 0 && !this.unlocked.has('first_catch')) this.unlock('first_catch');
 
@@ -134,15 +144,26 @@ const Achievements = {
         const totalKills = p.totalKills || 0;
         this.setProgress('kill_10', totalKills);
         this.setProgress('kill_100', totalKills);
+        this.setProgress('kill_500', totalKills);
         const bossKills = p.bossKills || 0;
         if (bossKills > 0 && !this.unlocked.has('kill_boss')) this.unlock('kill_boss');
         this.setProgress('kill_5_bosses', bossKills);
+        this.setProgress('kill_10_bosses', bossKills);
 
         // Casino bankroll backfill
         try {
             if ((p.casinoTotalLost || 0) >= 10000 && !this.unlocked.has('casino_bankrupt')) {
                 this.unlock('casino_bankrupt');
             }
+        } catch (e) {}
+
+        // Fortune backfill: tycoon / full hold / marlin quests
+        try {
+            if ((p.coins || 0) >= 100000 && !this.unlocked.has('tycoon_100k')) this.unlock('tycoon_100k');
+            if ((p.bucket || []).length >= (p.bucketCapacity || 15) && (p.bucket || []).length > 0 && !this.unlocked.has('full_bucket')) {
+                this.unlock('full_bucket');
+            }
+            if (p.quests && (p.quests.done || 0) >= 5 && !this.unlocked.has('quest_5')) this.unlock('quest_5');
         } catch (e) {}
         
         // Level
@@ -183,6 +204,12 @@ const Achievements = {
         state.player.totalKills = totalKills;
         this.setProgress('kill_10', totalKills);
         this.setProgress('kill_100', totalKills);
+        this.setProgress('kill_500', totalKills);
+
+        // Per-species extermination counts
+        if (enemyType === 'beachCrab') this.addProgress('kill_crab_25');
+        if (enemyType === 'seagull') this.addProgress('kill_gull_50');
+        if (enemyType === 'duneBeetle') this.addProgress('kill_beetle_20');
         
         // Boss kills
         if (enemyType === 'boss') {
@@ -190,6 +217,7 @@ const Achievements = {
             state.player.bossKills = bossKills;
             if (!this.unlocked.has('kill_boss')) this.unlock('kill_boss');
             this.setProgress('kill_5_bosses', bossKills);
+            this.setProgress('kill_10_bosses', bossKills);
         }
         
         this.saveProgress();
@@ -201,7 +229,17 @@ const Achievements = {
         state.player.totalFishCaught = totalCaught;
         this.setProgress('catch_10', totalCaught);
         this.setProgress('catch_100', totalCaught);
+        this.setProgress('catch_500', totalCaught);
         this.setProgress('catch_1000', totalCaught);
+
+        // The whale itself is an achievement (hook = unlock, not just catch)
+        if (fish && fish.id === 'colossal_whale' && !this.unlocked.has('whale_watcher')) {
+            this.unlock('whale_watcher');
+        }
+        // Shiny catches
+        if (fish && fish.shiny && !this.unlocked.has('catch_shiny')) {
+            this.unlock('catch_shiny');
+        }
         
         // Rarity specific
         if (fish.rarity === 'rare' && !this.unlocked.has('catch_rare')) this.unlock('catch_rare');
@@ -218,6 +256,9 @@ const Achievements = {
     checkCasino(state, type, amount) {
         if (type === 'win' && amount >= 1000 && !this.unlocked.has('casino_win_1000')) {
             this.unlock('casino_win_1000');
+        }
+        if (type === 'win' && amount >= 5000 && !this.unlocked.has('casino_high_roller')) {
+            this.unlock('casino_high_roller');
         }
         if (type === 'jackpot' && !this.unlocked.has('casino_jackpot')) {
             this.unlock('casino_jackpot');
@@ -244,6 +285,19 @@ const Achievements = {
         if (timeAlive >= 3600 && !this.unlocked.has('no_death_1hr')) { // 1 hour
             this.unlock('no_death_1hr');
         }
+    },
+
+    // Live wealth checks (called from Player.refreshHUD — cheap guards only)
+    checkWealth(state) {
+        try {
+            const p = state && state.player;
+            if (!p) return;
+            if ((p.coins || 0) >= 100000 && !this.unlocked.has('tycoon_100k')) this.unlock('tycoon_100k');
+            if ((p.bucket || []).length >= (p.bucketCapacity || 15) && (p.bucket || []).length > 0 && !this.unlocked.has('full_bucket')) {
+                this.unlock('full_bucket');
+            }
+            if (p.quests && (p.quests.done || 0) >= 5 && !this.unlocked.has('quest_5')) this.unlock('quest_5');
+        } catch (e) {}
     },
     
     showUnlockNotification(ach) {
@@ -276,10 +330,11 @@ const Achievements = {
     // UI for achievements panel
     renderPanel(container) {
         const categories = {
-            'Fishing': ['first_catch', 'catch_10', 'catch_100', 'catch_1000'],
+            'Fishing': ['first_catch', 'catch_10', 'catch_100', 'catch_500', 'catch_1000', 'catch_shiny', 'whale_watcher'],
             'Rarity': ['catch_rare', 'catch_epic', 'catch_legendary', 'catch_mythic'],
-            'Combat': ['kill_10', 'kill_100', 'kill_boss', 'kill_5_bosses'],
-            'Casino': ['casino_win_1000', 'casino_jackpot', 'casino_bankrupt'],
+            'Combat': ['kill_10', 'kill_100', 'kill_500', 'kill_crab_25', 'kill_gull_50', 'kill_beetle_20', 'kill_boss', 'kill_5_bosses', 'kill_10_bosses'],
+            'Casino': ['casino_win_1000', 'casino_high_roller', 'casino_jackpot', 'casino_bankrupt'],
+            'Fortune': ['tycoon_100k', 'full_bucket', 'quest_5'],
             'Progression': ['level_10', 'level_25', 'level_50', 'level_100'],
             'Collection': ['fish_index_25', 'fish_index_50', 'fish_index_100', 'fish_index_all'],
             'Hardcore': ['no_death_1hr', 'max_rods', 'max_weapons'],

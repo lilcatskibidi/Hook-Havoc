@@ -261,7 +261,7 @@ const NPC = {
         'Red line means the line is about to SNAP. Ease off SPACE and let it breathe.',
         'A tired fish drags easy. Shoot the hooked one to drain its stamina first.',
         'Shiny fish pay triple. If you see gold, drop everything.',
-        'The Umbrella from the Beach Shop scares monsters away. Cowardice works.',
+        'Armor from the shop shrugs off monster hits. Cowardice works — dress for it.',
         'Reloading costs coins per bullet. The Tac-Pistol is free forever — poverty has perks.',
         'Casino tokens cash out at a 30% cut. The house thanks you for playing.',
         'Jumpers flop back to the sea after a minute. Kill fast or lose the loot.'
@@ -413,7 +413,12 @@ const NPC = {
         Ritual.consumeFish(st, 'legendaryPlus', 5);
         try { audio.playRoar(); } catch (e) {}
         Particles.showFloatingText(st, 'Marlin chants... THE DEEP ANSWERS!', p.x, p.y - 70, '#f0abfc');
-        Ritual.spawnBoss(st, 'leviathan_priest');
+        // Rises from the deep at the arena, then the standard 3-2-1
+        // (after the 5s rise cinematic).
+        const riteBoss = Ritual.spawnBoss(st, 'leviathan_priest', 5, 'rise');
+        if (riteBoss) {
+            try { Ritual.fightCountdown(st, riteBoss, { delaySec: 5 }); } catch (e) {}
+        }
         Player.refreshHUD(st);
         if (typeof SaveSystem !== 'undefined') SaveSystem.save(st);
         this.close();

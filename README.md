@@ -1,19 +1,36 @@
-# Aquatic Havoc — Deep Sea Hunter (with Online P2P Multiplayer)
+# Aquatic Havoc — Deep Sea Hunter (v1.3.3, with Online P2P Multiplayer)
 
 A hybrid fishing/action game with **online peer-to-peer multiplayer** (PeerJS, no server to run).
+Cast, hook monsters, drag them ashore, finish them with guns. Bosses, a sealed void cave,
+a casino, wild isles, living weather, bite-driving events — and **281 catchable fish**.
 
-## Features
-- Single player fishing & combat
-- **Online Multiplayer (up to 4 players)** - Host/Join via room codes, works on itch.io
-- **Shared vision** - custom fish/gun/bobber art syncs across peers; catch popups + boss banners mirrored
-- Real-time game state synchronization (host-authoritative)
-- WebRTC peer-to-peer data (low latency), brokered by the free PeerJS cloud
+## Features (v1.3.3)
+- Fishing + gun combat, dash with i-frames (Q), consumable items (Bandage / Adrenaline / Smoke on F)
+- Event-tide **crafting**: special fish + coins forge event baits and armor (Bait/Armor tabs show have/need rows)
+- 7 rotating sky **events** (Typhoon, Monsoon, Fog Bank, Blood Moon, …); strict-schedule fish bite only in-window
+- 📡 **Fish radar** at spawn: live per-species odds, best ferry trip, schedules, active events
+- Minecraft-style **keybinds** + sectioned Settings (Audio / Graphics / Controls / Game)
+- Square wild isles, shared sea asset, flat 1500c ferry, buoy borders
+- Deep Sea Casino, Fish Index (custom-art friendly), 26 achievements
+- **Online Multiplayer (up to 4 players)** — Host/Join via room codes, works on itch.io
 
----
+## Controls
+| Key | Action |
+|-----|--------|
+| `WASD` / Arrows | Move (fixed) |
+| `Q` | Dash — i-frame dodge (rebindable) |
+| `SPACE` | Cast / reel / pull bobber back (rebindable) |
+| Mouse | Shoot · Wheel/Z/X zoom |
+| `1-4` | Weapons · `R` reload · `J` fish index |
+| `E` | Talk / shop / portal / radar (rebindable) |
+| `F` | Use equipped item (rebindable) |
+| `ESC` | Menu · `F3` perf overlay |
+| Gamepad | Stick move, RT shoot, A cast, B interact, R3 dash |
+
+Walk to the beach SHOP/CASINO pads and press E (circled ⓔ bubbles mark every pad).
+No HUD shop button — the trip is the price.
 
 ## Quick Start
-
-### 1. Open the Game
 
 Open `index.html` in a browser (Chrome/Edge/Firefox) — or play the itch.io build.
 No server needed for anything, including multiplayer.
@@ -41,27 +58,9 @@ different versions can't even see each other's rooms).
 4. Click **"Join"**
 5. Wait for host to start the game
 
----
-
-## Multiplayer Controls
-
-| Key | Action |
-|-----|--------|
-| `H` | **Heal both players** (3 uses per session, 10s cooldown) |
-| `Enter` | Open chat |
-| `ESC` | Menu |
-
-### Healing System
-- **Shared pool**: 3 heals total per session (not per player)
-- **Cooldown**: 10 seconds between heals
-- **Amount**: 30 HP per heal
-- **Range**: Heals BOTH players simultaneously
-- **Visual**: Green screen flash + particles + floating text
-
-### Chat
-- Click the chat icon (💬) in the multiplayer HUD (top-right)
-- Press `Enter` to focus chat input
-- Messages sync between both players
+Personal skills, catches, casino tokens, custom art and Settings stay on
+your own file — only the shared world (clock, weather, bodies, loot,
+announcements) syncs through the host.
 
 ---
 
@@ -81,20 +80,15 @@ different versions can't even see each other's rooms).
 - Room codes are 4 characters; host and clients must share the **same game version**
 - "Room is full" means 4 players already joined
 
-### "Room not found" / "Room is full"
-- Room codes are 4 characters, case-insensitive
-- Max 4 players per room
-- Codes expire after host leaves or 1 minute of inactivity
-
 ### High latency / Disconnections
 - Use wired Ethernet if possible
 - Close bandwidth-heavy apps
-- WebRTC prefers UDP; some networks block it
+- WebRTC prefers UDP; some networks block it (a TURN relay can be saved in Multiplayer → TURN RELAY)
 
-### Healing not working
-- Check heal cooldown (10s) and remaining heals (3 max)
-- Must be in-game (not in menu)
-- Both players receive heal simultaneously
+### Lag on wild isles
+- Press `F3` — if update/render/HUD are all tiny but FPS is low, the stall is
+  outside the page (background tab, another heavy tab, GPU present)
+- `F3` also shows canvas backing size; oversized canvases are auto-capped
 
 ---
 
@@ -182,7 +176,8 @@ embed. Just make sure everyone plays the **same uploaded version**.
 ├── server.js           # Static dev server (NOT shipped to itch.io; MP needs no server)
 ├── package.json        # Node dependencies (ws)
 ├── scripts/
-│   └── build-itch.mjs  # Builds the itch.io zip (npm run build:itch)
+│   ├── build-itch.mjs  # Builds the itch.io zip (npm run build:itch)
+│   └── verify-*.mjs    # Headless regression sims (events, crafts, clamps…)
 ├── .github/workflows/
 │   ├── ci.yml          # Lint + archive-layout check
 │   └── deploy-itch.yml # Build & upload to itch.io via butler
@@ -190,23 +185,37 @@ embed. Just make sure everyone plays the **same uploaded version**.
 ├── css/
 │   └── style.css       # Styles including multiplayer UI
 └── js/
-    ├── main.js         # Game loop, menu, multiplayer integration
+    ├── main.js         # Game loop, menu, settings, changelog, HUD
     ├── peerlink.js     # PeerJS transport, custom-art sync, announce mirroring
     ├── multiplayer.js  # Room flow, host-authoritative state sync, remote rendering
-    ├── player.js       # Player logic + heal effect
-    ├── fishing.js      # Fishing mechanics
-    ├── combat.js       # Combat & bosses
-    ├── weapons.js      # Weapons & rods
-    ├── render.js       # Rendering
-    ├── input.js        # Input handling
+    ├── netcodec.js     # Binary input codec (14-byte locomotion ticks)
+    ├── player.js       # Player logic, dash + i-frames, XP, death/respawn
+    ├── fishing.js      # Fishing mechanics + hooked-fish fights
+    ├── combat.js       # Combat, hazards, loot, bosses
+    ├── weapons.js      # Weapons, rods, armor defs
+    ├── render.js       # Rendering (fish models, world, PNG trim)
+    ├── input.js        # Input handling + Minecraft-style keybinds
     ├── camera.js       # Camera
     ├── particles.js    # Particle effects
-    ├── shop.js         # Shop UI
+    ├── shop.js         # Shop UI (sell/weapons/rods/armor/ammo/bucket/bait/items)
+    ├── items.js        # Consumables (buy/equip/use, hotbar)
+    ├── craft.js        # Fish + coins crafting engine
+    ├── radar.js        # Fish radar forecast board
+    ├── ritual.js       # Cave, runes, boss rituals, bait system
+    ├── npc.js          # Old Marlin quests
+    ├── casino.js       # Casino games
     ├── save.js         # Save/load
     ├── config.js       # Game constants
-    ├── fishData.js     # Fish species & skills
+    ├── fishData.js     # Fish species, skills, roll tables
+    ├── world.js        # Islands, sea zones, events, weather, ferry
+    ├── touch.js        # Mobile controls
+    ├── gamepad.js      # Gamepad controls
+    ├── bgtick.js       # Background-tab simulation ticks
+    ├── feedback.js     # Bug-report panel
     ├── utils.js        # Math helpers
-    └── audio.js        # Audio
+    ├── audio.js        # Audio
+    ├── lang.js         # EN/VI localization
+    └── assetpack.js    # Custom-skin zip export/import
 ```
 
 ---
@@ -214,21 +223,18 @@ embed. Just make sure everyone plays the **same uploaded version**.
 ## Technical Details
 
 ### Architecture
-- **Transport** (`peerlink.js`): PeerJS cloud broker + WebRTC DataChannels (reliable). Star topology, max 4 players
+- **Transport** (`peerlink.js`): PeerJS cloud broker + WebRTC DataChannels.
+  Ephemeral traffic (snapshots ~12Hz, inputs ~15Hz/binary 14B) rides an
+  unreliable + unordered lane; lobby/awards/skins stay reliable.
+  Star topology, max 4 players
 - **Same-version gate**: room ids embed the version digits + explicit handshake check
 - **Shared vision** (`PeerSkins`, `PeerAnnounce`): custom art syncs per-session (your local art always wins on your screen); catch popups + boss banners mirrored; Settings stay local
-- **Host Authoritative**: Host simulates physics, sends state at ~12Hz
+- **Host Authoritative**: Host simulates physics; clients predict locally with
+  snapshot smoothing; binary locomotion ticks keep host upload lean
 
 ### State Synchronization
 - Player positions, HP, fishing state, monsters, bullets, loot, hazards
-- 50ms update interval (20 updates/sec)
-- Delta compression for bandwidth efficiency
-
-### Healing Implementation
-- Request sent via DataChannel → Host broadcasts to both peers
-- Applied instantly locally for responsiveness
-- Visual feedback: particles, green flash, floating text
-- Shared cooldown & pool tracked by both peers
+- Personal files (skills, catches, tokens, items, Settings) never cross the wire
 
 ---
 

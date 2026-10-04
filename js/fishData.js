@@ -1316,7 +1316,7 @@ const FISH_SPECIES = [
         id: 'leviathan_priest',
         name: 'Leviathan Priest',
         color: '#1e40af', accent: '#0ea5e9',
-        size: 78, maxHp: 24000, staminaMax: 8000, attack: 340, speed: 3.0,
+        size: 78, maxHp: 36000, staminaMax: 8000, attack: 340, speed: 3.0,
         value: 55000,
         rarity: 'boss',
         shape: 'kraken',
@@ -1330,43 +1330,45 @@ const FISH_SPECIES = [
         id: 'stormlord_hydra',
         name: 'Stormlord Hydra',
         color: '#10b981', accent: '#047857',
-        size: 74, maxHp: 34000, staminaMax: 9000, attack: 470, speed: 3.6,
+        size: 74, maxHp: 52000, staminaMax: 9000, attack: 470, speed: 3.6,
         value: 62000,
         rarity: 'boss',
         shape: 'serpent',
         finColor: '#064e3b',
-        desc: 'NINE heads, one storm. Every head casts — orbs, lightning and a nine-bolt volley across the arena.',
-        skills: ['summonStormOrbs', 'nineHeadVolley', 'chainLightning', 'bossWhirlpool', 'stormField'],
-        skillName: '9-Head Volley / Storm Orbs / Chain Lightning',
+        desc: 'NINE heads, one storm. Lightning from the sky, a roar that calls the sea, rift bites, grasping tides and venom.',
+        skills: ['hydraLightning', 'hydraRoar', 'hydraBiteSea', 'hydraTether', 'hydraVenom', 'danmakuSpiral', 'danmakuFan'],
+        skillName: 'Stormcall / Ocean Roar / Rift Bite / Grasp / Venom',
         isBoss: true,
         heads: 9
     },
     {
         id: 'void_shepherd',
-        name: 'Void Shepherd',
-        color: '#6b21a8', accent: '#a855f7',
-        size: 80, maxHp: 32000, staminaMax: 10000, attack: 420, speed: 3.2,
+        name: 'Void Leviathan',
+        color: '#1e293b', accent: '#22d3ee',
+        aura2: '#a855f7',
+        size: 104, maxHp: 48000, staminaMax: 10000, attack: 420, speed: 3.2,
         value: 78000,
         rarity: 'boss',
-        shape: 'kraken',
-        finColor: '#3b0764',
-        desc: 'The hand that feeds the abyss. Tears holes in reality and calls servants.',
-        skills: ['summonVoidlings', 'voidCollapse', 'bossWhirlpool', 'gravitationalPull'],
-        skillName: 'Voidlings / Collapse / Gravity',
+        shape: 'serpent',
+        finColor: '#0f172a',
+        image: 'void_leviathan',
+        desc: 'The Star-Eater. Unholy catch from the void — spits stars, breaches beaches and eats space itself.',
+        skills: ['voidSpitting', 'voidBarrage', 'abyssalGeyser', 'voidTentacle', 'realityShear', 'voidPit', 'starRain', 'cosmicBlast', 'phaseBarrage'],
+        skillName: 'Spit / Barrage / Geyser / Tentacles / Shear / Pits / Rain / Blast / Barrage',
         isBoss: true
     },
     {
         id: 'crimson_emperor',
         name: 'Crimson Emperor',
         color: '#dc2626', accent: '#f59e0b',
-        size: 82, maxHp: 36000, staminaMax: 11000, attack: 460, speed: 3.4,
+        size: 82, maxHp: 54000, staminaMax: 11000, attack: 460, speed: 3.4,
         value: 92000,
         rarity: 'boss',
         shape: 'dragon',
         finColor: '#7f1d1d',
-        desc: 'A tyrant from the molten deep. Summons emberlings and calls firestorms.',
-        skills: ['summonEmberlings', 'firestormNova', 'bossWhirlpool', 'magmaPillars'],
-        skillName: 'Emberlings / Nova / Pillars',
+        desc: 'Sovereign of the Blood Tides. Breaches, roars, charges and mutates — three phases of carnage.',
+        skills: ['crimsonBreach', 'tailSlapWave', 'homingBubbles', 'abyssalCharge', 'crimsonMaelstrom', 'goreBarbs', 'tentacleSlam', 'bloodBeam', 'sovereignBite'],
+        skillName: 'Breach / Tails / Bubbles / Charge / Maelstrom / Barbs / Slam / Beam / Bite',
         isBoss: true
     },
 
@@ -1934,7 +1936,331 @@ const FISH_SPECIES = [
         value: 1050, rarity: 'epic', shape: 'squid', finColor: '#ea580c',
         desc: 'Walking rainbow. Flashes color, then vanishes in ink.',
         skills: ['flashBang', 'inkBurst', 'camouflaged'], skillName: 'Flash / Ink'
-    }
+    },
+    // ---- TIDE-BREAKER EXPANSION: stronger species across every tier ----
+    {
+        id: 'mudskipper', name: 'Giant Mudskipper', color: '#65a30d', accent: '#3f6212',
+        size: 18, maxHp: 320, staminaMax: 220, attack: 30, speed: 5.2,
+        value: 140, rarity: 'common', shape: 'frogfish', finColor: '#365314',
+        desc: 'Walks on land to mock you. Jumps like it pays rent.',
+        skills: ['dart', 'mudSlime', 'charge'], skillName: 'Hop / Mud'
+    },
+    {
+        id: 'glass_minnow', name: 'Glass Minnow School', color: '#bae6fd', accent: '#e0f2fe',
+        size: 12, maxHp: 200, staminaMax: 260, attack: 18, speed: 6.5,
+        value: 120, rarity: 'common', shape: 'anchovy', finColor: '#7dd3fc',
+        desc: 'You see right through them. They see right through you.',
+        skills: ['dart', 'blink', 'mirrorImage'], skillName: 'Shimmer / Split'
+    },
+    {
+        id: 'lanternfish', name: 'Hadal Lanternfish', color: '#22d3ee', accent: '#a5f3fc',
+        size: 24, maxHp: 700, staminaMax: 480, attack: 70, speed: 3.8,
+        value: 620, rarity: 'rare', shape: 'angler', finColor: '#0e7490',
+        desc: 'Carries its own spotlight into the dark.',
+        skills: ['flashBang', 'shock', 'lure'], skillName: 'Lure / Shock'
+    },
+    {
+        id: 'thunder_eel', name: 'Thunder Eel', color: '#facc15', accent: '#fef08a',
+        size: 34, maxHp: 1100, staminaMax: 650, attack: 120, speed: 5.0,
+        value: 980, rarity: 'rare', shape: 'eel', finColor: '#a16207',
+        desc: 'Swims like lightning, stings like betrayal.',
+        skills: ['shock', 'stormSpiral', 'charge'], skillName: 'Volt / Spiral'
+    },
+    {
+        id: 'obsidian_tuna', name: 'Obsidian Tuna', color: '#1c1917', accent: '#57534e',
+        size: 46, maxHp: 2200, staminaMax: 1100, attack: 170, speed: 6.2,
+        value: 3400, rarity: 'epic', shape: 'tuna', finColor: '#0c0a09',
+        desc: 'Forged in a volcano, served at full speed.',
+        skills: ['charge', 'emberBreath', 'inferno'], skillName: 'Ram / Magma'
+    },
+    {
+        id: 'abyssal_angler', name: 'Abyssal Angler', color: '#6d28d9', accent: '#c4b5fd',
+        size: 38, maxHp: 2600, staminaMax: 1300, attack: 190, speed: 3.0,
+        value: 4200, rarity: 'epic', shape: 'angler', finColor: '#4c1d95',
+        desc: 'Its lure shows you what you want most. Then teeth.',
+        skills: ['lure', 'voidPull', 'drain'], skillName: 'Lure / Drain'
+    },
+    {
+        id: 'tide_rex', name: 'Tide Rex', color: '#047857', accent: '#6ee7b7',
+        size: 62, maxHp: 6500, staminaMax: 2600, attack: 320, speed: 4.8,
+        value: 15000, rarity: 'legendary', shape: 'prehistoric', finColor: '#065f46',
+        desc: 'Apex of the shallows. The tide moves for it, not you.',
+        skills: ['charge', 'tidalSlam', 'bloodFrenzy', 'elderCharge'], skillName: 'Apex Rush / Slam'
+    },
+    {
+        id: 'volcano_eel', name: 'Volcano Eel', color: '#dc2626', accent: '#fca5a5',
+        size: 48, maxHp: 5500, staminaMax: 2400, attack: 300, speed: 5.4,
+        value: 13500, rarity: 'legendary', shape: 'serpent', finColor: '#7f1d1d',
+        desc: 'Nests in magma vents. Its blood boils the sea around it.',
+        skills: ['inferno', 'magmaShower', 'magmaPillars'], skillName: 'Eruption'
+    },
+    {
+        id: 'frost_serpent', name: 'Frost Serpent', color: '#a5f3fc', accent: '#ffffff',
+        size: 52, maxHp: 6000, staminaMax: 2500, attack: 290, speed: 5.0,
+        value: 14200, rarity: 'legendary', shape: 'serpent', finColor: '#0e7490',
+        desc: 'Winter given fangs. Freezes the surf it swims through.',
+        skills: ['frostbite', 'iceSpikeRing', 'blizzardNova'], skillName: 'Deep Freeze'
+    },
+    {
+        id: 'leviathan_calf', name: 'Leviathan Calf', color: '#1e3a8a', accent: '#60a5fa',
+        size: 70, maxHp: 9000, staminaMax: 3200, attack: 380, speed: 3.6,
+        value: 26000, rarity: 'mythic', shape: 'leviathan', finColor: '#172554',
+        desc: 'A baby. A BABY. Imagine the mother.',
+        skills: ['tidalCrush', 'leviathanRoar', 'tsunami'], skillName: 'Calf Tantrum'
+    },
+    {
+        id: 'ember_megalodon', name: 'Ember Megalodon', color: '#7c2d12', accent: '#fb923c',
+        size: 95, maxHp: 16000, staminaMax: 4500, attack: 460, speed: 5.2,
+        value: 60000, rarity: 'mythic', shape: 'shark', finColor: '#431407',
+        desc: 'Ancient shark wreathed in living flame. The sea boils in its wake.',
+        skills: ['inferno', 'firestormNova', 'supernova', 'charge'], skillName: 'Firestorm'
+    },
+    {
+        id: 'void_kraken', name: 'Void Kraken', color: '#4c1d95', accent: '#c084fc',
+        size: 85, maxHp: 14000, staminaMax: 5000, attack: 420, speed: 3.4,
+        value: 55000, rarity: 'mythic', shape: 'kraken', finColor: '#2e1065',
+        desc: 'Eight arms reaching out of nothing. It pulls ships AND shadows.',
+        skills: ['voidPull', 'voidCollapse', 'tentacleSlam', 'gravitationalPull'], skillName: 'Event Maw'
+    },
+    {
+        id: 'colossal_whale', name: 'Colossal Whale', color: '#3b82f6', accent: '#93c5fd',
+        size: 150, maxHp: 30000, staminaMax: 12000, attack: 500, speed: 1.2,
+        value: 120000, rarity: 'mythic', shape: 'titan', finColor: '#1e3a8a',
+        desc: 'A living island. When it breaches the sky, the earth answers.',
+        skills: ['titanSlam', 'tidalCrush', 'tsunami'], skillName: 'BREACH / QUAKE'
+    },
+    // --- EVENT TIDE: 30 newcomers (strict schedules bite ONLY in-window) ---
+    // Commons: open water, always biting.
+    {
+        id: 'sunfin_tetra', name: 'Sunfin Tetra', color: '#fbbf24', accent: '#f59e0b',
+        size: 12, maxHp: 120, staminaMax: 110, attack: 6, speed: 2.6,
+        value: 22, rarity: 'common', shape: 'minnow', finColor: '#d97706',
+        desc: 'Glints like a coin at noon. Loves a clear day.',
+        skills: ['dart', 'flashBang'], skillName: 'Sun Flicker'
+    },
+    {
+        id: 'drizzle_minnow', name: 'Drizzle Minnow', color: '#7dd3fc', accent: '#0284c7',
+        size: 11, maxHp: 110, staminaMax: 100, attack: 5, speed: 2.8,
+        value: 18, rarity: 'common', shape: 'minnow', finColor: '#0369a1',
+        desc: 'Rises with the first raindrops. Monsoon herald.',
+        skills: ['dart', 'waterJet'], skillName: 'Rain Rise'
+    },
+    {
+        id: 'fog_guppy', name: 'Fog Guppy', color: '#cbd5e1', accent: '#64748b',
+        size: 10, maxHp: 100, staminaMax: 95, attack: 5, speed: 2.4,
+        value: 20, rarity: 'common', shape: 'goldfish', finColor: '#475569',
+        desc: 'Vanishes between fog banks. Follow the grey.',
+        skills: ['dart', 'camouflaged'], skillName: 'Grey Veil'
+    },
+    {
+        id: 'dusk_glimmer', name: 'Dusk Glimmer', color: '#c084fc', accent: '#7c3aed',
+        size: 13, maxHp: 130, staminaMax: 120, attack: 7, speed: 2.7,
+        value: 26, rarity: 'common', shape: 'wrasse', finColor: '#5b21b6',
+        desc: 'Only glows as the sun gives up.',
+        skills: ['dart', 'lure'], skillName: 'Last Light'
+    },
+    {
+        id: 'night_ripple', name: 'Night Ripple', color: '#312e81', accent: '#6366f1',
+        size: 12, maxHp: 125, staminaMax: 115, attack: 6, speed: 2.5,
+        value: 24, rarity: 'common', shape: 'anchovy', finColor: '#4338ca',
+        desc: 'A rumor with fins. Bites after dark.',
+        skills: ['dart', 'inkCloud'], skillName: 'Dark Water'
+    },
+    {
+        id: 'tidepool_blenny', name: 'Tidepool Blenny', color: '#65a30d', accent: '#365314',
+        size: 11, maxHp: 115, staminaMax: 105, attack: 6, speed: 2.3,
+        value: 16, rarity: 'common', shape: 'frogfish', finColor: '#1a2e05',
+        desc: 'King of puddles. Grumpy, edible.',
+        skills: ['mudSlime', 'spineVolley'], skillName: 'Mud Grumble'
+    },
+    {
+        id: 'cloudskipper', name: 'Cloudskipper', color: '#e0f2fe', accent: '#0ea5e9',
+        size: 14, maxHp: 140, staminaMax: 130, attack: 8, speed: 3.2,
+        value: 28, rarity: 'common', shape: 'trout', finColor: '#0284c7',
+        desc: 'Skips the surface when clouds gather.',
+        skills: ['dart', 'charge'], skillName: 'Skip Jump'
+    },
+    {
+        id: 'ember_anchovy', name: 'Ember Anchovy', color: '#fb923c', accent: '#c2410c',
+        size: 12, maxHp: 120, staminaMax: 110, attack: 7, speed: 3.0,
+        value: 25, rarity: 'common', shape: 'anchovy', finColor: '#7c2d12',
+        desc: 'Warm to the touch. Dawn fishermen swear by it.',
+        skills: ['dart', 'emberBreath'], skillName: 'Warm Trail'
+    },
+    // Rares: half scheduled, half open.
+    {
+        id: 'monsoon_garpike', name: 'Monsoon Garpike', color: '#0e7490', accent: '#164e63',
+        size: 30, maxHp: 620, staminaMax: 420, attack: 55, speed: 4.2,
+        value: 420, rarity: 'rare', shape: 'pike', finColor: '#0c4a6e',
+        desc: 'Only hunts while the rain hammers down.',
+        hours: null, weather: ['rain'], strict: true,
+        skills: ['charge', 'waterJet', 'tidalWave'], skillName: 'Rain Spear'
+    },
+    {
+        id: 'mistwisp_eel', name: 'Mistwisp Eel', color: '#a5b4fc', accent: '#4f46e5',
+        size: 26, maxHp: 540, staminaMax: 400, attack: 48, speed: 4.6,
+        value: 380, rarity: 'rare', shape: 'eel', finColor: '#312e81',
+        desc: 'A ribbon of living fog. Never seen on clear days.',
+        hours: null, weather: ['fog'], strict: true,
+        skills: ['shock', 'camouflaged', 'drain'], skillName: 'Grey Coil'
+    },
+    {
+        id: 'dawn_runner', name: 'Dawn Runner', color: '#fdba74', accent: '#ea580c',
+        size: 28, maxHp: 560, staminaMax: 430, attack: 50, speed: 5.2,
+        value: 450, rarity: 'rare', shape: 'trout', finColor: '#9a3412',
+        desc: 'Sprints the sunrise. Gone by full morning — 05:00 to 07:00 only.',
+        hours: [5, 7], weather: null, strict: true,
+        skills: ['charge', 'dart', 'solarBeam'], skillName: 'Sunrise Sprint'
+    },
+    {
+        id: 'stormpetrel_fish', name: 'Stormpetrel Fish', color: '#475569', accent: '#0f172a',
+        size: 24, maxHp: 500, staminaMax: 380, attack: 46, speed: 5.0,
+        value: 400, rarity: 'rare', shape: 'swordfish', finColor: '#020617',
+        desc: 'Rides the storm front. Calm seas never hold it.',
+        hours: null, weather: ['storm'], strict: true,
+        skills: ['thunderDive', 'charge', 'chainLightning'], skillName: 'Front Rider'
+    },
+    {
+        id: 'bloodfin_tetra', name: 'Bloodfin Tetra', color: '#dc2626', accent: '#7f1d1d',
+        size: 22, maxHp: 480, staminaMax: 360, attack: 44, speed: 4.0,
+        value: 390, rarity: 'rare', shape: 'minnow', finColor: '#450a0a',
+        desc: 'Smells iron on the night rain.',
+        hours: [20, 23], weather: ['rain', 'storm', 'clear'], strict: true,
+        skills: ['bloodFrenzy', 'dart', 'lure'], skillName: 'Iron Scent'
+    },
+    {
+        id: 'coral_squire', name: 'Coral Squire', color: '#fb7185', accent: '#be123c',
+        size: 24, maxHp: 520, staminaMax: 390, attack: 47, speed: 3.6,
+        value: 360, rarity: 'rare', shape: 'snapper', finColor: '#881337',
+        desc: 'Polite, bright, and completely fearless at noon.',
+        skills: ['radiantBarb', 'coralSnare', 'charge'], skillName: 'Reef Oath'
+    },
+    {
+        id: 'abyss_lanternfish', name: 'Abyss Lanternfish', color: '#22d3ee', accent: '#0e7490',
+        size: 20, maxHp: 460, staminaMax: 350, attack: 42, speed: 3.4,
+        value: 350, rarity: 'rare', shape: 'angler', finColor: '#155e75',
+        desc: 'Carries its own moon wherever it goes.',
+        skills: ['lure', 'inkCloud', 'shock'], skillName: 'Deep Lamp'
+    },
+    {
+        id: 'typhoon_dart', name: 'Typhoon Dart', color: '#67e8f9', accent: '#0e7490',
+        size: 26, maxHp: 550, staminaMax: 410, attack: 52, speed: 6.4,
+        value: 480, rarity: 'rare', shape: 'pike', finColor: '#164e63',
+        desc: 'Outruns the wind it was born in. Storms only.',
+        hours: null, weather: ['storm'], strict: true,
+        skills: ['blink', 'charge', 'stormField'], skillName: 'Wind Edge'
+    },
+    {
+        id: 'midnight_rainfish', name: 'Midnight Rainfish', color: '#1e1b4b', accent: '#818cf8',
+        size: 25, maxHp: 530, staminaMax: 400, attack: 49, speed: 3.8,
+        value: 460, rarity: 'rare', shape: 'trout', finColor: '#312e81',
+        desc: 'Exists 20:00-23:00 on rainy nights, and never otherwise.',
+        hours: [20, 23], weather: ['rain', 'storm'], strict: true,
+        skills: ['inkCloud', 'drain', 'chainLightning'], skillName: 'Night Pour'
+    },
+    // Epics: event headliners.
+    {
+        id: 'tempest_queenfish', name: 'Tempest Queenfish', color: '#38bdf8', accent: '#075985',
+        size: 46, maxHp: 1700, staminaMax: 900, attack: 122, speed: 6.2,
+        value: 2300, rarity: 'epic', shape: 'marlin', finColor: '#0c4a6e',
+        desc: 'Crowned in the typhoon wall. Bows to no angler.',
+        skills: ['stormField', 'chainLightning', 'tidalWave', 'blink'], skillName: 'Storm Crown'
+    },
+    {
+        id: 'bloodmoon_raya', name: 'Bloodmoon Raya', color: '#991b1b', accent: '#fecaca',
+        size: 44, maxHp: 1650, staminaMax: 880, attack: 118, speed: 4.4,
+        value: 2200, rarity: 'epic', shape: 'manta', finColor: '#450a0a',
+        desc: 'Glides out only under a clear 20:00-23:00 moon.',
+        hours: [20, 23], weather: ['clear'], strict: true,
+        skills: ['bloodFrenzy', 'mirrorImage', 'tidalSlam'], skillName: 'Red Eclipse'
+    },
+    {
+        id: 'fogmother_eel', name: 'Fogmother Eel', color: '#d8b4fe', accent: '#6b21a8',
+        size: 48, maxHp: 1750, staminaMax: 920, attack: 120, speed: 4.8,
+        value: 2350, rarity: 'epic', shape: 'eel', finColor: '#3b0764',
+        desc: 'Nurses a hundred mistwisps. Fog is her nursery.',
+        hours: null, weather: ['fog'], strict: true,
+        skills: ['sandVeil', 'shock', 'summonShades', 'drain'], skillName: 'Nursery Mist'
+    },
+    {
+        id: 'dawnherald_marlin', name: 'Dawnherald Marlin', color: '#fdba74', accent: '#c2410c',
+        size: 47, maxHp: 1720, staminaMax: 900, attack: 124, speed: 7.2,
+        value: 2300, rarity: 'epic', shape: 'marlin', finColor: '#7c2d12',
+        desc: 'First fin of the chorus. Dawn only.',
+        hours: [5, 7], weather: null, strict: true,
+        skills: ['solarBeam', 'charge', 'flashBang', 'blink'], skillName: 'Herald Dash'
+    },
+    {
+        id: 'monsoon_leopardfish', name: 'Monsoon Leopardfish', color: '#15803d', accent: '#052e16',
+        size: 43, maxHp: 1600, staminaMax: 860, attack: 116, speed: 5.6,
+        value: 2100, rarity: 'epic', shape: 'grouper', finColor: '#14532d',
+        desc: 'Spotted bomber of the downpour.',
+        skills: ['tidalWave', 'poisonBarb', 'charge'], skillName: 'Spotted Surge'
+    },
+    {
+        id: 'sunscorch_damsel', name: 'Sunscorch Damsel', color: '#fde047', accent: '#b45309',
+        size: 40, maxHp: 1500, staminaMax: 820, attack: 112, speed: 5.2,
+        value: 2000, rarity: 'epic', shape: 'butterfly', finColor: '#78350f',
+        desc: 'Basks in punishing noon sun. Sunspell regular.',
+        skills: ['solarBeam', 'radiantBarb', 'flashBang'], skillName: 'Noon Glare'
+    },
+    {
+        id: 'abyssal_anglerfish', name: 'Abyssal Anglerfish', color: '#4c1d95', accent: '#c4b5fd',
+        size: 45, maxHp: 1680, staminaMax: 890, attack: 119, speed: 3.6,
+        value: 2250, rarity: 'epic', shape: 'angler', finColor: '#2e1065',
+        desc: 'Its lamp never lies. It promises teeth.',
+        skills: ['lure', 'abyssalGaze', 'voidRend', 'inkBurst'], skillName: 'False Promise'
+    },
+    // Legendaries: storm-and-moon royalty.
+    {
+        id: 'typhoon_wyrm', name: 'Typhoon Wyrm', color: '#0ea5e9', accent: '#082f49',
+        size: 60, maxHp: 3400, staminaMax: 1700, attack: 175, speed: 5.8,
+        value: 6200, rarity: 'legendary', shape: 'serpent', finColor: '#0c4a6e',
+        desc: 'The typhoon made flesh. Exists only inside the storm.',
+        hours: null, weather: ['storm'], strict: true,
+        skills: ['stormSpiral', 'chainLightning', 'tidalCrush', 'stormField'], skillName: 'Wyrm Spiral'
+    },
+    {
+        id: 'pale_mistlord', name: 'Pale Mistlord', color: '#e2e8f0', accent: '#64748b',
+        size: 58, maxHp: 3300, staminaMax: 1650, attack: 170, speed: 4.2,
+        value: 6000, rarity: 'legendary', shape: 'leviathan', finColor: '#334155',
+        desc: 'Rules what the fog hides. Fog only.',
+        hours: null, weather: ['fog'], strict: true,
+        skills: ['mirrorImage', 'camouflaged', 'voidCollapse', 'tidalSlam'], skillName: 'Grey Throne'
+    },
+    {
+        id: 'crimson_tidereaver', name: 'Crimson Tidereaver', color: '#ef4444', accent: '#450a0a',
+        size: 62, maxHp: 3600, staminaMax: 1750, attack: 185, speed: 5.4,
+        value: 6800, rarity: 'legendary', shape: 'shark', finColor: '#7f1d1d',
+        desc: 'Reaves the 20:00-23:00 tide, rain or shine.',
+        hours: [20, 23], weather: ['clear', 'rain'], strict: true,
+        skills: ['bloodFrenzy', 'titanSlam', 'whirlpool', 'charge'], skillName: 'Reave Tide'
+    },
+    {
+        id: 'solar_crownfish', name: 'Solar Crownfish', color: '#facc15', accent: '#92400e',
+        size: 57, maxHp: 3250, staminaMax: 1620, attack: 172, speed: 5.0,
+        value: 6100, rarity: 'legendary', shape: 'angelfish', finColor: '#78350f',
+        desc: 'Crowned at high noon under a cloudless sky.',
+        hours: [7, 17], weather: ['clear'], strict: true,
+        skills: ['solarBeam', 'supernova', 'radiantBarb', 'starFall'], skillName: 'Crown Fire'
+    },
+    // Mythics: event apices.
+    {
+        id: 'maelstrom_titan', name: 'Maelstrom Titan', color: '#155e75', accent: '#67e8f9',
+        size: 88, maxHp: 9500, staminaMax: 3200, attack: 320, speed: 3.2,
+        value: 26000, rarity: 'mythic', shape: 'kraken', finColor: '#0e7490',
+        desc: 'The surge before dawn, given arms. Storm 00:00-05:00 only.',
+        hours: [0, 5], weather: ['storm'], strict: true,
+        skills: ['bossWhirlpool', 'tidalCrush', 'nineHeadVolley', 'stormField'], skillName: 'Surge Arms'
+    },
+    {
+        id: 'moonfall_seraph', name: 'Moonfall Seraph', color: '#fef3c7', accent: '#d97706',
+        size: 70, maxHp: 8800, staminaMax: 3000, attack: 300, speed: 4.4,
+        value: 24000, rarity: 'mythic', shape: 'manta', finColor: '#92400e',
+        desc: 'Falls with the clear 20:00-23:00 moon. Never twice.',
+        hours: [20, 23], weather: ['clear'], strict: true,
+        skills: ['starFall', 'timeWarp', 'mirrorImage', 'supernova'], skillName: 'Moon Descent'
+    },
 ];
 
 const Projectiles = {
@@ -2039,9 +2365,14 @@ const Projectiles = {
                 state.screenShake = proj.impactShake || 10;
 
                 if (!died) {
-                    // Knockback away from projectile trajectory
-                    p.x += (proj.vx > 0 ? 1 : -1) * (proj.knockback || 25);
-                    p.y += (proj.vy > 0 ? 1 : -1) * (proj.knockback || 25);
+                    // Knockback away from projectile trajectory — as pull
+                    // VELOCITY (0.25s), never a teleport (see Player.addPull).
+                    if (typeof Player !== 'undefined' && Player.addPull) {
+                        try { Player.addPull(state, (proj.vx > 0 ? 1 : -1) * 100, (proj.vy > 0 ? 1 : -1) * 100, 0.25); } catch (e) {}
+                    } else {
+                        p.x += (proj.vx > 0 ? 1 : -1) * (proj.knockback || 25);
+                        p.y += (proj.vy > 0 ? 1 : -1) * (proj.knockback || 25);
+                    }
                     // On-hit riders: stun / slow / shove / grapple / screen fx.
                     // Everything lands ONLY on a real hit — dodge the missile,
                     // dodge the effect.
@@ -2049,21 +2380,50 @@ const Projectiles = {
                     if (proj.slowOnHit) p.slowTimer = Math.max(p.slowTimer || 0, proj.slowOnHit);
                     if (proj.pushOnHit) {
                         const pv = Math.hypot(proj.vx, proj.vy) || 1;
-                        p.x += (proj.vx / pv) * proj.pushOnHit;
-                        p.y += (proj.vy / pv) * proj.pushOnHit;
+                        const sp = proj.pushOnHit / 0.25;
+                        if (typeof Player !== 'undefined' && Player.addPull) {
+                            try { Player.addPull(state, (proj.vx / pv) * sp, (proj.vy / pv) * sp, 0.25); } catch (e) {}
+                        } else {
+                            p.x += (proj.vx / pv) * proj.pushOnHit;
+                            p.y += (proj.vy / pv) * proj.pushOnHit;
+                        }
                     }
                     if (proj.pullOnHit && proj.pullX !== undefined && proj.pullY !== undefined) {
                         const pdx = proj.pullX - p.x, pdy = proj.pullY - p.y;
                         const pd = Math.hypot(pdx, pdy) || 1;
-                        p.x += (pdx / pd) * proj.pullOnHit;
-                        p.y += (pdy / pd) * proj.pullOnHit;
+                        const sp = proj.pullOnHit / 0.25;
+                        if (typeof Player !== 'undefined' && Player.addPull) {
+                            try { Player.addPull(state, (pdx / pd) * sp, (pdy / pd) * sp, 0.3); } catch (e) {}
+                        } else {
+                            p.x += (pdx / pd) * proj.pullOnHit;
+                            p.y += (pdy / pd) * proj.pullOnHit;
+                        }
+                    }
+                    // Hydra grasping tide: arrowhead lands -> 5s living
+                    // leash anchored to the hydra body (see Player.update).
+                    if (proj.tetherDur && !died) {
+                        try {
+                            const s = proj.tetherSrc || null;
+                            p.tether = {
+                                src: s, timer: proj.tetherDur,
+                                x: (s && Number.isFinite(s.x)) ? s.x : p.x,
+                                y: (s && Number.isFinite(s.y)) ? s.y : p.y,
+                            };
+                            Particles.showFloatingText(state, '🪢 TETHERED — IT DRAGS YOU IN!', p.x, p.y - 60, '#4ade80');
+                        } catch (e) {}
                     }
                     if (proj.flashOnHit) p.flashTimer = Math.max(p.flashTimer || 0, proj.flashOnHit);
                     if (proj.blurOnHit) p.blurTimer = Math.max(p.blurTimer || 0, proj.blurOnHit);
 
-                    // Clamp player within world bounds
+                    // Clamp player within walkable bounds — map-aware (the old
+                    // mainland-only clamp teleported isle players to the far
+                    // surf after a pull; see WorldSystem.clampEntity).
+                    if (typeof WorldSystem !== 'undefined' && WorldSystem.clampEntity) {
+                        try { WorldSystem.clampEntity(state, p, p.radius); } catch (e) {}
+                    } else {
                     p.x = Utils.clamp(p.x, B.MIN_X + p.radius, state.waterBoundaryX - p.radius);
                     p.y = Utils.clamp(p.y, B.MIN_Y + p.radius, B.MAX_Y - p.radius);
+                    }
                 }
 
                 // Remove projectile
@@ -2282,13 +2642,20 @@ function rollFishSpecies(state) {
         const rarity = (entry.species && entry.species.rarity) || 'common';
         const mult = luckMult[rarity] || 1.0;
         // 1.1.5 WORLD: time / weather / water-tier conditions reshape the
-        // table — matching fish get up to ~6x weight (see WorldSystem).
+        // table — matching fish get up to ~9x weight (see WorldSystem).
         let cond = 1;
         try {
             if (typeof WorldSystem !== 'undefined' && WorldSystem.bonusFor && state) {
                 cond = WorldSystem.bonusFor(entry.species, state) || 1;
             }
         } catch (e) { cond = 1; }
+        // Hard spawn gates: strict-schedule fish (20:00–23:00 + rain, …)
+        // weigh ZERO outside their window — they simply do not exist then.
+        try {
+            if (typeof WorldSystem !== 'undefined' && WorldSystem.spawnAllowed && state) {
+                if (!WorldSystem.spawnAllowed(entry.species, state)) cond = 0;
+            }
+        } catch (e) {}
         const w = entry.weight * mult * cond;
         total += w;
         return { species: entry.species, weight: w };
@@ -3705,19 +4072,782 @@ const FISH_SKILLS = {
                 });
         }
         state.screenShake = 32;
-        // Massive warning rings — standing in one when it pops STUNS
-        for (let i = 0; i < 6; i++) {
-            const a = (Math.PI * 2 / 6) * i;
-            state.delayedBlasts.push({
-                x: fish.x + Math.cos(a) * 200,
-                y: fish.y + Math.sin(a) * 200,
-                radius: 90, damage: 70,
-                timer: 0.8 + i * 0.1,
-                color: '#0ea5e9', shake: 20, stunOnBlast: 1.0
-            });
-        }
+        // Shock rings erupt FROM THE MOUTH (shared roar system) — standing
+        // in one when it pops STUNS. Plus the sonic boom visual on top.
+        try {
+            const mouth = (typeof Combat !== 'undefined' && Combat.mouthXY)
+                ? Combat.mouthXY({ x: fish.x, y: fish.y, angle: 0, species: fish.species })
+                : { x: fish.x, y: fish.y };
+            for (let i = 0; i < 6; i++) {
+                const a = (Math.PI * 2 / 6) * i;
+                state.delayedBlasts.push({
+                    x: mouth.x + Math.cos(a) * 200,
+                    y: mouth.y + Math.sin(a) * 200,
+                    radius: 90, damage: 70,
+                    timer: 0.8 + i * 0.1,
+                    color: '#0ea5e9', shake: 20, stunOnBlast: 1.0
+                });
+            }
+            if (typeof Combat !== 'undefined' && Combat.roarShockwave) {
+                Combat.roarShockwave(state, mouth.x, mouth.y, { color: '#0ea5e9', rings: 4, maxR: 300, shake: 20 });
+            }
+        } catch (e) {}
         try { audio.playRoar(); } catch (e) {}
         ctx.showFloatingText("🌊 LEVIATHAN ROAR!", fish.x, fish.y - 70, '#0ea5e9');
+    },
+
+    // ============================================================
+    //  GENERIC DANMAKU TRIO (touhou) — default projectile skills for
+    //  every boss, tinted by the caster's own species color. Pure
+    //  bullets: dodge, don't tank. Counts kept modest so snapshots
+    //  (40-projectile cap) and frame rate survive the spam.
+    // ============================================================
+    danmakuSpiral(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const col = (fish.species && fish.species.color) || '#f87171';
+        const dmg = getSkillDamage(fish, 0.75);
+        for (let arm = 0; arm < 2; arm++) {
+            for (let i = 0; i < 10; i++) {
+                const a = arm * Math.PI + i * 0.35;
+                const ox = fish.x + Math.cos(a) * 30, oy = fish.y + Math.sin(a) * 30;
+                Projectiles.spawn(state, ox, oy,
+                    ox + Math.cos(a) * 600, oy + Math.sin(a) * 600,
+                    300, Math.round(dmg), col, {
+                        radius: 10, glow: true, glowColor: col, life: 3.0,
+                        isSpiral: true, spiralRadius: 4,
+                    });
+            }
+        }
+        try { audio.playSkillZap(); } catch (e) {}
+        ctx.showFloatingText('🌀 SPIRAL DANMAKU!', fish.x, fish.y - 70, col);
+    },
+
+    danmakuFan(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const col = (fish.species && fish.species.color) || '#f87171';
+        const dmg = getSkillDamage(fish, 0.85);
+        const base = Math.atan2(p.y - fish.y, p.x - fish.x);
+        for (let i = 0; i < 7; i++) {
+            const a = base + (i - 3) * 0.12;
+            Projectiles.spawn(state, fish.x, fish.y,
+                fish.x + Math.cos(a) * 700, fish.y + Math.sin(a) * 700,
+                620, Math.round(dmg), col, {
+                    radius: 10, glow: true, glowColor: col, life: 2.0,
+                });
+        }
+        try { audio.playWhoosh(); } catch (e) {}
+        ctx.showFloatingText('🔱 DANMAKU FAN!', fish.x, fish.y - 70, col);
+    },
+
+    danmakuRing(fish, ctx) {
+        const state = ctx.state;
+        const col = (fish.species && fish.species.color) || '#f87171';
+        const dmg = getSkillDamage(fish, 0.7);
+        for (let ring = 0; ring < 2; ring++) {
+            const n = 12, off = ring * 0.26 + Math.random() * 0.2;
+            for (let i = 0; i < n; i++) {
+                const a = off + (i / n) * Math.PI * 2;
+                Projectiles.spawn(state, fish.x, fish.y,
+                    fish.x + Math.cos(a) * 600, fish.y + Math.sin(a) * 600,
+                    300 + ring * 60, Math.round(dmg), col, {
+                        radius: 9, glow: true, glowColor: col, life: 3.2,
+                    });
+            }
+        }
+        try { audio.playSkillZap(); } catch (e) {}
+        ctx.showFloatingText('⭕ RING DANMAKU!', fish.x, fish.y - 70, col);
+    },
+
+    // ============================================================
+    //  HYDRA REWORK KIT (sea + shore). Every skill runs in BOTH
+    //  arenas: hooked-fish context (triggerSkill) and the land bridge
+    //  (virtualFish with _monster back-ref) — same code, same damage.
+    // ============================================================
+    _hydraMouth(fish) {
+        try {
+            const m = (fish && fish._monster) || fish || {};
+            const ang = (typeof m.angle === 'number') ? m.angle
+                : (typeof fish.angle === 'number' ? fish.angle : 0);
+            if (typeof Combat !== 'undefined' && Combat.mouthXY) {
+                return Combat.mouthXY({ x: m.x || fish.x, y: m.y || fish.y, angle: ang, species: (m.species || fish.species) });
+            }
+        } catch (e) {}
+        return { x: fish.x, y: fish.y };
+    },
+
+    // 1. STORMCALL — thiên lôi: 6 sấm telegraphed đánh quanh player.
+    hydraLightning(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 1.4);
+        for (let i = 0; i < 6; i++) {
+            const ox = (Math.random() - 0.5) * 300, oy = (Math.random() - 0.5) * 300;
+            const bx = p.x + ox, by = p.y + oy;
+            state.delayedBlasts.push({
+                x: bx, y: by, radius: 100, damage: Math.round(dmg),
+                timer: 0.6 + i * 0.12, color: '#facc15', shake: 16, stunOnBlast: 0.4,
+                onDetonate: () => {
+                    try {
+                        if (typeof Combat !== 'undefined' && Combat.strikeLightning) {
+                            Combat.strikeLightning(state, bx, by, { color: '#fef08a', shake: 0 });
+                        }
+                    } catch (e) {}
+                },
+            });
+            Particles.spawnParticles(state, p.x + ox, p.y + oy - 160, '#fef08a', 8, { size: 4 });
+        }
+        state.screenShake = Math.max(state.screenShake || 0, 12);
+        try { audio.playThunder(); } catch (e) {}
+        ctx.showFloatingText('⛈ STORMCALL!', fish.x, fish.y - 70, '#facc15');
+    },
+
+    // 2. OCEAN KING'S ROAR — gầm đỏ + shockwave từ miệng + gọi 4 cá
+    // jumping fish ngẫu nhiên lên đánh player.
+    hydraRoar(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const mouth = FISH_SKILLS._hydraMouth(fish);
+        // Grand red roar: 5 rings out of the mouth (theatre + shove).
+        try {
+            if (typeof Combat !== 'undefined' && Combat.roarShockwave) {
+                Combat.roarShockwave(state, mouth.x, mouth.y, {
+                    color: '#ef4444', rings: 5, maxR: 340, damage: 0, shake: 20, gap: 0.16,
+                });
+            }
+        } catch (e) {}
+        // Point-blank roar STUNS (1.5s): too close to the mouth and the
+        // scream locks your legs. Dodge out of the 380px scream zone.
+        try {
+            const d = Math.hypot(p.x - mouth.x, p.y - mouth.y) || 1;
+            if (d < 380) {
+                p.stunTimer = Math.max(p.stunTimer || 0, 1.5);
+                Particles.showFloatingText(state, '😱 STUNNED 1.5s!', p.x, p.y - 60, '#f87171');
+            }
+        } catch (e) {}
+        try {
+            Particles.spawnParticles(state, mouth.x, mouth.y, '#ef4444', 30, { size: 6 });
+            Particles.spawnParticles(state, mouth.x, mouth.y, '#fecaca', 16, { size: 4 });
+        } catch (e) {}
+        // The roar answers — first wave of 4, then REINFORCEMENTS: while
+        // fewer than 2 roar-spawned hunters still swim, every roar tops
+        // the pack back up to 4. Wipe them and it just calls more — that
+        // pressure IS the Hydra's difficulty.
+        try {
+            const host = fish._monster || fish;
+            const alive = (state.enemies || []).filter(e => e && e._roarSpawned && (e.hp || 0) > 0).length;
+            const need = Math.max(0, 4 - alive);
+            if (need > 0) {
+            host._roarWaves = (host._roarWaves || 0) + 1;
+            state.enemies = state.enemies || [];
+            const B = (typeof CONFIG !== 'undefined' && CONFIG.WORLD) || { MIN_X: 40, MAX_X: 4500, MIN_Y: 40, MAX_Y: 3500 };
+            const waterX = state.waterBoundaryX || 830;
+            for (let i = 0; i < need; i++) {
+                let base = null;
+                for (let t = 0; t < 10 && !base; t++) {
+                    const cand = (typeof rollFishSpecies === 'function')
+                        ? rollFishSpecies(state)
+                        : FISH_SPECIES[Math.floor(Math.random() * FISH_SPECIES.length)];
+                    if (cand && !cand.isBoss) base = cand;
+                }
+                if (!base) continue;
+                const sp = (typeof makeCatchInstance === 'function') ? makeCatchInstance(base, 0) : Object.assign({}, base);
+                const sx = waterX + 120 + Math.random() * 200;
+                const sy = p.y + (Math.random() - 0.5) * 420;
+                const tx = Utils.clamp(p.x + (Math.random() < 0.5 ? -1 : 1) * (70 + Math.random() * 90), B.MIN_X + 30, waterX - 30);
+                const ty = Utils.clamp(p.y + (Math.random() - 0.5) * 180, B.MIN_Y + 30, B.MAX_Y - 30);
+                const dist = Math.hypot(tx - sx, ty - sy) || 1;
+                state.enemies.push({
+                    id: 'hr' + Date.now() + Math.random() + i,
+                    enemyType: 'hydraSoldier', // hydra's own brood: separate
+                    species: sp,               // from wild jumpingFish so the
+                    bornDeathSeq: state._deathSeq || 0, // two never share bugs
+                    _roarSpawned: true, // the King's call — one wave only
+                    x: sx, y: sy,
+                    vx: (tx - sx), vy: (ty - sy),
+                    hp: Math.max(80, (sp.maxHp || 320) * 0.5),
+                    maxHp: Math.max(80, (sp.maxHp || 320) * 0.5),
+                    damage: 34,
+                    state: 'leaping',
+                    jumpT: 0,
+                    jumpDur: Utils.clamp(dist / 550, 0.7, 1.4),
+                    sx, sy, tx, ty,
+                    leapH: 0,
+                    landTimer: 25, // the King's call is short — 25s hunt
+                    hopTimer: 0.25,
+                    hitCd: 0,
+                    skillCooldown: 2.5,
+                    isRaging: false,
+                    rageTimer: 0,
+                    isInflated: false,
+                    inflateTimer: 0,
+                    score: 0, xp: 40,
+                    hitFlash: 0,
+                });
+                Particles.spawnWaterSplashes(state, sx, sy, 10);
+            }
+            } // end reinforce gate: top up to 4 while fewer than 2 swim
+        } catch (e) {}
+        try { audio.playBossRoar(); } catch (e) {}
+        ctx.showFloatingText("👑 ROAR OF THE OCEAN KING!", fish.x, fish.y - 80, '#ef4444');
+    },
+
+    // 3a. RIFT BITE (biển) — MỘT nhát chém không gian bay thẳng tới
+    // player. Một projectile duy nhất, nhanh, rộng — không spam.
+    hydraBiteSea(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 1.6);
+        const mouth = FISH_SKILLS._hydraMouth(fish);
+        Projectiles.spawn(state, mouth.x, mouth.y, p.x, p.y, 640, Math.round(dmg), '#e2e8f0', {
+            radius: 26, glow: true, glowColor: '#ef4444', life: 1.6,
+            knockback: 60, trailCount: 3, particleDensity: 0.9,
+        });
+        try { audio.playWhoosh(); } catch (e) {}
+        ctx.showFloatingText('🗡 RIFT BITE!', fish.x, fish.y - 70, '#e2e8f0');
+    },
+
+    // 3b. SHORE LUNGE (bờ) — nhảy bổ tới player rồi cắn: lướt thân +
+    // nổ cắn tại vị trí player đứng.
+    hydraBiteShore(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 1.5);
+        const m = fish._monster || null;
+        if (m) {
+            const dx = p.x - m.x, dy = p.y - m.y;
+            const d = Math.hypot(dx, dy) || 1;
+            const lunge = Math.min(d * 0.65, 420);
+            m.x += (dx / d) * lunge;
+            m.y += (dy / d) * lunge;
+            Particles.spawnParticles(state, m.x, m.y, '#a7f3d0', 22, { size: 5 });
+            state.screenShake = Math.max(state.screenShake || 0, 14);
+        }
+        state.delayedBlasts.push({
+            x: p.x, y: p.y, radius: 110, damage: Math.round(dmg),
+            timer: 0.35, color: '#ef4444', shake: 18, stunOnBlast: 0.4,
+        });
+        try { audio.playRoar(); } catch (e) {}
+        ctx.showFloatingText('🦷 SHORE LUNGE — MOVE!', (m ? m.x : fish.x), (m ? m.y : fish.y) - 70, '#ef4444');
+    },
+
+    // 4. GRASPING TIDE — rắn dây câu: projectile bay serpentine, đầu
+    // mũi tên; dính đòn player bị trói và kéo về hydra suốt 5s.
+    hydraTether(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const src = fish._monster || fish;
+        const mouth = FISH_SKILLS._hydraMouth(fish);
+        Projectiles.spawn(state, mouth.x, mouth.y, p.x, p.y, 380, Math.round(getSkillDamage(fish, 0.6)), '#4ade80', {
+            radius: 12, glow: true, glowColor: '#86efac', life: 3.2,
+            isHoming: true, homingForce: 520,
+            isSpiral: true, spiralRadius: 5,
+            trailCount: 3, particleDensity: 0.9,
+        });
+        // Anchor the leash to the hydra body (follows it while tethered).
+        try {
+            const pr = state.projectiles[state.projectiles.length - 1];
+            if (pr) { pr.tetherDur = 5; pr.tetherSrc = src; }
+        } catch (e) {}
+        try { audio.playWhoosh(); } catch (e) {}
+        ctx.showFloatingText('🐍 GRASPING TIDE!', fish.x, fish.y - 70, '#4ade80');
+    },
+
+    // 5. VENOM TIDE — vùng độc 5s tại chân player, -5hp/s đúng spec.
+    hydraVenom(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        state.groundHazards.push({
+            x: p.x, y: p.y, radius: 110, duration: 5,
+            type: 'poison', damagePerSec: 5, color: '#4ade80',
+        });
+        ctx.showFloatingText('☠️ VENOM TIDE — RUN!', p.x, p.y - 60, '#4ade80');
+    },
+
+    // ============================================================
+    //  CRIMSON EMPEROR KIT — Sovereign of the Blood Tides.
+    //  P1 hunter (breach / tail / bubbles), P2 carnage (charge /
+    //  maelstrom / barbs under the Blood Moon), P3 mutation
+    //  (tentacles / beam / last bite). Land pickSkill gates by phase;
+    //  hooked (sea) instances roll the full list.
+    // ============================================================
+    _crimsonMouth(fish) {
+        try {
+            const m = (fish && fish._monster) || fish || {};
+            const ang = (typeof m.angle === 'number') ? m.angle
+                : (typeof fish.angle === 'number' ? fish.angle : 0);
+            if (typeof Combat !== 'undefined' && Combat.mouthXY) {
+                return Combat.mouthXY({ x: m.x || fish.x, y: m.y || fish.y, angle: ang, species: (m.species || fish.species) });
+            }
+        } catch (e) {}
+        return { x: fish.x, y: fish.y };
+    },
+
+    // P1 — BLOOD BREACHING: dives, shadow under the player, erupts AoE.
+    crimsonBreach(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 1.3);
+        state.delayedBlasts.push({
+            x: p.x, y: p.y, radius: 130, damage: Math.round(dmg),
+            timer: 0.9, color: '#dc2626', shake: 18, stunOnBlast: 0.4,
+        });
+        // The Emperor itself breaches toward you (half the distance).
+        const m = fish._monster || null;
+        const bx = m ? m.x : fish.x, by = m ? m.y : fish.y;
+        const dx = p.x - bx, dy = p.y - by;
+        const d = Math.hypot(dx, dy) || 1;
+        const lunge = Math.min(d * 0.5, 380);
+        if (m) { m.x += (dx / d) * lunge; m.y += (dy / d) * lunge; }
+        else { fish.x += (dx / d) * lunge; fish.y += (dy / d) * lunge; }
+        try {
+            Particles.spawnWaterSplashes(state, bx + (dx / d) * lunge, by + (dy / d) * lunge, 16);
+            state.screenShake = Math.max(state.screenShake || 0, 16);
+            try { audio.playSplash(); } catch (e) {}
+        } catch (e) {}
+        ctx.showFloatingText('🩸 BLOOD BREACH — MOVE!', p.x, p.y - 60, '#dc2626');
+    },
+
+    // P1 — TAIL SLAP WAVE: 3 blood fan waves, gaps between them.
+    tailSlapWave(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 0.9);
+        const base = Math.atan2(p.y - fish.y, p.x - fish.x);
+        for (let i = -1; i <= 1; i++) {
+            const a = base + i * 0.26;
+            Projectiles.spawn(state, fish.x, fish.y,
+                fish.x + Math.cos(a) * 700, fish.y + Math.sin(a) * 700,
+                520, Math.round(dmg), '#f87171', {
+                    radius: 12, glow: true, glowColor: '#7f1d1d', life: 2.2,
+                });
+        }
+        try { audio.playWhoosh(); } catch (e) {}
+        ctx.showFloatingText('🌊 TAIL SLAP!', fish.x, fish.y - 70, '#f87171');
+    },
+
+    // P1 — HOMING CRIMSON BUBBLES: 4-6 slow chasers, shootable.
+    homingBubbles(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 0.7);
+        const n = 4 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < n; i++) {
+            const a = (Math.PI * 2 / n) * i;
+            Projectiles.spawn(state, fish.x + Math.cos(a) * 40, fish.y + Math.sin(a) * 40,
+                p.x, p.y, 240, Math.round(dmg), '#ef4444', {
+                    radius: 11, glow: true, glowColor: '#fca5a5', life: 5,
+                    isHoming: true, homingForce: 300,
+                });
+        }
+        try { audio.playFishScreech(); } catch (e) {}
+        ctx.showFloatingText('🫧 BLOOD BUBBLES — SHOOT THEM!', fish.x, fish.y - 70, '#ef4444');
+    },
+
+    // P2 — ABYSSAL CHARGE: blurs across through you, bleeding trail.
+    abyssalCharge(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const m = fish._monster || null;
+        const sx = m ? m.x : fish.x, sy = m ? m.y : fish.y;
+        const dx = p.x - sx, dy = p.y - sy;
+        const d = Math.hypot(dx, dy) || 1;
+        const nx = dx / d, ny = dy / d;
+        const run = 560;
+        // Trail of boiling blood along the whole lane.
+        for (let i = 0; i <= 5; i++) {
+            const t = (i / 5) * run - 80;
+            state.groundHazards.push({
+                x: sx + nx * t, y: sy + ny * t, radius: 60, duration: 3,
+                type: 'fire', damagePerSec: 12, color: '#dc2626',
+            });
+        }
+        if (m) { m.x = sx + nx * run; m.y = sy + ny * run; }
+        else { fish.x = sx + nx * run; fish.y = sy + ny * run; }
+        state.screenShake = Math.max(state.screenShake || 0, 18);
+        try { audio.playWhoosh(); } catch (e) {}
+        try {
+            Particles.spawnParticles(state, sx + nx * run, sy + ny * run, '#dc2626', 30, { size: 5 });
+        } catch (e) {}
+        ctx.showFloatingText('👑 ABYSSAL CHARGE — DASH!', p.x, p.y - 60, '#dc2626');
+    },
+
+    // P2 — CRIMSON MAELSTROM: vortex drags you to the fangs. Finite
+    // pull — run against it (Adrenaline helps if caught deep).
+    crimsonMaelstrom(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const cx = fish.x, cy = fish.y;
+        try {
+            if (typeof Player !== 'undefined' && Player.addPull) {
+                const dx = cx - p.x, dy = cy - p.y;
+                const d = Math.hypot(dx, dy) || 1;
+                const sp = 700 / 0.9;
+                Player.addPull(state, (dx / d) * sp, (dy / d) * sp, 0.9);
+            }
+        } catch (e) {}
+        for (let i = 0; i < 3; i++) {
+            state.delayedBlasts.push({
+                x: cx, y: cy, radius: 150 + i * 90, damage: 0,
+                timer: 0.3 + i * 0.25, color: '#991b1b', shake: 16,
+            });
+        }
+        try {
+            for (let i = 0; i < 24; i++) {
+                const a = (i / 24) * Math.PI * 2;
+                Particles.spawnParticles(state, cx + Math.cos(a) * 200, cy + Math.sin(a) * 200, '#ef4444', 2, { size: 4 });
+            }
+        } catch (e) {}
+        state.screenShake = Math.max(state.screenShake || 0, 16);
+        try { audio.playRoar(); } catch (e) {}
+        ctx.showFloatingText('🌀 CRIMSON MAELSTROM — RUN!', p.x, p.y - 60, '#991b1b');
+    },
+
+    // P2 — GORE BARBS: coral-spike rain across the beach.
+    goreBarbs(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 0.9);
+        for (let i = 0; i < 8; i++) {
+            state.delayedBlasts.push({
+                x: p.x + (Math.random() - 0.5) * 640,
+                y: p.y + (Math.random() - 0.5) * 480,
+                radius: 70, damage: Math.round(dmg),
+                timer: 0.8 + Math.random() * 0.6,
+                color: '#f87171', shake: 12,
+            });
+        }
+        try { audio.playFishScreech(); } catch (e) {}
+        ctx.showFloatingText('🪸 GORE BARBS — KEEP MOVING!', p.x, p.y - 60, '#f87171');
+    },
+
+    // P3 — TENTACLE SLAM: 4 tendrils hammer where you stand, staggered.
+    tentacleSlam(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 1.3);
+        const spots = [
+            [p.x, p.y], [p.x + 95, p.y - 40],
+            [p.x - 90, p.y + 55], [p.x + 30, p.y + 100],
+        ];
+        spots.forEach(([sx, sy], i) => {
+            state.delayedBlasts.push({
+                x: sx, y: sy, radius: 100, damage: Math.round(dmg),
+                timer: 0.4 + i * 0.16, color: '#7f1d1d', shake: 18, stunOnBlast: 0.4,
+            });
+            try {
+                Particles.spawnParticles(state, sx, sy - 120, '#7f1d1d', 10, { size: 5 });
+            } catch (e) {}
+        });
+        try { audio.playRoar(); } catch (e) {}
+        ctx.showFloatingText('🦑 TENTACLE SLAM — RED MEANS RUN!', p.x, p.y - 60, '#7f1d1d');
+    },
+
+    // P3 — BLOOD BEAM: eye charges 1s, then a 180° coral-laser sweep.
+    // Dash through the beam line as it passes — tanking all 7 is death.
+    bloodBeam(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 1.2);
+        const mouth = FISH_SKILLS._crimsonMouth(fish);
+        const base = Math.atan2(p.y - mouth.y, p.x - mouth.x);
+        try {
+            Particles.spawnParticles(state, mouth.x, mouth.y, '#fca5a5', 30, { size: 5 });
+            try { audio.playThunder(); } catch (e) {}
+        } catch (e) {}
+        for (let i = 0; i < 7; i++) {
+            const a = base + (-75 + i * 25) * (Math.PI / 180);
+            const R = 380;
+            state.delayedBlasts.push({
+                x: mouth.x + Math.cos(a) * R, y: mouth.y + Math.sin(a) * R,
+                radius: 70, damage: Math.round(dmg),
+                timer: 1.0 + i * 0.12, color: '#dc2626', shake: 16,
+            });
+        }
+        ctx.showFloatingText('👁 BLOOD BEAM — DASH THE SWEEP!', p.x, p.y - 60, '#dc2626');
+    },
+
+    // P3 death-throe (<10%): relentless shore-bites until it drops.
+    sovereignBite(fish, ctx) {        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 1.7);
+        const m = fish._monster || null;
+        const bx = m ? m.x : fish.x, by = m ? m.y : fish.y;
+        const dx = p.x - bx, dy = p.y - by;
+        const d = Math.hypot(dx, dy) || 1;
+        const lunge = Math.min(d * 0.8, 520);
+        if (m) { m.x += (dx / d) * lunge; m.y += (dy / d) * lunge; }
+        else { fish.x += (dx / d) * lunge; fish.y += (dy / d) * lunge; }
+        state.delayedBlasts.push({
+            x: p.x, y: p.y, radius: 130, damage: Math.round(dmg),
+            timer: 0.32, color: '#991b1b', shake: 20, stunOnBlast: 0.6,
+        });
+        state.screenShake = Math.max(state.screenShake || 0, 20);
+        try { audio.playRoar(); } catch (e) {}
+        ctx.showFloatingText('👑 SOVEREIGN BITE!', p.x, p.y - 60, '#991b1b');
+    },
+
+    // ============================================================
+    //  VOID LEVIATHAN KIT — The Star-Eater. P1 unstable star
+    //  (spit / geyser / tentacles), beach-breach QTE at 65%, P2 cosmic
+    //  rift (shear / well / rain), P3 star-eater (beam / barrage /
+    //  apocalypse). Land pickSkill gates by phase; hooked instances
+    //  roll the full list.
+    // ============================================================
+    // VOID BARRAGE — signature spam: 3 aimed bursts x 4 fast orbs
+    // (12 total). No homing — pure dodge-by-movement, cheap sprites so
+    // volume never lags. The boss's bread-and-butter at every phase.
+    voidBarrage(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 0.8);
+        const base = Math.atan2(p.y - fish.y, p.x - fish.x);
+        for (let b = 0; b < 3; b++) {
+            for (let i = 0; i < 4; i++) {
+                const a = base + (b - 1) * 0.22 + (i - 1.5) * 0.12;
+                Projectiles.spawn(state, fish.x, fish.y,
+                    fish.x + Math.cos(a) * 700, fish.y + Math.sin(a) * 700,
+                    560, Math.round(dmg), '#a855f7', {
+                        radius: 10, glow: true, glowColor: '#22d3ee', life: 2.0,
+                    });
+            }
+        }
+        try { audio.playSkillZap(); } catch (e) {}
+        ctx.showFloatingText('🟣 VOID BARRAGE!', fish.x, fish.y - 70, '#a855f7');
+    },
+
+    // P1 — VOID SPITTING: 6 chasing star-orbs, shootable.
+    voidSpitting(fish, ctx) {        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 0.7);
+        for (let i = 0; i < 6; i++) {
+            const a = (Math.PI * 2 / 6) * i;
+            Projectiles.spawn(state, fish.x + Math.cos(a) * 50, fish.y + Math.sin(a) * 50,
+                p.x, p.y, 300, Math.round(dmg), '#c084fc', {
+                    radius: 11, glow: true, glowColor: '#22d3ee', life: 4,
+                    isHoming: true, homingForce: 380,
+                });
+        }
+        try { audio.playFishScreech(); } catch (e) {}
+        ctx.showFloatingText('🟣 VOID SPITTING — SHOOT THEM!', fish.x, fish.y - 70, '#c084fc');
+    },
+
+    // P1 — ABYSSAL GEYSER: 3 warning rings, eruption after 2s.
+    abyssalGeyser(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 1.2);
+        const spots = [[p.x, p.y], [p.x + 130, p.y - 60], [p.x - 120, p.y + 70]];
+        spots.forEach(([sx, sy], i) => {
+            state.delayedBlasts.push({
+                x: sx, y: sy, radius: 95, damage: Math.round(dmg),
+                timer: 2.0, color: '#7c3aed', shake: 16,
+                onDetonate: () => {
+                    try {
+                        Particles.spawnParticles(state, sx, sy - 60, '#22d3ee', 20, { size: 5 });
+                        state.screenShake = Math.max(state.screenShake || 0, 12);
+                    } catch (e) {}
+                },
+            });
+        });
+        try { audio.playThunder(); } catch (e) {}
+        ctx.showFloatingText('🌋 ABYSSAL GEYSER — 2s!', p.x, p.y - 60, '#7c3aed');
+    },
+
+    // P1 — VOID TENTACLE SLAM: dorsal tendrils hammer the sand,
+    // leaving crackling energy fissures.
+    voidTentacle(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 1.2);
+        const spots = [
+            [p.x, p.y], [p.x + 100, p.y - 50],
+            [p.x - 95, p.y + 60], [p.x + 20, p.y + 110],
+        ];
+        spots.forEach(([sx, sy], i) => {
+            state.delayedBlasts.push({
+                x: sx, y: sy, radius: 95, damage: Math.round(dmg),
+                timer: 0.5 + i * 0.18, color: '#6d28d9', shake: 16, stunOnBlast: 0.4,
+                leaveHazard: true, hazardType: 'fire', hazardDps: 6, hazardDuration: 3,
+            });
+            try {
+                Particles.spawnParticles(state, sx, sy - 130, '#6d28d9', 10, { size: 5 });
+            } catch (e) {}
+        });
+        try { audio.playRoar(); } catch (e) {}
+        ctx.showFloatingText('🦑 VOID TENDRILS — RED MEANS RUN!', p.x, p.y - 60, '#6d28d9');
+    },
+
+    // P2 — REALITY SHEAR: dashes through you, 3 rifts that detonate
+    // after 3s, dragging victims in.
+    realityShear(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const m = fish._monster || null;
+        const sx = m ? m.x : fish.x, sy = m ? m.y : fish.y;
+        const dx = p.x - sx, dy = p.y - sy;
+        const d = Math.hypot(dx, dy) || 1;
+        const nx = dx / d, ny = dy / d;
+        const run = 520;
+        for (let i = 1; i <= 3; i++) {
+            const rx = sx + nx * (run * i / 3), ry = sy + ny * (run * i / 3);
+            state.delayedBlasts.push({
+                x: rx, y: ry, radius: 100, damage: Math.round(getSkillDamage(fish, 1.2)),
+                timer: 3.0, color: '#4c1d95', shake: 16, stunOnBlast: 0.5,
+                onDetonate: () => {
+                    try {
+                        if (typeof Player !== 'undefined' && Player.addPull) {
+                            const qx = rx - p.x, qy = ry - p.y;
+                            const qd = Math.hypot(qx, qy) || 1;
+                            Player.addPull(state, (qx / qd) * (420 / 0.5), (qy / qd) * (420 / 0.5), 0.5);
+                        }
+                        Particles.spawnParticles(state, rx, ry, '#a855f7', 25, { size: 5 });
+                    } catch (e) {}
+                },
+            });
+        }
+        if (m) { m.x = sx + nx * run; m.y = sy + ny * run; }
+        else { fish.x = sx + nx * run; fish.y = sy + ny * run; }
+        state.screenShake = Math.max(state.screenShake || 0, 16);
+        try { audio.playWhoosh(); } catch (e) {}
+        ctx.showFloatingText('✂ REALITY SHEAR — RIFTS IN 3s!', p.x, p.y - 60, '#4c1d95');
+    },
+
+    // P2 — VOID PIT: two black holes bloom around the player for 5s,
+    // then collapse. Dragged into the maw = CONSUMED (instant death).
+    // Plus a pair of void-touched jumpers to hunt while you run.
+    voidPit(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const spots = [
+            [p.x - 150, p.y - 90], [p.x + 150, p.y + 90],
+        ];
+        spots.forEach(([sx, sy], i) => {
+            state.groundHazards.push({
+                x: sx, y: sy, radius: 110, duration: 5,
+                type: 'void', voidPit: true, damagePerSec: 0, color: '#0f172a',
+            });
+            try {
+                state.realmFx = state.realmFx || [];
+                state.realmFx.push({ x: sx, y: sy, t0: state.time || 0, dur: 5, pit: true });
+            } catch (e) {}
+        });
+        // Void-touched hunters rise with the pits.
+        try {
+            state.enemies = state.enemies || [];
+            for (let i = 0; i < 2; i++) {
+                let base = null;
+                for (let t = 0; t < 10 && !base; t++) {
+                    const cand = (typeof rollFishSpecies === 'function')
+                        ? rollFishSpecies(state)
+                        : FISH_SPECIES[Math.floor(Math.random() * FISH_SPECIES.length)];
+                    if (cand && !cand.isBoss) base = cand;
+                }
+                if (!base) continue;
+                const sp = (typeof makeCatchInstance === 'function') ? makeCatchInstance(base, 0) : Object.assign({}, base);
+                sp.mutation = 'void';
+                sp.color = '#a855f7';
+                const sx = spots[i][0] + (Math.random() - 0.5) * 200;
+                const sy = spots[i][1] - 160;
+                const tx = Utils.clamp(p.x + (Math.random() < 0.5 ? -1 : 1) * 90, 40, (state.waterBoundaryX || 830) - 30);
+                const ty = Utils.clamp(p.y + (Math.random() - 0.5) * 160, 40, 3500);
+                const dist = Math.hypot(tx - sx, ty - sy) || 1;
+                state.enemies.push({
+                    id: 'vp' + Date.now() + Math.random() + i,
+                    enemyType: 'jumpingFish',
+                    species: sp,
+                    bornDeathSeq: state._deathSeq || 0,
+                    x: sx, y: sy, vx: (tx - sx), vy: (ty - sy),
+                    hp: Math.max(80, (sp.maxHp || 320) * 0.5),
+                    maxHp: Math.max(80, (sp.maxHp || 320) * 0.5),
+                    damage: 34, state: 'leaping',
+                    jumpT: 0, jumpDur: Utils.clamp(dist / 550, 0.7, 1.4),
+                    sx, sy, tx, ty, leapH: 0,
+                    landTimer: 30, hopTimer: 0.25, hitCd: 0,
+                    skillCooldown: 2.5, isRaging: false, rageTimer: 0,
+                    isInflated: false, inflateTimer: 0,
+                    score: 0, xp: 40, hitFlash: 0,
+                });
+            }
+        } catch (e) {}
+        try { audio.playThunder(); } catch (e) {}
+        ctx.showFloatingText('🕳 VOID PITS — DON’T FALL IN!', p.x, p.y - 60, '#0f172a');
+    },
+
+    // P2 — GRAVITY WELL: a black hole blooms mid-beach and drinks you in.
+    // P2 — STAR RAIN: violet shrapnel across the beach.
+    starRain(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 0.9);
+        for (let i = 0; i < 8; i++) {
+            state.delayedBlasts.push({
+                x: p.x + (Math.random() - 0.5) * 640,
+                y: p.y + (Math.random() - 0.5) * 480,
+                radius: 70, damage: Math.round(dmg),
+                timer: 0.8 + Math.random() * 0.6,
+                color: '#c084fc', shake: 12,
+            });
+        }
+        try { audio.playFishScreech(); } catch (e) {}
+        ctx.showFloatingText('🌠 STAR RAIN — KEEP MOVING!', p.x, p.y - 60, '#c084fc');
+    },
+
+    // P3 — COSMIC BLAST: eyes charge 1s, then a 180° void-laser sweep.
+    cosmicBlast(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 1.4);
+        let mx = fish.x, my = fish.y;
+        try {
+            const m = (fish && fish._monster) || fish || {};
+            const ang = (typeof m.angle === 'number') ? m.angle : 0;
+            if (typeof Combat !== 'undefined' && Combat.mouthXY) {
+                const mt = Combat.mouthXY({ x: m.x || fish.x, y: m.y || fish.y, angle: ang, species: (m.species || fish.species) });
+                mx = mt.x; my = mt.y;
+            }
+        } catch (e) {}
+        const base = Math.atan2(p.y - my, p.x - mx);
+        try {
+            Particles.spawnParticles(state, mx, my, '#e9d5ff', 30, { size: 5 });
+            try { audio.playThunder(); } catch (e) {}
+        } catch (e) {}
+        for (let i = 0; i < 7; i++) {
+            const a = base + (-75 + i * 25) * (Math.PI / 180);
+            const R = 380;
+            state.delayedBlasts.push({
+                x: mx + Math.cos(a) * R, y: my + Math.sin(a) * R,
+                radius: 70, damage: Math.round(dmg),
+                timer: 1.0 + i * 0.12, color: '#7c3aed', shake: 16,
+            });
+        }
+        ctx.showFloatingText('👁 COSMIC BLAST — DASH THE SWEEP!', p.x, p.y - 60, '#7c3aed');
+    },
+
+    // P3 death-throe (<10%): frenzied crawling bites, non-stop.
+    phaseBarrage(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 1.1);
+        const m = fish._monster || null;
+        const bx = m ? m.x : fish.x, by = m ? m.y : fish.y;
+        const dx = p.x - bx, dy = p.y - by;
+        const d = Math.hypot(dx, dy) || 1;
+        const lunge = Math.min(d * 0.5, 380);
+        if (m) { m.x += (dx / d) * lunge; m.y += (dy / d) * lunge; }
+        else { fish.x += (dx / d) * lunge; fish.y += (dy / d) * lunge; }
+        for (let i = 0; i < 3; i++) {
+            state.delayedBlasts.push({
+                x: p.x + (Math.random() - 0.5) * 120,
+                y: p.y + (Math.random() - 0.5) * 120,
+                radius: 80, damage: Math.round(dmg),
+                timer: 0.3 + i * 0.2, color: '#a855f7', shake: 14,
+            });
+        }
+        state.screenShake = Math.max(state.screenShake || 0, 14);
+        try { audio.playRoar(); } catch (e) {}
+        ctx.showFloatingText('🌀 FRENZY BARRAGE!', p.x, p.y - 60, '#a855f7');
     },
 
     // ============================================================
@@ -3871,5 +5001,37 @@ const FISH_SKILLS = {
         state.screenShake = Math.max(state.screenShake || 0, 10);
         try { audio.playRoar(); } catch (e) {}
         ctx.showFloatingText("👁️ ABYSSAL GAZE!", fish.x, fish.y - 40, '#a855f7');
+    },
+
+    lure(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        // Hypnotic glow: slows the angler and saps stamina while they stare.
+        // Keep moving to break the trance (slow falls off outside the glow).
+        p.slowTimer = Math.max(p.slowTimer || 0, 2.5);
+        p.slowMult = 0.45;
+        state.groundHazards.push({
+            x: fish.x, y: fish.y, radius: 130, duration: 3.5,
+            type: 'lure', damagePerSec: 6, color: '#c4b5fd'
+        });
+        ctx.spawnParticles(fish.x, fish.y, '#c4b5fd', 16);
+        ctx.showFloatingText("💡 LURED! Keep moving!", fish.x, fish.y - 40, '#c4b5fd');
+    },
+
+    titanSlam(fish, ctx) {
+        const state = ctx.state;
+        const p = state.player;
+        const dmg = getSkillDamage(fish, 2.2);
+        // THE BREACH: the whale rockets skyward (visible leap), hangs a
+        // beat, then comes down on the angler's position — earthquake.
+        fish.vx = (fish.vx || 0) * 0.2;
+        fish.vy = (fish.vy || 0) * 0.2 - 1050;
+        fish._slamT = 0.85;
+        fish._slamDmg = Math.round(dmg * 1.4);
+        ctx.spawnParticles(fish.x, fish.y, '#bae6fd', 30);
+        ctx.spawnParticles(fish.x, fish.y, '#ffffff', 18);
+        state.screenShake = Math.max(state.screenShake || 0, 14);
+        try { audio.playRoar(); } catch (e) {}
+        ctx.showFloatingText("🐋 BREACH! IT'S COMING DOWN — RUN!", fish.x, fish.y - 90, '#93c5fd');
     },
 };

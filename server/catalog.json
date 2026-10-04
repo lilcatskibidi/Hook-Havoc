@@ -1,0 +1,736 @@
+{
+ "builtAt": "2026-10-04T14:03:01.115Z",
+ "weapons": {
+  "pistol": {
+   "price": 0
+  },
+  "smg": {
+   "price": 500
+  },
+  "scrap_smg": {
+   "price": 1200
+  },
+  "shotgun": {
+   "price": 2200
+  },
+  "rusted_revolver": {
+   "price": 900
+  },
+  "dual_pistols": {
+   "price": 4200
+  },
+  "rifle": {
+   "price": 6500
+  },
+  "tidecaller": {
+   "price": 12000
+  },
+  "burst_rifle": {
+   "price": 8500
+  },
+  "marksman": {
+   "price": 14000
+  },
+  "harpoon": {
+   "price": 17000
+  },
+  "storm_harpoon": {
+   "price": 38000
+  },
+  "auto_shotgun": {
+   "price": 19000
+  },
+  "flamethrower": {
+   "price": 22000
+  },
+  "grenade_launcher": {
+   "price": 40000
+  },
+  "kraken_maul": {
+   "price": 55000
+  },
+  "railgun": {
+   "price": 48000
+  },
+  "abyssal_cannon": {
+   "price": 140000
+  },
+  "minigun": {
+   "price": 32000
+  },
+  "sniper_rail": {
+   "price": 70000
+  },
+  "plasma_caster": {
+   "price": 110000
+  },
+  "trident": {
+   "price": 150000
+  },
+  "crossbow": {
+   "price": 80000
+  },
+  "tesla_gun": {
+   "price": 95000
+  },
+  "void_rifle": {
+   "price": 220000
+  },
+  "coral_launcher": {
+   "price": 130000
+  },
+  "frost_bow": {
+   "price": 110000
+  },
+  "magma_shotgun": {
+   "price": 75000
+  },
+  "sonic_pistol": {
+   "price": 28000
+  },
+  "flare_gun": {
+   "price": 2500
+  },
+  "nailgun": {
+   "price": 4000
+  },
+  "foghorn": {
+   "price": 32000
+  },
+  "scattergun": {
+   "price": 22000
+  },
+  "recurve": {
+   "price": 24000
+  },
+  "arc_caster": {
+   "price": 70000
+  },
+  "depth_charge": {
+   "price": 80000
+  },
+  "lance": {
+   "price": 100000
+  },
+  "pulse_rifle": {
+   "price": 90000
+  },
+  "sun_spear": {
+   "price": 180000
+  },
+  "popgun": {
+   "price": 600
+  },
+  "longshot": {
+   "price": 5200
+  },
+  "blunderbuss": {
+   "price": 6800
+  },
+  "harpoon_pistol": {
+   "price": 8500
+  },
+  "storm_cell": {
+   "price": 26000
+  },
+  "coral_repeater": {
+   "price": 30000
+  },
+  "magma_mortar": {
+   "price": 36000
+  },
+  "inkcaster": {
+   "price": 42000
+  },
+  "glacier_cannon": {
+   "price": 85000
+  },
+  "vampire_fang": {
+   "price": 95000
+  },
+  "thunder_maul": {
+   "price": 110000
+  },
+  "doom_horn": {
+   "price": 130000
+  },
+  "starfall_launcher": {
+   "price": 200000
+  },
+  "leviathan_caller": {
+   "price": 240000
+  },
+  "event_horizon": {
+   "price": 300000
+  }
+ },
+ "rods": {
+  "rod_starter": {
+   "price": 0
+  },
+  "rod_bamboo": {
+   "price": 450
+  },
+  "rod_copper": {
+   "price": 200
+  },
+  "rod_pro": {
+   "price": 1500
+  },
+  "rod_kelp": {
+   "price": 2200
+  },
+  "rod_carbon": {
+   "price": 3200
+  },
+  "rod_ghost": {
+   "price": 5200
+  },
+  "rod_mythic": {
+   "price": 7000
+  },
+  "rod_frost": {
+   "price": 9000
+  },
+  "rod_bio": {
+   "price": 12000
+  },
+  "rod_storm": {
+   "price": 18000
+  },
+  "rod_titan": {
+   "price": 26000
+  },
+  "rod_abyssal": {
+   "price": 32000
+  },
+  "rod_doom": {
+   "price": 45000
+  },
+  "rod_kraken": {
+   "price": 55000
+  },
+  "rod_cosmic": {
+   "price": 70000
+  },
+  "rod_golem": {
+   "price": 90000
+  },
+  "rod_tempest": {
+   "price": 110000
+  },
+  "rod_worldserpent": {
+   "price": 135000
+  },
+  "rod_eventide": {
+   "price": 160000
+  },
+  "rod_whalefall": {
+   "price": 200000
+  },
+  "rod_godline": {
+   "price": 280000
+  }
+ },
+ "buckets": [
+  {
+   "cap": 25,
+   "price": 500
+  },
+  {
+   "cap": 40,
+   "price": 2000
+  },
+  {
+   "cap": 60,
+   "price": 6000
+  },
+  {
+   "cap": 100,
+   "price": 15000
+  },
+  {
+   "cap": 160,
+   "price": 35000
+  }
+ ],
+ "armor": [
+  {
+   "id": "vest_light",
+   "price": 1300
+  },
+  {
+   "id": "cap_light",
+   "price": 800
+  },
+  {
+   "id": "boots_light",
+   "price": 1000
+  },
+  {
+   "id": "gloves_light",
+   "price": 800
+  },
+  {
+   "id": "wetsuit_top",
+   "price": 1500
+  },
+  {
+   "id": "vest_medium",
+   "price": 6300
+  },
+  {
+   "id": "boots_medium",
+   "price": 4500
+  },
+  {
+   "id": "helm_medium",
+   "price": 5000
+  },
+  {
+   "id": "helm_sonar",
+   "price": 9000
+  },
+  {
+   "id": "vest_kelp",
+   "price": 11000
+  },
+  {
+   "id": "vest_heavy",
+   "price": 30000
+  },
+  {
+   "id": "boots_heavy",
+   "price": 20000
+  },
+  {
+   "id": "gauntlets_heavy",
+   "price": 23000
+  },
+  {
+   "id": "helm_crusher",
+   "price": 35000
+  },
+  {
+   "id": "boots_magma",
+   "price": 32000
+  },
+  {
+   "id": "vest_legendary",
+   "price": 125000
+  },
+  {
+   "id": "boots_legendary",
+   "price": 88000
+  },
+  {
+   "id": "helm_legendary",
+   "price": 100000
+  },
+  {
+   "id": "vest_stormhide",
+   "price": 180000
+  },
+  {
+   "id": "helm_void",
+   "price": 150000
+  },
+  {
+   "id": "set_abyssal",
+   "price": 500000
+  },
+  {
+   "id": "vest_typhoon",
+   "price": 0
+  },
+  {
+   "id": "gloves_solar",
+   "price": 0
+  },
+  {
+   "id": "helm_mistwalker",
+   "price": 0
+  },
+  {
+   "id": "boots_bloodtide",
+   "price": 0
+  }
+ ],
+ "ammoPrices": {
+  "pistol": null,
+  "popgun": 1,
+  "rusted_revolver": 1,
+  "flare_gun": 2,
+  "nailgun": 1,
+  "smg": 1,
+  "scrap_smg": 1,
+  "shotgun": 2,
+  "dual_pistols": 2,
+  "rifle": 1,
+  "tidecaller": 2,
+  "burst_rifle": 2,
+  "marksman": 3,
+  "harpoon": 8,
+  "storm_harpoon": 12,
+  "lance": 15,
+  "auto_shotgun": 3,
+  "scattergun": 3,
+  "flamethrower": 1,
+  "grenade_launcher": 20,
+  "depth_charge": 25,
+  "kraken_maul": 22,
+  "railgun": 25,
+  "abyssal_cannon": 30,
+  "sun_spear": 35,
+  "minigun": 1,
+  "sniper_rail": 30,
+  "plasma_caster": 15,
+  "pulse_rifle": 12,
+  "trident": 28,
+  "crossbow": 12,
+  "tesla_gun": 2,
+  "arc_caster": 3,
+  "void_rifle": 40,
+  "coral_launcher": 22,
+  "frost_bow": 15,
+  "recurve": 12,
+  "longshot": 2,
+  "blunderbuss": 2,
+  "harpoon_pistol": 8,
+  "storm_cell": 2,
+  "coral_repeater": 1,
+  "magma_mortar": 18,
+  "inkcaster": 4,
+  "glacier_cannon": 28,
+  "vampire_fang": 1,
+  "thunder_maul": 3,
+  "doom_horn": 6,
+  "starfall_launcher": 32,
+  "leviathan_caller": 30,
+  "event_horizon": 45,
+  "magma_shotgun": 3,
+  "sonic_pistol": 4,
+  "foghorn": 6
+ },
+ "ammoMax": {
+  "pistol": null,
+  "popgun": 400,
+  "rusted_revolver": 120,
+  "flare_gun": 40,
+  "nailgun": 220,
+  "smg": 180,
+  "scrap_smg": 150,
+  "shotgun": 50,
+  "dual_pistols": 60,
+  "rifle": 150,
+  "tidecaller": 120,
+  "burst_rifle": 120,
+  "marksman": 40,
+  "harpoon": 30,
+  "storm_harpoon": 24,
+  "lance": 20,
+  "auto_shotgun": 48,
+  "scattergun": 40,
+  "flamethrower": 500,
+  "grenade_launcher": 8,
+  "depth_charge": 5,
+  "kraken_maul": 6,
+  "railgun": 6,
+  "abyssal_cannon": 5,
+  "sun_spear": 4,
+  "minigun": 800,
+  "sniper_rail": 5,
+  "plasma_caster": 60,
+  "pulse_rifle": 80,
+  "trident": 16,
+  "crossbow": 20,
+  "tesla_gun": 200,
+  "arc_caster": 160,
+  "void_rifle": 8,
+  "coral_launcher": 6,
+  "frost_bow": 18,
+  "recurve": 24,
+  "longshot": 120,
+  "blunderbuss": 40,
+  "harpoon_pistol": 30,
+  "storm_cell": 200,
+  "coral_repeater": 300,
+  "magma_mortar": 10,
+  "inkcaster": 90,
+  "glacier_cannon": 8,
+  "vampire_fang": 260,
+  "thunder_maul": 36,
+  "doom_horn": 30,
+  "starfall_launcher": 6,
+  "leviathan_caller": 14,
+  "event_horizon": 5,
+  "magma_shotgun": 24,
+  "sonic_pistol": 50,
+  "foghorn": 40
+ },
+ "fishValues": {
+  "bluegill": 65,
+  "perch": 70,
+  "crappie": 68,
+  "pumpkinseed": 55,
+  "carp": 180,
+  "bream": 85,
+  "tench": 95,
+  "roach": 58,
+  "rudd": 62,
+  "dace": 48,
+  "gudgeon": 42,
+  "bleak": 35,
+  "smelt": 52,
+  "shad": 105,
+  "herring": 72,
+  "mackerel": 85,
+  "pilchard": 56,
+  "sprat": 45,
+  "sand_smelt": 40,
+  "goby": 50,
+  "sculpin": 54,
+  "stickleback": 38,
+  "minnow_creek": 32,
+  "topminnow": 44,
+  "mosquitofish": 28,
+  "bonefish": 620,
+  "permit": 680,
+  "tarpon": 850,
+  "snook": 780,
+  "redfish": 800,
+  "speckled_trout": 580,
+  "flounder": 540,
+  "halibut": 760,
+  "sole": 500,
+  "turbot": 570,
+  "monkfish": 720,
+  "john_dory": 550,
+  "gurnard": 510,
+  "weever": 480,
+  "scorpionfish": 560,
+  "stonefish": 600,
+  "toadfish": 520,
+  "frogfish": 490,
+  "batfish": 460,
+  "squirrelfish": 530,
+  "soldierfish": 500,
+  "cardinalfish": 420,
+  "clownfish": 400,
+  "damselfish": 380,
+  "anthias": 440,
+  "chromis": 410,
+  "wrasse": 430,
+  "parrotfish": 650,
+  "surgeonfish": 600,
+  "butterflyfish": 470,
+  "angelfish": 630,
+  "bluefin_tuna": 12000,
+  "yellowfin_tuna": 5500,
+  "bigeye_tuna": 4800,
+  "marlin_black": 2500,
+  "marlin_striped": 2100,
+  "sailfish_atlantic": 2600,
+  "spearfish": 1850,
+  "tarpon_giant": 1950,
+  "amberjack": 1700,
+  "dogtooth_tuna": 2800,
+  "cubera_snapper": 2500,
+  "mutton_snapper": 1650,
+  "grouper_gag": 1850,
+  "grouper_goliath": 2300,
+  "cobia": 1750,
+  "kingfish": 1700,
+  "wahoo_giant": 1850,
+  "barracuda_giant": 1800,
+  "rainbow_runner": 1550,
+  "pompano": 1480,
+  "jack_crevalle": 1600,
+  "jack_horse_eye": 1520,
+  "bluefish": 1500,
+  "striped_bass": 1580,
+  "muskie": 1750,
+  "northern_pike": 1680,
+  "bluefin_tuna_giant": 5500,
+  "marlin_blue_giant": 6000,
+  "swordfish_giant": 6000,
+  "tuna_giant": 6500,
+  "sturgeon": 7000,
+  "sturgeon_white": 6500,
+  "alligator_gar": 6000,
+  "arapaima": 6800,
+  "piraiba": 6900,
+  "wels_catfish": 6200,
+  "mekong_catfish": 7200,
+  "giant_mekong": 6400,
+  "coelacanth": 20000,
+  "oarfish": 7500,
+  "megamouth": 7000,
+  "basking_shark": 6800,
+  "whale_shark_juv": 7200,
+  "manta_giant": 6600,
+  "devil_ray": 6400,
+  "sawfish": 6800,
+  "guitarfish": 6300,
+  "electric_eel_giant": 6500,
+  "giant_squid": 6800,
+  "colossal_squid": 35000,
+  "megalodon_alpha": 35000,
+  "liopleurodon": 33000,
+  "basilosaurus": 38000,
+  "mosasaurus": 36000,
+  "dunkleosteus": 32000,
+  "xiphactinus": 30000,
+  "helicoprion": 28000,
+  "leviathan_whale": 45000,
+  "kraken_ancient": 42000,
+  "cthulhu": 40000,
+  "jormungandr": 38000,
+  "yamata_no_orochi": 36000,
+  "tiamat": 44000,
+  "shenlong": 41000,
+  "bahamut": 48000,
+  "midgardsormr": 39000,
+  "apep": 37000,
+  "leviathan_biblical": 52000,
+  "behemoth": 50000,
+  "ziz": 43000,
+  "sardine": 60,
+  "mudcrab": 200,
+  "stingray": 560,
+  "sea_turtle": 720,
+  "lionfish": 640,
+  "thunder_ray": 1700,
+  "coral_dragon": 2100,
+  "star_ray": 4200,
+  "leviathan_turtle": 5200,
+  "elder_dragon": 18000,
+  "celestial_ray": 16500,
+  "bass": 75,
+  "snapper": 160,
+  "catfish": 220,
+  "neon_tetra": 90,
+  "eel": 450,
+  "puffer": 520,
+  "viperfish": 680,
+  "angler": 750,
+  "prism_squid": 620,
+  "shark": 1250,
+  "magma_pike": 1600,
+  "ghost_ray": 1800,
+  "frost_manta": 1950,
+  "kraken": 3500,
+  "golden": 4000,
+  "tsunami_whale": 5000,
+  "storm_hydra": 5800,
+  "void_drake": 9500,
+  "sun_fish": 12000,
+  "chronos_squid": 15000,
+  "leviathan_priest": 55000,
+  "stormlord_hydra": 62000,
+  "void_shepherd": 78000,
+  "crimson_emperor": 92000,
+  "anchovy": 50,
+  "mudskipper": 140,
+  "guppy": 40,
+  "minnow": 45,
+  "barracuda": 800,
+  "mahi_mahi": 850,
+  "swordfish": 950,
+  "sailfish": 900,
+  "wahoo": 820,
+  "electric_ray": 1500,
+  "giant_trevally": 1650,
+  "napoleon_wrasse": 1700,
+  "tiger_shark": 1800,
+  "great_white": 4000,
+  "blue_marlin": 3800,
+  "giant_grouper": 4200,
+  "ocean_sunfish": 4500,
+  "megalodon": 20000,
+  "leviathan_eel": 22000,
+  "kraken_prime": 30000,
+  "sandeel": 48,
+  "garfish": 90,
+  "pipefish": 52,
+  "blenny": 42,
+  "dragonet": 58,
+  "flatfish": 82,
+  "plaice": 88,
+  "tuna_skipjack": 750,
+  "tuna_albacore": 900,
+  "bonito": 680,
+  "little_tunny": 620,
+  "samson_fish": 1000,
+  "queenfish": 820,
+  "trevally_giant": 1800,
+  "bluefin_trevally": 880,
+  "golden_trevally": 950,
+  "permite": 920,
+  "roosterfish": 2200,
+  "wahoo_peterson": 1900,
+  "white_marlin": 2200,
+  "striped_marlin": 3000,
+  "black_marlin": 3500,
+  "blue_marlin_grand": 4500,
+  "swordfish_broadbill": 2800,
+  "great_hammerhead": 4200,
+  "tiger_shark_great": 5000,
+  "greenland_shark": 4500,
+  "sixgill_shark": 3800,
+  "megamouth_shark": 3200,
+  "giant_oarfish": 15000,
+  "whale_shark": 25000,
+  "leedsichthys": 30000,
+  "megalodon_prime": 100000,
+  "seahorse": 450,
+  "moon_jelly": 1750,
+  "cuttlefish": 1050,
+  "glass_minnow": 120,
+  "lanternfish": 620,
+  "thunder_eel": 980,
+  "obsidian_tuna": 3400,
+  "abyssal_angler": 4200,
+  "tide_rex": 15000,
+  "volcano_eel": 13500,
+  "frost_serpent": 14200,
+  "leviathan_calf": 26000,
+  "ember_megalodon": 60000,
+  "void_kraken": 55000,
+  "colossal_whale": 120000,
+  "sunfin_tetra": 22,
+  "drizzle_minnow": 18,
+  "fog_guppy": 20,
+  "dusk_glimmer": 26,
+  "night_ripple": 24,
+  "tidepool_blenny": 16,
+  "cloudskipper": 28,
+  "ember_anchovy": 25,
+  "monsoon_garpike": 420,
+  "mistwisp_eel": 380,
+  "dawn_runner": 450,
+  "stormpetrel_fish": 400,
+  "bloodfin_tetra": 390,
+  "coral_squire": 360,
+  "abyss_lanternfish": 350,
+  "typhoon_dart": 480,
+  "midnight_rainfish": 460,
+  "tempest_queenfish": 2300,
+  "bloodmoon_raya": 2200,
+  "fogmother_eel": 2350,
+  "dawnherald_marlin": 2300,
+  "monsoon_leopardfish": 2100,
+  "sunscorch_damsel": 2000,
+  "abyssal_anglerfish": 2250,
+  "typhoon_wyrm": 6200,
+  "pale_mistlord": 6000,
+  "crimson_tidereaver": 6800,
+  "solar_crownfish": 6100,
+  "maelstrom_titan": 26000,
+  "moonfall_seraph": 24000
+ },
+ "fishValueMult": 0.7,
+ "tokenPrice": 100,
+ "cashoutRate": 70,
+ "maxSellPerFish": 480000
+}

@@ -1,7 +1,12 @@
 // Central tunable game constants
 const CONFIG = {
     // World
-    WATER_BOUNDARY_RATIO: 0.52,
+    // FIXED world-space shoreline — NEVER derived from viewport size.
+    // The old `cssW * RATIO` made the surf line move per client (16:9 vs
+    // 1:1 vs phone), so one peer's legal cast rendered as "fishing on
+    // the sand" on another peer. All water/land checks must agree.
+    WATER_BOUNDARY_X: 830,
+    WATER_BOUNDARY_RATIO: 0.52, // deprecated: kept for compat, not used
     SHORE_DRAG_FRICTION: 2.8,
     WATER_DRAG_FRICTION: 1.4,
     BEACH_TRIGGER_OFFSET: 30,
@@ -66,6 +71,7 @@ const CONFIG = {
     // costs roughly 1-3 average fish, even at the top end.
     AMMO_PRICES: {
         pistol:          Infinity,   // infinite ammo — never reload
+        popgun:        1,
         rusted_revolver: 1,
         flare_gun:       2,
         nailgun:         1,
@@ -101,6 +107,20 @@ const CONFIG = {
         coral_launcher:  22,
         frost_bow:       15,
         recurve:         12,
+        longshot:        2,
+        blunderbuss:     2,
+        harpoon_pistol:  8,
+        storm_cell:      2,
+        coral_repeater:  1,
+        magma_mortar:    18,
+        inkcaster:       4,
+        glacier_cannon:  28,
+        vampire_fang:    1,
+        thunder_maul:    3,
+        doom_horn:       6,
+        starfall_launcher: 32,
+        leviathan_caller: 30,
+        event_horizon:   45,
         magma_shotgun:   3,
         sonic_pistol:    4,
         foghorn:         6
@@ -109,6 +129,7 @@ const CONFIG = {
     // Magazine / reserve size per weapon
     MAX_AMMO: {
         pistol:          Infinity,
+        popgun:        400,
         rusted_revolver: 120,
         flare_gun:       40,
         nailgun:         220,
@@ -144,6 +165,20 @@ const CONFIG = {
         coral_launcher:  6,
         frost_bow:       18,
         recurve:         24,
+        longshot:        120,
+        blunderbuss:     40,
+        harpoon_pistol:  30,
+        storm_cell:      200,
+        coral_repeater:  300,
+        magma_mortar:    10,
+        inkcaster:       90,
+        glacier_cannon:  8,
+        vampire_fang:    260,
+        thunder_maul:    36,
+        doom_horn:       30,
+        starfall_launcher: 6,
+        leviathan_caller: 14,
+        event_horizon:   5,
         magma_shotgun:   24,
         sonic_pistol:    50,
         foghorn:         40
@@ -155,11 +190,11 @@ const CONFIG = {
     // 1.1.5 WORLD — day length, pier reach, ferry fees (island defs live
     // in js/world.js; fees duplicated here for shop-balance reference).
     WORLD15: {
-        DAY_LENGTH_SEC: 480,
+        DAY_LENGTH_SEC: 900,
         PIER_REACH: 680,       // px past the surf at the pier end (DEEP tier)
         SHORE_EDGE: 250,       // SHORE < +250px, SHALLOW < +650px, else DEEP
         SHALLOW_EDGE: 650,
-        FERRY_FEES: { isle_sun: 800, isle_mist: 2200, isle_abyss: 4500 },
+        FERRY_FEES: { isle_sun: 1500, isle_mist: 1500, isle_abyss: 1500 },
     },
 
     //  Rarity colors
@@ -220,6 +255,31 @@ const CONFIG = {
             score: 75,
             xp: 40,
         },
+
+        // Dune Beetle - armored charger (telegraphed horn dash)
+        DUNE_BEETLE: {
+            maxCount: 4,
+            spawnInterval: 75,
+            spawnChance: 0.35,
+            hp: 950,
+            damage: 42,
+            speed: 48,
+            chargeSpeed: 320,
+            score: 120,
+            xp: 70,
+        },
+
+        // Sand Urchin - stationary spiker (radial spine rings)
+        LAND_URCHIN: {
+            maxCount: 4,
+            spawnInterval: 90,
+            spawnChance: 0.3,
+            hp: 700,
+            damage: 26,
+            volleyCooldown: 3.2,
+            score: 100,
+            xp: 60,
+        },
     },
 
     // Achievement System
@@ -252,6 +312,24 @@ const CONFIG = {
         LEVEL_25: { id: 'level_25', name: 'Deep Diver', desc: 'Reach Level 25', reward: { coins: 10000, xp: 0 }, icon: 'fa-water' },
         LEVEL_50: { id: 'level_50', name: 'Abyssal Walker', desc: 'Reach Level 50', reward: { coins: 50000, xp: 0 }, icon: 'fa-anchor' },
         LEVEL_100: { id: 'level_100', name: 'God of the Sea', desc: 'Reach Level 100', reward: { coins: 250000, xp: 0 }, icon: 'fa-crown' },
+
+        // Tide-breaker achievements (bulk fishing + the whale)
+        CATCH_500: { id: 'catch_500', name: 'Seasoned Pro', desc: 'Catch 500 fish', reward: { coins: 15000, xp: 6000 }, icon: 'fa-fish-fins' },
+        CATCH_SHINY: { id: 'catch_shiny', name: 'Lucky Glint', desc: 'Catch a shiny fish', reward: { coins: 8000, xp: 3000 }, icon: 'fa-wand-magic-sparkles' },
+        WHALE_WATCHER: { id: 'whale_watcher', name: 'Whale Watcher', desc: 'Hook the Colossal Whale', reward: { coins: 30000, xp: 12000 }, icon: 'fa-fish' },
+
+        // Extermination achievements (bulk + per-species kill counts)
+        KILL_500: { id: 'kill_500', name: 'Exterminator', desc: 'Defeat 500 enemies', reward: { coins: 25000, xp: 10000 }, icon: 'fa-bug-slash' },
+        KILL_CRAB_25: { id: 'kill_crab_25', name: 'Crab Boil', desc: 'Defeat 25 beach crabs', reward: { coins: 4000, xp: 1500 }, icon: 'fa-shrimp' },
+        KILL_GULL_50: { id: 'kill_gull_50', name: 'Scarecrow', desc: 'Defeat 50 seagulls', reward: { coins: 6000, xp: 2500 }, icon: 'fa-crow' },
+        KILL_BEETLE_20: { id: 'kill_beetle_20', name: 'Bug Crusher', desc: 'Defeat 20 dune beetles', reward: { coins: 5000, xp: 2000 }, icon: 'fa-bug' },
+        KILL_10_BOSSES: { id: 'kill_10_bosses', name: 'Decaboss', desc: 'Defeat 10 bosses', reward: { coins: 100000, xp: 40000 }, icon: 'fa-skull' },
+
+        // Fortune achievements (coins, full hold, quests)
+        CASINO_HIGH_ROLLER: { id: 'casino_high_roller', name: 'High Roller', desc: 'Win 5000+ tokens in one bet', reward: { coins: 15000, xp: 5000 }, icon: 'fa-coins' },
+        TYCOON_100K: { id: 'tycoon_100k', name: 'Harbor Tycoon', desc: 'Hold 100,000 coins at once', reward: { coins: 20000, xp: 8000 }, icon: 'fa-sack-dollar' },
+        FULL_BUCKET: { id: 'full_bucket', name: 'Full Hold', desc: 'Fill your bucket to capacity', reward: { coins: 3000, xp: 1200 }, icon: 'fa-bucket' },
+        QUEST_5: { id: 'quest_5', name: "Marlin's Regular", desc: 'Complete 5 quests for Old Marlin', reward: { coins: 8000, xp: 4000 }, icon: 'fa-scroll' },
         
         // Collection achievements
         FISH_INDEX_25: { id: 'fish_index_25', name: 'Collector', desc: 'Discover 25 fish species', reward: { coins: 5000, xp: 1000 }, icon: 'fa-book' },

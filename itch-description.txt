@@ -1,111 +1,79 @@
 Copy everything below the line into your itch.io game page description.
 ----------------------------------------------------------------
 
-AQUATIC HAVOC — Deep Sea Hunter (v1.2.5)
+AQUATIC HAVOC — Deep Sea Hunter (v1.3.3)
 
 Cast your line into haunted waters, hook monsters, drag them ashore,
 and finish them with an arsenal of ridiculous guns. Then dive deeper:
 ancient bosses, a sealed void cave, a casino, wild isles, living
-weather — and 213 catchable fish.
+weather, bite-driving EVENTS — and 281 catchable fish.
 
 WHAT YOU DO
 - Stand near the water, hold SPACE to charge, release to cast.
 - When something bites, shoot it to drain stamina, manage line tension,
   drag it onto the sand and claim your loot.
-- Sell catches, buy guns, rods, armor and bait. Talk to OLD MARLIN (E)
+- Dash (Q) through danger with i-frames; buy and craft consumables
+  (Bandage, Adrenaline, Smoke Bomb — press F to use the equipped one).
+- Sell catches, buy guns, rods, armor and bait — or CRAFT event-tide
+  baits and armor from special fish + coins. Talk to OLD MARLIN (E)
   for fish-catching quests.
+- Check the 📡 FISH RADAR by your spawn umbrella: live bite odds per
+  species, best ferry trip, strict time/weather windows, active events.
 - Slay 20 seagulls and their mother, the STORMCALLER, will come for you.
-- Crack the NW-corner void portal: feed the runes fish (common, rare,
+- Crack the SW-corner void portal: feed the runes fish (common, rare,
   epic), descend into the Hollow Cave, and summon bosses at the ritual
   circle — including the nine-headed STORMLORD HYDRA.
 
 FEATURES
-- 213 catchable fish across 6 rarities + 4 summonable bosses + miniboss
-- 30+ guns with real rendered previews, rods, armor, craftable bait
-- Boss cinematics: 10-second camera intro, war-horn roar, war-drum theme
+- 281 catchable fish across 6 rarities + 4 summonable bosses + miniboss
+- 30+ guns with real rendered previews, rods, armor (buyable + craftable),
+  craftable event baits, consumable items with hotbar + dash cooldown
+- 7 rotating sky EVENTS (Typhoon, Monsoon, Fog Bank, Blood Moon, Dawn
+  Chorus, Sunspell, Abyssal Surge) drive bites; strict-schedule fish
+  exist ONLY in-window (e.g. 20:00–23:00 + rain) or never bite at all
+- Boss cinematics: swim-in arrival, war-horn roar, 3-2-1 countdown with
+  mutual freeze; bosses never flee your corpse (10 deaths and it leaves)
+- Square wild isles with exact collision, lagoon lakes, buoy borders,
+  one shared sea asset with the mainland, flat 1500c ferry fare
 - Deep Sea Casino (roulette, slots, fish betting, high-low)
-- Fish Index, 26 achievements, online P2P multiplayer (PeerJS, same version), full custom-skin support
+- Fish Index (auto-trimmed custom art), 26 achievements, online P2P
+  multiplayer (PeerJS, same version), full custom-skin support
   (export/import your skins as a zip, right from Settings)
-- File-first audio: drop in your own mp3/ogg/wav to replace any sound
+- Minecraft-style keybinds + sectioned Settings; file-first audio
 
 CONTROLS
-WASD move · SPACE cast / reel / pull bobber back · Mouse shoot ·
-1-4 weapons · R reload · E talk / shop / portal · J fish index ·
-Wheel zoom · ESC menu
+WASD move · Q dash (dodge) · SPACE cast / reel / pull bobber back ·
+Mouse shoot · 1-4 weapons · R reload · E talk / shop / portal ·
+F use equipped item · J fish index · Wheel/Z/X zoom · ESC menu ·
+Gamepad: stick move, RT shoot, A cast, B interact, R3 dash
 
 UPDATE LOG
-v1.2.5 (Oct 2026) — LATEST
+v1.3.3 (Oct 2026) — LATEST
+- Event-tide crafting inside Bait/Armor tabs (have/need rows) + 4 craft-only armors from special fish
+  + coins (locked fish never eaten); item hotbar now reads [F]
+- Press-E goes radar-style: circled E bubbles over shops/casino/ferries
+
+v1.3.2 (Oct 2026)
+- Event system: 7 sky events drive all island luck (rarity boosts gone)
+- Strict spawn windows (weight 0 outside); 30 new fish (281 total)
+- Radar v2: real island names, per-spot odds, schedules, event tags
+- All ferries one flat 1500c; no free Marlin-camp teleport from isles
+
+v1.3.1 (Oct 2026)
+- Isle-hopping luck loop; radar projects odds per island; dock respawn
+  without camp teleport
+
+v1.3.0 (Oct 2026)
+- Dash + i-frames; consumable items (Bandage/Adrenaline/Smoke) on [E→F];
+  fish radar board; Minecraft-style keybinds; sectioned Settings
+- Bosses hold your corpse; swim-in + 3-2-1 mutual-freeze intros
+- Ambient kills pay XP + carcass (boss bounties stay); HUD shop button
+  removed (walk to the shop); XP bar; compact mobile fight/quest HUD
+
+v1.2.5 (Oct 2026)
 - Pilot names: asked once, remembered, shown in lobby + name tags
 - Separate MP saves: personal slots 1-3, never touches single player
 - Shared sky (host clock/weather), one boss per room, cross-map culling;
   catches, casino, assets and Settings stay personal
-
-v1.2.4 (Oct 2026)
-- FIXED: invisible surf-line wall blocked dragged catches from beaching
-- Beached fish tire fast (stronger drag, eased tension on land)
-- Bobber flies toward the mouse on every map
-- One sea-cell detector drives spawns, bite waits and water tint
-
-v1.2.3 (Oct 2026)
-- FIXED: clients never entered the game on host start (dropped packets)
-- Island-dock respawn: dying on an isle keeps you there
-- Ritual summons stay mainland-only; bait-hooked bosses fight on isles
-- BOSS TIDE: Hydra + Crimson bite far rarer than other bosses
-
-v1.2.2 (Oct 2026)
-- Background run: the world keeps simulating while the tab is hidden,
-  no forced pause-to-menu in MP rooms, heartbeats stop ghost-drops,
-  stuck-input and audio guards on tab return
-
-v1.2.1 (Oct 2026)
-- Isle rework: open sea around every isle fishes like mainland water
-  (shore/shallow/deep from the sand edge) + per-isle lakes (lagoon,
-  river, twin ponds) + its own pier and dock
-- Ferry rides are real boat trips now, both ways
-- Pier/isle fishing fixed: decks and sand count as shore for beaching,
-  loot no longer sinks on piers or isles, knockbacks can't nudge you
-  off the deck
-- Zone orbs removed — water color shows the tiers (light → dark)
-
-v1.2.0 (Oct 2026)
-- Online P2P multiplayer (PeerJS): no localhost server, works on itch.io,
-  same version required; shared custom-art vision + mirrored announcements
-
-v1.1.5 (Oct 2026)
-- Map expansion: long pier reaches SHALLOW then DEEP water, sea tiers
-  by distance (Shore / Shallow / Deep)
-- Ferryman boat at the pier end: 3 detached wild isles (Sunspill 500c,
-  Mistfall 1500c, Abyssal Maw 3000c) with loading screens + sailing intros
-- Time + weather: day/night cycle, clear/clouds/rain/storm/fog — matching
-  fish get big spawn-rate boosts; clock chip in the HUD; Day/Night FX
-  toggle in Settings (time keeps running when OFF)
-- New-game drift intro: you wash ashore from a wreck before Chapter I
-- Menu safety: Slot 1 pre-selected, TOP button is Continue, New Game
-  sits below with a wipe confirm
-
-v1.1.0 (Oct 2026)
-- Update log added in the menu, with the current version up top
-- Teleport loading screen for cave descents and returns
-- Menu remake: hero header, PLAY/EXPLORE columns, live beach background
-  with real index fish swimming by
-- Full SFX assets (roar, skills, throw, splash, reload, boss roar/theme,
-  coin, hit, UI, portal) — mp3/ogg/wav drop-in support, custom files
-  are never overwritten
-- Volume mixer: Master / Music / SFX sliders in Settings
-- Skin-pack sharing: export all custom skins to a zip, import a zip
-- Shop gun cards show the real gun model
-- SPACE pulls the bobber back before a bite (keeps your bait)
-- Boss intros hold the camera on the boss for 10s, then crossfade
-  tide music into the boss theme; Stormcaller uses the boss roar
-
-v1.0.0 (Sep 2026) — RELEASE
-- Sealed cave rework: corner void portal, fog + lantern light,
-  fish-offering rune puzzle
-- Stormlord Hydra: 9 heads, sea-phase hunt, nine-head volley,
-  cinematic boss intros
-- Achievements repaired (unlock, counting, persistence) +
-  full-roster hook table (213 species)
-- Bait luck fixed: rod + bait luck feed rarity weights and shiny rolls
-- Boot + teleport loading screens, boss war-drum theme
 
 Made by LILCAT. Built with pure HTML, CSS and vanilla JavaScript.
