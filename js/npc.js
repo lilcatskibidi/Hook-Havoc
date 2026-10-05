@@ -127,12 +127,14 @@ const NPC = {
         };
     },
 
-    // How many of this species are sitting in the bucket right now
+    // How many of this species are sitting in the bucket right now.
+    // Locked keepers never count — a 🔒 means "never sold, never spent",
+    // and the quest turn-in IS spending (same rule as shop/craft/ritual).
     countInBucket(state, speciesId) {
         const bucket = state.player.bucket || [];
         let n = 0;
         for (const f of bucket) {
-            if (f && (f.id === speciesId || f.speciesId === speciesId)) n++;
+            if (f && !f.locked && (f.id === speciesId || f.speciesId === speciesId)) n++;
         }
         return n;
     },
@@ -208,17 +210,24 @@ const NPC = {
             // Fish were sold or never caught — no turn-in without the goods
             const missing = a ? (a.need - a.have) : 0;
             const sp = a ? this.species(a) : null;
+            let lockedN = 0;
+            try {
+                if (a) for (const f of (p.bucket || [])) {
+                    if (f && f.locked && (f.id === a.speciesId || f.speciesId === a.speciesId)) lockedN++;
+                }
+            } catch (e) {}
             Particles.showFloatingText(state,
-                a ? `NEED ${missing} MORE ${sp.name.toUpperCase()} IN BUCKET!` : 'NO ACTIVE QUEST',
+                a ? `NEED ${missing} MORE ${sp.name.toUpperCase()} IN BUCKET!${lockedN > 0 ? ` (🔒${lockedN} locked — unlock to spend)` : ''}` : 'NO ACTIVE QUEST',
                 p.x, p.y - 50, '#f87171');
             try { audio.playError(); } catch (e) {}
             this.showQuests();
             return;
         }
-        // Take the quest fish out of the bucket (hand them to Marlin)
+        // Take the quest fish out of the bucket (hand them to Marlin).
+        // Locked keepers are exempt — unlock them first.
         let toRemove = a.need;
         p.bucket = (p.bucket || []).filter(f => {
-            if (toRemove > 0 && f && (f.id === a.speciesId || f.speciesId === a.speciesId)) {
+            if (toRemove > 0 && f && !f.locked && (f.id === a.speciesId || f.speciesId === a.speciesId)) {
                 toRemove--;
                 return false;
             }
@@ -350,20 +359,20 @@ const NPC = {
             html += `<div class="text-xs text-slate-400 mb-2">No active job. Pick one below (one at a time):</div>`;
         }
         html += `<div class="text-[10px] font-black tracking-widest text-slate-500 mt-1 mb-1">AVAILABLE JOBS</div>`;
-        // RITE OF THE DEEP: Marlin himself calls the Leviathan Priest when
-        // handed 5 epic+ catches. Repeatable, spawns on the spot.
+        // HEART OF THE SEA: Marlin trades 10 blood-mutated epic+ catches
+        // for the Heart of the Sea (priest chain). Repeatable — each
+        // sacrifice burns one heart.
         try {
-            const riteHave = (typeof Ritual !== 'undefined' && Ritual.countTier)
-                ? Ritual.countTier(st, 'legendaryPlus') : 0;
-            const riteSlain = (st.player.slainBosses || []).includes('leviathan_priest');
-            const riteBusy = typeof Ritual !== 'undefined' && Ritual.bossAlive && Ritual.bossAlive(st);
-            html += `<div class="glass-panel p-2.5 rounded-xl mb-1.5 border ${riteSlain ? 'border-emerald-500/50' : 'border-fuchsia-500/40'}">
+            const heartHave = (typeof Ritual !== 'undefined' && Ritual.countMutation)
+                ? Ritual.countMutation(st, 'blood') : 0;
+            const heartBusy = typeof Ritual !== 'undefined' && Ritual.bossAlive && Ritual.bossAlive(st);
+            html += `<div class="glass-panel p-2.5 rounded-xl mb-1.5 border border-sky-500/40">
                 <div class="flex items-center justify-between gap-2">
                     <div class="min-w-0">
-                        <div class="font-bold text-white text-xs">🌊 RITE OF THE DEEP ${riteSlain ? '<span class="text-[9px] text-emerald-300 font-black">PRIEST SLAIN ✓</span>' : ''}</div>
-                        <div class="text-[10px] text-slate-400">Deliver 5 legendary+ catches — Marlin calls the <b>Leviathan Priest</b> himself. Offering in bucket: ${riteHave}/5.</div>
+                        <div class="font-bold text-white text-xs">💙 HEART OF THE SEA</div>
+                        <div class="text-[10px] text-slate-400">Deliver 10× 🩸 blood-mutated <b>epic+</b> catches — Marlin trades you the <b>Heart of the Sea</b>. Blood in bucket: ${heartHave}/10.</div>
                     </div>
-                    <button id="npc-rite" class="px-3 py-1.5 bg-fuchsia-500 hover:bg-fuchsia-400 text-slate-950 text-[11px] font-black rounded-lg shrink-0" ${(riteHave >= 5 && !riteBusy) ? '' : 'disabled style="opacity:.4"'}>PERFORM</button>
+                    <button id="npc-heart" class="px-3 py-1.5 bg-sky-500 hover:bg-sky-400 text-slate-950 text-[11px] font-black rounded-lg shrink-0" ${(heartHave >= 10 && !heartBusy) ? '' : 'disabled style="opacity:.4"'}>TRADE</button>
                 </div>
             </div>`;
         } catch (e) {}
@@ -389,36 +398,31 @@ const NPC = {
         scope.querySelectorAll('[data-accept]').forEach(b => {
             b.onclick = () => this.accept(st, b.dataset.accept);
         });
-        const rite = $('npc-rite');
-        if (rite) rite.onclick = () => this.performRite(st);
+        const rite = $('npc-heart');
+        if (rite) rite.onclick = () => this.tradeHeart(st);
     },
 
-    // RITE OF THE DEEP: 5 legendary+ catches for Marlin -> Priest spawns
-    // beside the player immediately. Host-only (shared world monster).
-    performRite(st) {
+    // HEART OF THE SEA: 10 blood-mutated epic+ catches for Marlin ->
+    // he trades the Heart of the Sea (priest sacrifice fuel). No spawn.
+    tradeHeart(st) {
         const p = st.player;
         if (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient()) {
-            Particles.showFloatingText(st, 'Only the host can call the rite.', p.x, p.y - 50, '#f87171');
+            Particles.showFloatingText(st, 'Only the host can trade.', p.x, p.y - 50, '#f87171');
             return;
         }
-        if (typeof Ritual === 'undefined' || !Ritual.countTier || !Ritual.spawnBoss) return;
+        if (typeof Ritual === 'undefined' || !Ritual.countMutation || !Ritual.consumeMutation) return;
         if (Ritual.bossAlive && Ritual.bossAlive(st)) {
             Particles.showFloatingText(st, 'A boss already walks!', p.x, p.y - 50, '#f87171');
             return;
         }
-        if (Ritual.countTier(st, 'legendaryPlus') < 5) {
+        if (Ritual.countMutation(st, 'blood') < 10) {
             try { audio.playError(); } catch (e) {}
             return;
         }
-        Ritual.consumeFish(st, 'legendaryPlus', 5);
-        try { audio.playRoar(); } catch (e) {}
-        Particles.showFloatingText(st, 'Marlin chants... THE DEEP ANSWERS!', p.x, p.y - 70, '#f0abfc');
-        // Rises from the deep at the arena, then the standard 3-2-1
-        // (after the 5s rise cinematic).
-        const riteBoss = Ritual.spawnBoss(st, 'leviathan_priest', 5, 'rise');
-        if (riteBoss) {
-            try { Ritual.fightCountdown(st, riteBoss, { delaySec: 5 }); } catch (e) {}
-        }
+        Ritual.consumeMutation(st, 'blood', 10);
+        Ritual.grantItem(st, 'heart_sea', "Marlin's trade");
+        try { audio.playLevelUp(); } catch (e) {}
+        Particles.showFloatingText(st, '💙 Marlin presses a beating heart into your hands...', p.x, p.y - 70, '#38bdf8');
         Player.refreshHUD(st);
         if (typeof SaveSystem !== 'undefined') SaveSystem.save(st);
         this.close();

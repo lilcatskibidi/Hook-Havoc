@@ -1,12 +1,12 @@
 Copy everything below the line into your itch.io game page description.
 ----------------------------------------------------------------
 
-AQUATIC HAVOC — Deep Sea Hunter (v1.3.3)
+AQUATIC HAVOC — Deep Sea Hunter (v1.4.0)
 
 Cast your line into haunted waters, hook monsters, drag them ashore,
 and finish them with an arsenal of ridiculous guns. Then dive deeper:
 ancient bosses, a sealed void cave, a casino, wild isles, living
-weather, bite-driving EVENTS — and 281 catchable fish.
+weather, bite-driving EVENTS — and 281 catchable fish with 32 mutations.
 
 WHAT YOU DO
 - Stand near the water, hold SPACE to charge, release to cast.
@@ -19,15 +19,19 @@ WHAT YOU DO
   for fish-catching quests.
 - Check the 📡 FISH RADAR by your spawn umbrella: live bite odds per
   species, best ferry trip, strict time/weather windows, active events.
-- Slay 20 seagulls and their mother, the STORMCALLER, will come for you.
+- Slay 20 seagulls and their mother, the STORMCALLER, arrives in a 3.5s
+  cutscene (storm warning, feather omen, dive landing, title card).
 - Crack the SW-corner void portal: feed the runes fish (common, rare,
-  epic), descend into the Hollow Cave, and summon bosses at the ritual
-  circle — including the nine-headed STORMLORD HYDRA.
+  epic), descend into the Hollow Cave, tear a 7-shard gate and feed the
+  quartz shrine void-touched fish per rarity — including the nine-headed
+  STORMLORD HYDRA and the LEVIATHAN PRIEST (blood-mutation heart chain).
 
 FEATURES
-- 281 catchable fish across 6 rarities + 4 summonable bosses + miniboss
+- 281 catchable fish across 6 rarities + 32 mutations + 4 summonable bosses + miniboss
 - 30+ guns with real rendered previews, rods, armor (buyable + craftable),
   craftable event baits, consumable items with hotbar + dash cooldown
+- CRAFT tab (bait/armor/rod/gun sub-tabs) with key-material recipes:
+  priest cores forge Heartlance, Choir Repeater, Tithe rods, Tidefather armor
 - 7 rotating sky EVENTS (Typhoon, Monsoon, Fog Bank, Blood Moon, Dawn
   Chorus, Sunspell, Abyssal Surge) drive bites; strict-schedule fish
   exist ONLY in-window (e.g. 20:00–23:00 + rain) or never bite at all
@@ -39,7 +43,8 @@ FEATURES
 - Fish Index (auto-trimmed custom art), 26 achievements, online P2P
   multiplayer (PeerJS, same version), full custom-skin support
   (export/import your skins as a zip, right from Settings)
-- Minecraft-style keybinds + sectioned Settings; file-first audio
+- Minecraft-style keybinds + sectioned Settings; every sound is a file
+  in assets/audio (swap any mp3/ogg/wav to reskin it)
 
 CONTROLS
 WASD move · Q dash (dodge) · SPACE cast / reel / pull bobber back ·
@@ -48,7 +53,18 @@ F use equipped item · J fish index · Wheel/Z/X zoom · ESC menu ·
 Gamepad: stick move, RT shoot, A cast, B interact, R3 dash
 
 UPDATE LOG
-v1.3.3 (Oct 2026) — LATEST
+v1.4.0 (Oct 2026) — LATEST
+- Stormcaller 3.5s intro cutscene + title card; kit grows to 8 skills
+  (feather barrage, feather recall, gull call)
+- Priest remake: 32 mutations → blood heart chain → sacrifice → 100%
+  Bloodheart Lure → bells + sky breach + tsunami; sea-to-shore hunt,
+  land kit, heart-rip finisher (crown + core loot)
+- Void remake: star-orb skill, 7-shard gate, quartz shrine, far portal,
+  black sea; hydra rework: breach arrival, storm sea, thunder orb
+- All 40 sounds externalized (assets/audio); art resolves by species id;
+  Craft tab with 4 sub-tabs; F9 admin console (mythics, coins, guns)
+
+v1.3.3 (Oct 2026)
 - Event-tide crafting inside Bait/Armor tabs (have/need rows) + 4 craft-only armors from special fish
   + coins (locked fish never eaten); item hotbar now reads [F]
 - Press-E goes radar-style: circled E bubbles over shops/casino/ferries

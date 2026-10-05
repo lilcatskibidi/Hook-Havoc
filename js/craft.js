@@ -1,10 +1,9 @@
 /* ====================================================================
- * Craft — fish + coins crafting for new baits and armors.
- * Recipes are EXPLICIT (fish A x N + fish B x M + coins), unlike the old
- * tier-based bait recipes: only unlocked (never 🔒 locked, never summon
- * keys) bucket fish count, oldest entries go first. The grind IS the
- * difficulty: event/weather-gated fish must actually be caught.
- *   recipe: { coins: n, fish: [{ id, n }] }
+ * Craft — fish + coins (+ summon-key material) crafting for baits,
+ * armors, rods and weapons.
+ * Recipes are EXPLICIT: { coins, fish: [{ id, n }], keys: [{ id, n }] }.
+ * Only unlocked (never 🔒 locked, never other summon keys) bucket fish
+ * count, oldest entries go first. The grind IS the difficulty.
  * ================================================================== */
 const Craft = {
     // Unlocked, spendable bucket fish of one species id.
@@ -30,7 +29,7 @@ const Craft = {
     },
 
     // Full requirement check with per-part have/need (for UI rows).
-    // recipe: { coins, fish:[{id,n}] }
+    // recipe: { coins, fish:[{id,n}], keys:[{id,n}] }
     check(state, recipe) {
         const parts = [];
         try {
@@ -46,6 +45,24 @@ const Craft = {
                 const h = this.fishCount(state, need.id);
                 parts.push({ kind: 'fish', id: need.id, label: meta.name, color: meta.color, have: h, need: n, ok: h >= n });
             }
+            // Summon-key material (priest cores, shards...): unlocked only.
+            const klist = (recipe && recipe.keys) || [];
+            for (const need of klist) {
+                if (!need || !need.id) continue;
+                const n = Math.max(1, Math.floor(Number(need.n) || 1));
+                let meta = { name: need.id, color: '#fbbf24', icon: '🔑' };
+                try {
+                    if (typeof Ritual !== 'undefined' && Ritual.itemDef) {
+                        const def = Ritual.itemDef(need.id);
+                        if (def) meta = { name: def.name || need.id, color: def.color || '#fbbf24', icon: def.icon || '🔑' };
+                    }
+                } catch (e) {}
+                let h = 0;
+                try {
+                    if (typeof Ritual !== 'undefined' && Ritual.countItem) h = Ritual.countItem(state, need.id);
+                } catch (e) {}
+                parts.push({ kind: 'key', id: need.id, label: `${meta.icon} ${meta.name}`, color: meta.color, have: h, need: n, ok: h >= n });
+            }
             const bad = parts.find(x => !x.ok);
             if (bad) {
                 const why = bad.kind === 'coins'
@@ -60,12 +77,35 @@ const Craft = {
     },
 
     // Spend a checked recipe (no re-check inside — call check() first).
+    // Still fails CLOSED on shortfall (returns false, touches nothing)
+    // instead of handing the product for partial payment.
     consume(state, recipe) {
         try {
             const p = state.player;
             const coins = Math.max(0, Math.floor(Number((recipe && recipe.coins) || 0)));
-            p.coins = Math.max(0, (p.coins || 0) - coins);
             const bucket = p.bucket || [];
+            // Pre-scan: every need must be fully payable or nothing moves.
+            for (const need of ((recipe && recipe.fish) || [])) {
+                if (!need || !need.id) continue;
+                const n = Math.max(1, Math.floor(Number(need.n) || 1));
+                let have = 0;
+                for (const f of bucket) {
+                    if (f && f.id === need.id && !f.locked && !f.keyItem && ++have >= n) break;
+                }
+                if (have < n) return false;
+            }
+            for (const need of ((recipe && recipe.keys) || [])) {
+                if (!need || !need.id) continue;
+                const n = Math.max(1, Math.floor(Number(need.n) || 1));
+                let have = 0;
+                try {
+                    if (typeof Ritual !== 'undefined' && Ritual.countItem) have = Ritual.countItem(state, need.id) || 0;
+                } catch (e) {}
+                if (have < n) return false;
+            }
+            if ((p.coins || 0) < coins) return false;
+            // All payable — now deduct for real.
+            p.coins = Math.max(0, (p.coins || 0) - coins);
             for (const need of ((recipe && recipe.fish) || [])) {
                 if (!need || !need.id) continue;
                 let left = Math.max(1, Math.floor(Number(need.n) || 1));
@@ -76,6 +116,13 @@ const Craft = {
                         left--;
                     }
                 }
+            }
+            for (const need of ((recipe && recipe.keys) || [])) {
+                if (!need || !need.id) continue;
+                const n = Math.max(1, Math.floor(Number(need.n) || 1));
+                try {
+                    if (typeof Ritual !== 'undefined' && Ritual.consumeItems) Ritual.consumeItems(state, need.id, n);
+                } catch (e) {}
             }
             return true;
         } catch (e) { return false; }
@@ -108,8 +155,7 @@ const Craft = {
         } catch (e) { return false; }
     },
 
-    craftArmor(state, armorId) {
-        try {
+    craftArmor(state, armorId) {        try {
             const item = (typeof ARMOR !== 'undefined' ? ARMOR.find(a => a.id === armorId) : null);
             if (!item || !item.recipe) return false;
             const p = state.player;
@@ -143,44 +189,150 @@ const Craft = {
         } catch (e) { return false; }
     },
 
-    // ---- shop Craft tab ----
-    renderTab(state, content) {
+    craftRod(state, rodId) {
         try {
+            const rod = (typeof RODS !== 'undefined' ? RODS.find(r => r.id === rodId) : null);
+            if (!rod || !rod.recipe) return false;
+            const p = state.player;
+            if (!p.unlockedRods) p.unlockedRods = ['rod_starter'];
+            if (p.unlockedRods.includes(rodId)) return false;
+            const chk = this.check(state, rod.recipe);
+            if (!chk.ok) {
+                try {
+                    Particles.showFloatingText(state, chk.why, p.x, p.y - 50, '#f87171');
+                    audio.playError();
+                } catch (e) {}
+                return false;
+            }
+            if (!this.consume(state, rod.recipe)) return false;
+            p.unlockedRods.push(rodId);
+            p.equippedRod = rod;
+            try { audio.playCoin(); } catch (e) {}
+            try {
+                Particles.showFloatingText(state, `🎣 ${rod.name} crafted + equipped!`, p.x, p.y - 50, rod.color || '#38bdf8');
+            } catch (e) {}
+            if (typeof Player !== 'undefined') {
+                try { Player.refreshHUD(state); } catch (e) {}
+            }
+            if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+            return true;
+        } catch (e) { return false; }
+    },
+
+    craftWeapon(state, weaponId) {
+        try {
+            const w = (typeof WEAPONS !== 'undefined' ? WEAPONS.find(x => x.id === weaponId) : null);
+            if (!w || !w.recipe) return false;
+            const p = state.player;
+            if (!p.ownedWeapons) p.ownedWeapons = ['pistol'];
+            if (p.ownedWeapons.includes(weaponId)) return false;
+            const chk = this.check(state, w.recipe);
+            if (!chk.ok) {
+                try {
+                    Particles.showFloatingText(state, chk.why, p.x, p.y - 50, '#f87171');
+                    audio.playError();
+                } catch (e) {}
+                return false;
+            }
+            if (!this.consume(state, w.recipe)) return false;
+            p.ownedWeapons.push(weaponId);
+            if (w.id !== 'pistol' && p.weaponAmmo && p.weaponAmmo[w.id] === undefined) {
+                p.weaponAmmo[w.id] = (typeof CONFIG !== 'undefined' && CONFIG.MAX_AMMO && CONFIG.MAX_AMMO[w.id]) || 0;
+            }
+            try { audio.playCoin(); } catch (e) {}
+            try {
+                Particles.showFloatingText(state, `🔫 ${w.name} forged! Equip it in Guns.`, p.x, p.y - 50, '#fbbf24');
+            } catch (e) {}
+            if (typeof Player !== 'undefined') {
+                try { Player.refreshHUD(state); } catch (e) {}
+                try { Player.refreshWeaponHUD(state); } catch (e) {}
+            }
+            if (typeof UI !== 'undefined' && UI.renderWeaponToolbar) {
+                try { UI.renderWeaponToolbar(state); } catch (e) {}
+            }
+            if (typeof AntiCheat !== 'undefined') AntiCheat.markLegit();
+            if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+            return true;
+        } catch (e) { return false; }
+    },
+
+    // ---- shop Craft tab (sub-tabs: bait / armor / rods / weapons) ----
+    _sub: 'bait',
+
+    renderTab(state, content, sub) {
+        try {
+            if (sub) this._sub = sub;
             const head = document.createElement('div');
             head.className = 'text-[10px] font-black tracking-widest text-slate-500 mt-1 mb-1 px-1';
-            head.innerText = 'CRAFT — SPECIAL FISH + COINS. LOCKED FISH ARE NEVER EATEN.';
+            head.innerText = 'CRAFT — SPECIAL FISH + COINS + CORES. LOCKED FISH ARE NEVER EATEN.';
             content.appendChild(head);
-            const sections = [
-                { title: '🪱 CRAFT BAITS', list: this._baitRecipes(), kind: 'bait' },
-                { title: '🛡 CRAFT ARMOR', list: this._armorRecipes(), kind: 'armor' },
+            // Sub-tab row.
+            const row = document.createElement('div');
+            row.className = 'flex gap-1 mb-2 flex-wrap px-1';
+            const subs = [
+                ['bait', '🪱 Baits'], ['armor', '🛡 Armor'],
+                ['rods', '🎣 Rods'], ['weapons', '🔫 Guns'],
             ];
-            for (const sec of sections) {
-                if (!sec.list.length) continue;
-                const box = document.createElement('div');
-                box.className = 'glass-panel-light p-3 rounded-xl mb-2';
-                box.innerHTML = `<h4 class="font-bold text-amber-300 mb-2">${sec.title}</h4>`;
-                const grid = document.createElement('div');
-                grid.className = 'grid grid-cols-1 lg:grid-cols-2 gap-2';
-                box.appendChild(grid);
-                content.appendChild(box);
-                for (const r of sec.list) grid.appendChild(this._card(state, r));
+            for (const [id, label] of subs) {
+                const b = document.createElement('button');
+                const on = this._sub === id;
+                b.className = 'px-3 py-1.5 rounded-lg text-xs font-black ' + (on
+                    ? 'text-slate-950 bg-amber-400'
+                    : 'text-slate-300 bg-slate-800/60 border border-slate-700 hover:bg-slate-700');
+                b.innerText = label;
+                b.onclick = () => {
+                    try {
+                        if (typeof Shop !== 'undefined' && Shop.renderTab) Shop.renderTab(state, 'craft', id);
+                        else this.renderTab(state, content, id);
+                    } catch (e) {}
+                };
+                row.appendChild(b);
             }
+            content.appendChild(row);
+            const conf = {
+                bait: { title: '🪱 CRAFT BAITS', list: this._baitRecipes() },
+                armor: { title: '🛡 CRAFT ARMOR', list: this._armorRecipes() },
+                rods: { title: '🎣 CRAFT RODS', list: this._rodRecipes() },
+                weapons: { title: '🔫 CRAFT GUNS', list: this._weaponRecipes() },
+            }[this._sub] || { title: '', list: [] };
+            if (!conf.list.length) {
+                const empty = document.createElement('div');
+                empty.className = 'text-xs text-slate-500 px-1 py-2';
+                empty.innerText = 'Nothing craftable here yet.';
+                content.appendChild(empty);
+                return;
+            }
+            const box = document.createElement('div');
+            box.className = 'glass-panel-light p-3 rounded-xl mb-2';
+            box.innerHTML = `<h4 class="font-bold text-amber-300 mb-2">${conf.title}</h4>`;
+            const grid = document.createElement('div');
+            grid.className = 'grid grid-cols-1 lg:grid-cols-2 gap-2';
+            box.appendChild(grid);
+            content.appendChild(box);
+            for (const r of conf.list) grid.appendChild(this._card(state, r));
+            const rerender = () => {
+                try {
+                    if (typeof Shop !== 'undefined' && Shop.renderTab) Shop.renderTab(state, 'craft', this._sub);
+                } catch (e) {}
+            };
             content.querySelectorAll('[data-craft-bait]').forEach(btn => {
                 btn.onclick = () => {
-                    try {
-                        if (this.craftBait(state, btn.dataset.craftBait) && typeof Shop !== 'undefined' && Shop.renderTab) {
-                            Shop.renderTab(state, 'craft');
-                        }
-                    } catch (e) {}
+                    try { if (this.craftBait(state, btn.dataset.craftBait)) rerender(); } catch (e) {}
                 };
             });
             content.querySelectorAll('[data-craft-armor]').forEach(btn => {
                 btn.onclick = () => {
-                    try {
-                        if (this.craftArmor(state, btn.dataset.craftArmor) && typeof Shop !== 'undefined' && Shop.renderTab) {
-                            Shop.renderTab(state, 'craft');
-                        }
-                    } catch (e) {}
+                    try { if (this.craftArmor(state, btn.dataset.craftArmor)) rerender(); } catch (e) {}
+                };
+            });
+            content.querySelectorAll('[data-craft-rod]').forEach(btn => {
+                btn.onclick = () => {
+                    try { if (this.craftRod(state, btn.dataset.craftRod)) rerender(); } catch (e) {}
+                };
+            });
+            content.querySelectorAll('[data-craft-weapon]').forEach(btn => {
+                btn.onclick = () => {
+                    try { if (this.craftWeapon(state, btn.dataset.craftWeapon)) rerender(); } catch (e) {}
                 };
             });
         } catch (e) {}
@@ -202,6 +354,22 @@ const Craft = {
         } catch (e) { return []; }
     },
 
+    _rodRecipes() {
+        try {
+            if (typeof RODS === 'undefined') return [];
+            return RODS.filter(r => r && r.recipe)
+                .map(r => ({ kind: 'rod', id: r.id, name: r.name, icon: 'fa-fishing-rod', color: r.color || '#38bdf8', desc: r.desc || '', recipe: r.recipe, rod: r }));
+        } catch (e) { return []; }
+    },
+
+    _weaponRecipes() {
+        try {
+            if (typeof WEAPONS === 'undefined') return [];
+            return WEAPONS.filter(w => w && w.recipe)
+                .map(w => ({ kind: 'weapon', id: w.id, name: w.name, icon: w.icon || 'fa-gun', color: '#fbbf24', desc: w.desc || '', recipe: w.recipe, weapon: w }));
+        } catch (e) { return []; }
+    },
+
     _reqRows(state, recipe) {
         try {
             const chk = this.check(state, recipe);
@@ -220,15 +388,23 @@ const Craft = {
         const div = document.createElement('div');
         div.className = 'shop-item glass-panel p-3 rounded-xl';
         const { rows, ok } = this._reqRows(state, r.recipe);
-        const art = r.kind === 'armor' && r.armor
-            ? `<i class="fa-solid fa-shield-halved text-lg" style="color:${r.color}"></i>`
-            : `<i class="fa-solid ${r.icon} text-lg" style="color:${r.color}"></i>`;
-        const sub = r.kind === 'armor' && r.armor
-            ? `DEF +${r.armor.defense || 0}${r.armor.hpBonus ? ` · HP +${r.armor.hpBonus}` : ''}${r.armor.luckBonus ? ` · Luck +${Math.round(r.armor.luckBonus * 100)}%` : ''}${r.armor.speedBonus ? ` · SPD +${r.armor.speedBonus}%` : ''}${r.armor.reelPowerBonus ? ` · Reel +${r.armor.reelPowerBonus}` : ''}`
-            : (r.kind === 'bait' && typeof Ritual !== 'undefined' && Ritual.baitDef && Ritual.baitDef(r.id)
-                ? `Luck +${Math.round((Ritual.baitDef(r.id).luckBonus || 0) * 100)}% · yield ${Ritual.baitDef(r.id).yield || 10}`
-                : '');
-        const owned = r.kind === 'armor' && ((state.player.ownedArmor || []).includes(r.id));
+        let art = `<i class="fa-solid ${r.icon} text-lg" style="color:${r.color}"></i>`;
+        let sub = '';
+        let owned = false;
+        if (r.kind === 'armor' && r.armor) {
+            art = `<i class="fa-solid fa-shield-halved text-lg" style="color:${r.color}"></i>`;
+            sub = `DEF +${r.armor.defense || 0}${r.armor.hpBonus ? ` · HP +${r.armor.hpBonus}` : ''}${r.armor.luckBonus ? ` · Luck +${Math.round(r.armor.luckBonus * 100)}%` : ''}${r.armor.speedBonus ? ` · SPD +${r.armor.speedBonus}%` : ''}${r.armor.reelPowerBonus ? ` · Reel +${r.armor.reelPowerBonus}` : ''}`;
+            owned = ((state.player.ownedArmor || []).includes(r.id));
+        } else if (r.kind === 'rod' && r.rod) {
+            art = `<i class="fa-solid fa-fishing-rod text-lg" style="color:${r.color}"></i>`;
+            sub = `TEN ${r.rod.tensionMax} · REEL ${r.rod.reelPower} · LUCK +${Math.round((r.rod.luck || 0) * 100)}%`;
+            owned = ((state.player.unlockedRods || []).includes(r.id));
+        } else if (r.kind === 'weapon' && r.weapon) {
+            sub = `DMG ${r.weapon.damage} · ${r.weapon.pellets || ''} · RNG ${r.weapon.range}`;
+            owned = ((state.player.ownedWeapons || []).includes(r.id));
+        } else if (r.kind === 'bait' && typeof Ritual !== 'undefined' && Ritual.baitDef && Ritual.baitDef(r.id)) {
+            sub = `Luck +${Math.round((Ritual.baitDef(r.id).luckBonus || 0) * 100)}% · yield ${Ritual.baitDef(r.id).yield || 10}`;
+        }
         div.innerHTML =
             `<div class="flex items-center gap-3 mb-1.5">` +
                 `<div class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0" style="background:${r.color}20;border:1px solid ${r.color}60">${art}</div>` +

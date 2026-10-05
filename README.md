@@ -1,12 +1,19 @@
-# Aquatic Havoc — Deep Sea Hunter (v1.3.3, with Online P2P Multiplayer)
+# Aquatic Havoc — Deep Sea Hunter (v1.4.0, with Online P2P Multiplayer)
 
 A hybrid fishing/action game with **online peer-to-peer multiplayer** (PeerJS, no server to run).
 Cast, hook monsters, drag them ashore, finish them with guns. Bosses, a sealed void cave,
-a casino, wild isles, living weather, bite-driving events — and **281 catchable fish**.
+a casino, wild isles, living weather, bite-driving events — and **281 catchable fish** with **32 mutations**.
 
-## Features (v1.3.3)
+## Features (v1.4.0)
 - Fishing + gun combat, dash with i-frames (Q), consumable items (Bandage / Adrenaline / Smoke on F)
-- Event-tide **crafting**: special fish + coins forge event baits and armor (Bait/Armor tabs show have/need rows)
+- **Craft tab** (bait/armor/rod/gun sub-tabs) with key-material recipes: priest cores forge Heartlance,
+  Choir Repeater, Tithe rods, Tidefather armor; crowns cover emperor trophy gaps
+- **Boss remakes**: Void (star-orb, 7-shard gate, quartz shrine, black sea), Hydra (breach arrival,
+  storm sea, thunder orb, tiered calls), Priest (blood-mutation heart chain, sacrifice, tsunami
+  arrival, shore hunt, heart-rip finisher), Stormcaller (3.5s intro cutscene, 8-skill kit)
+- 32 catchable **mutations** (blood/toxic/diamond/…); fish art resolves by species id
+- Every sound is a file in `assets/audio/` (`npm run gen-audio` fills gaps) — swap any file to reskin
+- Local-only **admin console** (F9): mythical fish, coins, all guns, storm intro, test kits
 - 7 rotating sky **events** (Typhoon, Monsoon, Fog Bank, Blood Moon, …); strict-schedule fish bite only in-window
 - 📡 **Fish radar** at spawn: live per-species odds, best ferry trip, schedules, active events
 - Minecraft-style **keybinds** + sectioned Settings (Audio / Graphics / Controls / Game)
@@ -41,8 +48,9 @@ No server needed for anything, including multiplayer.
 
 ## Multiplayer Setup (Online P2P)
 
-Everyone must run the **same game version** (room ids embed the version —
-different versions can't even see each other's rooms).
+Everyone must run the **same snapshot build** (menu shows `v1.4.0 · #0001` —
+same version is NOT enough: `1.4.0.0001` and `1.4.0.0002` can't see or join
+each other's rooms, so a stale tab never desyncs a fresh one).
 
 ### Host (Player 1)
 1. Click **"Multiplayer"** in the main menu

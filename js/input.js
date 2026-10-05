@@ -45,6 +45,10 @@ const Input = {
     },
 
     init(state, canvas) {
+        // Bulletproof: booting twice (hot-reload, re-init) must not stack
+        // duplicate key handlers that double-fire every action.
+        if (this._bound) return;
+        this._bound = true;
         window.addEventListener('keydown', (e) => {
     state.keys[e.key.toLowerCase()] = true;
     // Corpses don't act — respawn first (death menu has the buttons)
@@ -71,7 +75,7 @@ const Input = {
         try { state.keys[' '] = true; } catch (err) {}
         if (this.match(e, 'cast') && !e.repeat) Fishing.onSpaceDown(state);
     }
-    if (this.match(e, 'interact')) {
+    if (this.match(e, 'interact') && !e.repeat) {
         Input.interact(state);
     }
     // Use the equipped consumable (see Items tab in the shop).
@@ -185,6 +189,26 @@ const Input = {
         // Cave door first: exit marker (inside) / hole (beach)
         if (typeof Ritual !== 'undefined') {
             try {
+                // Void shrine first (own map inside the cave flag).
+                if (!state.paused && state.player.inVoidTemple && Ritual.nearTempleExit(state) < 110) {
+                    Ritual.exitVoidTemple(state);
+                    return true;
+                }
+                if (!state.paused && state.player.inVoidTemple) {
+                    if (Ritual.nearVoidBook && Ritual.nearVoidBook(state) < 110) {
+                        Ritual.readVoidBook(state);
+                        return true;
+                    }
+                    const hit = Ritual.nearTemplePillar(state);
+                    if (hit && hit.i >= 0 && hit.d < (hit.pillar.r + 70)) {
+                        Ritual.offerAtPillar(state);
+                        return true;
+                    }
+                }
+                if (!state.paused && Ritual.nearVoidGate && Ritual.nearVoidGate(state) < 150) {
+                    Ritual.enterVoidTemple(state);
+                    return true;
+                }
                 if (!state.paused && state.player.inCave && Ritual.nearExit(state) < 110) {
                     Ritual.exit(state);
                     return true;
@@ -195,6 +219,15 @@ const Input = {
                 }
             } catch (err) {}
         }
+        // Kneeling priest finisher FIRST — rip the heart before shopping.
+        try {
+            if (!state.paused && typeof Ritual !== 'undefined' && Ritual.nearKneelingPriest) {
+                if (Ritual.nearKneelingPriest(state)) {
+                    Ritual.startHeartRip(state);
+                    return true;
+                }
+            }
+        } catch (err) {}
         // Old Marlin first — quests beat shopping
         if (typeof NPC !== 'undefined' && NPC.near) {
             try {

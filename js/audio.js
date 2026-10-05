@@ -115,14 +115,45 @@ class SoundEngine {
             throw: 'assets/audio/throw',
             water_touch: 'assets/audio/water_touch',
             reload: 'assets/audio/reload',
-            thunder: 'assets/audio/skill_blast',
-            explosion: 'assets/audio/skill_blast',
-            splash: 'assets/audio/water_touch',
-            cast: 'assets/audio/throw',
             coin: 'assets/audio/coin',
             hit: 'assets/audio/hit',
             ui: 'assets/audio/ui_click',
             portal: 'assets/audio/portal',
+            bell: 'assets/audio/bell',
+            sacrifice: 'assets/audio/sacrifice',
+            thunder: 'assets/audio/thunder',
+            dash: 'assets/audio/dash',
+            explosion: 'assets/audio/explosion',
+            splash: 'assets/audio/splash',
+            cast: 'assets/audio/cast',
+            snap: 'assets/audio/snap',
+            beach: 'assets/audio/beach',
+            levelup: 'assets/audio/levelup',
+            reeltick: 'assets/audio/reeltick',
+            tensionstress: 'assets/audio/tensionstress',
+            fishscreech: 'assets/audio/fishscreech',
+            whoosh: 'assets/audio/whoosh',
+            bubble: 'assets/audio/bubble',
+            icecrack: 'assets/audio/icecrack',
+            hurt: 'assets/audio/hurt',
+            fishdeath: 'assets/audio/fishdeath',
+            bosskilled: 'assets/audio/bosskilled',
+            victory: 'assets/audio/victory',
+            uihover: 'assets/audio/uihover',
+            savesuccess: 'assets/audio/savesuccess',
+            error: 'assets/audio/error',
+            gun_pistol: 'assets/audio/gun_pistol',
+            gun_shotgun: 'assets/audio/gun_shotgun',
+            gun_rifle: 'assets/audio/gun_rifle',
+            gun_harpoon: 'assets/audio/gun_harpoon',
+            gun_smg: 'assets/audio/gun_smg',
+            gun_rail: 'assets/audio/gun_rail',
+            gun_plasma: 'assets/audio/gun_plasma',
+            gun_flame: 'assets/audio/gun_flame',
+            gun_launcher: 'assets/audio/gun_launcher',
+            theme_cave: 'assets/audio/theme_cave',
+            theme_temple: 'assets/audio/theme_temple',
+            theme_isle: 'assets/audio/theme_isle',
             music: 'assets/audio/music_loop',
             boss_theme: 'assets/audio/boss_theme',
         };
@@ -205,6 +236,8 @@ class SoundEngine {
         // Manifest hit: only fetch formats that exist (no 404 probes).
         // Otherwise: legacy mp3 -> ogg -> wav probing.
         let exts = SoundEngine.ASSET_EXTS.slice();
+        let triedFallback = false;
+        const seenExts = new Set();
         try {
             if (this._manifest && Array.isArray(this._manifest[name]) && this._manifest[name].length) {
                 exts = this._manifest[name].filter(e => SoundEngine.ASSET_EXTS.includes(e));
@@ -213,20 +246,34 @@ class SoundEngine {
         } catch (e) {}
         const tryNext = () => {
             if (!exts.length) {
+                // Manifest formats all failed (stale manifest after the
+                // player swapped files?): fall back to the remaining
+                // extensions once before giving up — customs always win.
+                if (!triedFallback) {
+                    triedFallback = true;
+                    exts = SoundEngine.ASSET_EXTS.filter(e => !seenExts.has(e));
+                    if (exts.length) { tryNext(); return; }
+                }
                 // Every format failed: synth takes over, never retry.
                 this._missing[name] = true;
                 delete this._inflight[name];
                 return;
             }
-            const url = base + '.' + exts.shift();
+            const ext = exts.shift();
+            seenExts.add(ext);
+            const url = base + '.' + ext;
             this._fetchUrl(url).then(ab => this._decode(ab)).then(decoded => {
                 if (decoded) {
                     this._buf[name] = decoded;
                     delete this._inflight[name];
-                    // Music files landing late still start their loops.
-                    if ((name === 'music' || name === 'boss_theme')) {
+                    // Music files landing late start their loop ONLY if the
+                    // tide is actually wanted — never over a zone theme or
+                    // a boss theme (that layering was the "sea music in the
+                    // cave" bug). Zones claim the air via syncZoneMusic.
+                    if (name === 'music') {
                         try {
-                            if (name === 'music') this.startMusic();
+                            if (!this._zone && !this._bossTheme &&
+                                (!this._wantZone || this._wantZone === 'tide')) this.startMusic();
                         } catch (e) {}
                     }
                 } else {
@@ -359,6 +406,9 @@ class SoundEngine {
     // ------------------------------------------------------------
     playGunshot(type) {
         if (this._gate()) return;
+        // Per-family file first (assets/audio/gun_<type>.wav) — replace
+        // any file to reskin that gun family. Falls back to synth below.
+        try { if (type && this._playFile('gun_' + type, { gain: 0.9 })) return; } catch (e) {}
         const now = this.ctx.currentTime;
 
         if (type === 'pistol') {
@@ -397,6 +447,7 @@ class SoundEngine {
     }
 
     playSnap() {
+        if (this._playFile('snap', { gain: 0.9 })) return;
         this._tone({ type: 'sawtooth', freq: 900, endFreq: 100, gain: 0.5, duration: 0.1 });
     }
 
@@ -413,11 +464,13 @@ class SoundEngine {
     }
 
     playBeach() {
+        if (this._playFile('beach', { gain: 0.9 })) return;
         this._tone({ type: 'sine', freq: 120, endFreq: 40, gain: 0.5, duration: 0.3 });
         this.playSplash();
     }
 
     playLevelUp() {
+        if (this._playFile('levelup', { gain: 0.9 })) return;
         [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
             this._tone({ type: 'sine', freq, gain: 0.25, duration: 0.28, delay: i * 0.1 });
         });
@@ -428,6 +481,7 @@ class SoundEngine {
     // ------------------------------------------------------------
     // Short tick each time the reel clicks (call on a timer while reeling)
     playReelTick() {
+        if (this._playFile('reeltick', { gain: 0.9 })) return;
         this._tone({ type: 'square', freq: 1100, endFreq: 900, gain: 0.08, duration: 0.03 });
         this._noiseBurst({ duration: 0.03, startFreq: 3000, endFreq: 1500, gain: 0.05, filterType: 'highpass' });
     }
@@ -457,6 +511,7 @@ class SoundEngine {
 
     stopReelLoop() {
         if (!this._reelLoop) return;
+        if (!this.ctx) { this._reelLoop = null; return; }
         const { src, gain } = this._reelLoop;
         const now = this.ctx.currentTime;
         try {
@@ -470,6 +525,7 @@ class SoundEngine {
 
     // Line tension stress — high pitched whine when tension is critical
     playTensionStress() {
+        if (this._playFile('tensionstress', { gain: 0.9 })) return;
         this._tone({ type: 'sawtooth', freq: 1800, endFreq: 2200, gain: 0.12, duration: 0.15 });
     }
 
@@ -510,17 +566,22 @@ class SoundEngine {
 
     // Smaller aggressive screech for common/rare fish
     playFishScreech() {
+        if (this._playFile('fishscreech', { gain: 0.9 })) return;
         this._tone({ type: 'sawtooth', freq: 800, endFreq: 300, gain: 0.2, duration: 0.25 });
         this._tone({ type: 'triangle', freq: 1200, endFreq: 500, gain: 0.15, duration: 0.2, delay: 0.05 });
     }
 
-    // Fish bolting / darting away
+    // Fish bolting / darting away — also the dash (Q) sound.
+    // Tries dash.* first (intuitive name), then whoosh.*.
     playWhoosh() {
+        if (this._playFile('dash', { gain: 0.9 })) return;
+        if (this._playFile('whoosh', { gain: 0.9 })) return;
         this._noiseBurst({ duration: 0.35, startFreq: 200, endFreq: 1800, gain: 0.3, filterType: 'bandpass' });
     }
 
     // Bubbling underwater sound
     playBubble() {
+        if (this._playFile('bubble', { gain: 0.9 })) return;
         const now = this.ctx ? this.ctx.currentTime : 0;
         for (let i = 0; i < 5; i++) {
             const delay = i * 0.08 + Math.random() * 0.04;
@@ -550,7 +611,24 @@ class SoundEngine {
         this._tone({ type: 'sawtooth', freq: 70, endFreq: 25, gain: 0.35, duration: 0.9 });
     }
 
+    // Deep abyssal bell: low fundamental + harmonics, long decay.
+    playBell() {
+        if (this._playFile('bell', { gain: 1 })) return;
+        this._tone({ type: 'sine', freq: 98, gain: 0.5, duration: 2.2 });
+        this._tone({ type: 'sine', freq: 147, gain: 0.3, duration: 1.8, delay: 0.02 });
+        this._tone({ type: 'sine', freq: 196, gain: 0.25, duration: 1.5, delay: 0.04 });
+        this._tone({ type: 'sine', freq: 294, gain: 0.12, duration: 1.0, delay: 0.06 });
+    }
+
+    // Blood sacrifice merge: dark choir + heartbeats, file-first.
+    playSacrifice() {
+        if (this._playFile('sacrifice', { gain: 1 })) return;
+        this._tone({ type: 'sawtooth', freq: 80, endFreq: 40, gain: 0.4, duration: 1.5 });
+        this._tone({ type: 'sine', freq: 98, gain: 0.4, duration: 2.0, delay: 0.1 });
+    }
+
     playIceCrack() {
+        if (this._playFile('icecrack', { gain: 0.9 })) return;
         for (let i = 0; i < 6; i++) {
             this._tone({ type: 'square', freq: 1400 + Math.random() * 800, endFreq: 600, gain: 0.08, duration: 0.04, delay: i * 0.03 });
         }
@@ -561,17 +639,20 @@ class SoundEngine {
     //  NEW — STATUS / DEATH / MISC
     // ------------------------------------------------------------
     playHurt() {
+        if (this._playFile('hurt', { gain: 0.9 })) return;
         this._tone({ type: 'sawtooth', freq: 180, endFreq: 60, gain: 0.35, duration: 0.15 });
         this._noiseBurst({ duration: 0.15, startFreq: 400, endFreq: 80, gain: 0.2 });
     }
 
     playFishDeath() {
+        if (this._playFile('fishdeath', { gain: 0.9 })) return;
         // Descending wail
         this._tone({ type: 'sawtooth', freq: 500, endFreq: 80, gain: 0.3, duration: 0.6 });
         this._noiseBurst({ duration: 0.4, startFreq: 600, endFreq: 100, gain: 0.25 });
     }
 
     playBossKilled() {
+        if (this._playFile('bosskilled', { gain: 0.9 })) return;
         // Bigger, deeper death jingle for legendary/mythic
         this._tone({ type: 'sawtooth', freq: 200, endFreq: 40, gain: 0.45, duration: 1.2 });
         this._noiseBurst({ duration: 1.0, startFreq: 1200, endFreq: 60, gain: 0.4 });
@@ -582,6 +663,7 @@ class SoundEngine {
     }
 
     playVictory() {
+        if (this._playFile('victory', { gain: 0.9 })) return;
         // Ascending arpeggio — used after beachFish succeeds
         [392.0, 523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
             this._tone({ type: 'triangle', freq, gain: 0.22, duration: 0.35, delay: i * 0.09 });
@@ -626,6 +708,7 @@ class SoundEngine {
 
     stopAmbient() {
         if (!this._ambient) return;
+        if (!this.ctx) { this._ambient = null; return; }
         const { surf, surfGain, hum, humGain } = this._ambient;
         const now = this.ctx.currentTime;
         try {
@@ -689,6 +772,10 @@ class SoundEngine {
     // ------------------------------------------------------------
     startMusic() {
         if (this._gate() || this._music) return;
+        // Zone owns the air: a late tide call (init race, boss resume,
+        // slow buffer) must never layer the sea over cave/temple/isle.
+        // Zones hand the air back via stopZoneTheme/stopBossTheme.
+        if (this._zone) return;
         // File loop needs the buffer; otherwise the synth surf takes over.
         if (!this._buf.music) {
             try { this._loadAsset('music'); } catch (e) {}
@@ -713,21 +800,26 @@ class SoundEngine {
 
     stopMusic() {
         if (this._music) {
-            const { src, gain } = this._music;
-            try {
-                const now = this.ctx.currentTime;
-                gain.gain.cancelScheduledValues(now);
-                gain.gain.setValueAtTime(gain.gain.value, now);
-                gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
-                src.stop(now + 0.6);
-            } catch (e) {}
-            this._music = null;
+            if (!this.ctx) { this._music = null; }
+            else {
+                const { src, gain } = this._music;
+                try {
+                    const now = this.ctx.currentTime;
+                    gain.gain.cancelScheduledValues(now);
+                    gain.gain.setValueAtTime(gain.gain.value, now);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+                    src.stop(now + 0.6);
+                } catch (e) {}
+                this._music = null;
+            }
         }
         try { this.stopAmbient(); } catch (e) {}
     }
 
     // Boss war-drum loop. Ducks the tide music while it plays; resumes it
-    // after. File-first, silent when the asset is missing.
+    // after. File-first, silent when the asset is missing. Zone loops are
+    // suspended too (boss owns the air exclusively) and handed back via
+    // _wantZone in stopBossTheme.
     startBossTheme() {
         if (this._gate() || this._bossTheme) return;
         if (!this._buf.boss_theme) {
@@ -737,6 +829,7 @@ class SoundEngine {
         try {
             const now = this.ctx.currentTime;
             try { this.stopMusic(); } catch (e) {}
+            try { this.stopZoneTheme(); } catch (e) {}
             const src = this.ctx.createBufferSource();
             src.buffer = this._buf.boss_theme;
             src.loop = true;
@@ -750,8 +843,7 @@ class SoundEngine {
     }
 
     stopBossTheme() {
-        if (!this._bossTheme) return;
-        const { src, gain } = this._bossTheme;
+        if (!this._bossTheme) return;        const { src, gain } = this._bossTheme;
         try {
             const now = this.ctx.currentTime;
             gain.gain.cancelScheduledValues(now);
@@ -760,8 +852,12 @@ class SoundEngine {
             src.stop(now + 0.8);
         } catch (e) {}
         this._bossTheme = null;
-        // Tide music comes back (file loop or synth surf, whichever exists)
-        try { this.startMusic(); } catch (e) {}
+        // Tide music comes back (file loop or synth surf, whichever exists).
+        // If a zone claimed the air before the fight, hand it back.
+        try {
+            if (this._wantZone && this._wantZone !== 'tide') this.startZoneTheme(this._wantZone);
+            else this.startMusic();
+        } catch (e) { try { this.startMusic(); } catch (e2) {} }
     }
 
     // War-horn boss roar. Fallback: the regular roar synth.
@@ -786,17 +882,101 @@ class SoundEngine {
     }
 
     playUIHover() {
+        if (this._playFile('uihover', { gain: 0.9 })) return;
         this._tone({ type: 'sine', freq: 1400, gain: 0.06, duration: 0.03 });
     }
 
     playSaveSuccess() {
+        if (this._playFile('savesuccess', { gain: 0.9 })) return;
         this._tone({ type: 'sine', freq: 660, gain: 0.2, duration: 0.12 });
         this._tone({ type: 'sine', freq: 990, gain: 0.18, duration: 0.18, delay: 0.08 });
     }
 
     playError() {
+        if (this._playFile('error', { gain: 0.9 })) return;
         this._tone({ type: 'square', freq: 200, endFreq: 120, gain: 0.25, duration: 0.15 });
         this._tone({ type: 'square', freq: 180, endFreq: 100, gain: 0.25, duration: 0.15, delay: 0.16 });
+    }
+
+    // ------------------------------------------------------------
+    //  ZONE THEMES — cave / temple / isle loops. Boss theme always
+    //  wins; tide returns when no zone claims the air. All file-first
+    //  (assets/audio/theme_<zone>.wav), silent when missing.
+    // ------------------------------------------------------------
+    _stopAllMusic() {
+        try {
+            if (this._zone && this._zone.src) {
+                const { src, gain } = this._zone;
+                const now = this.ctx.currentTime;
+                try {
+                    gain.gain.cancelScheduledValues(now);
+                    gain.gain.setValueAtTime(gain.gain.value, now);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+                    src.stop(now + 0.6);
+                } catch (e) {}
+            }
+        } catch (e) {}
+        this._zone = null;
+        this._zoneKey = null;
+        try { this.stopMusic(); } catch (e) {}
+    }
+
+    startZoneTheme(key) {
+        if (this._gate()) return;
+        if (this._bossTheme) return; // boss owns the air
+        if (this._zoneKey === key && this._zone) return;
+        if (!this._buf['theme_' + key]) {
+            try { this._loadAsset('theme_' + key); } catch (e) {}
+            return;
+        }
+        try { this._stopAllMusic(); } catch (e) {}
+        try {
+            const now = this.ctx.currentTime;
+            const src = this.ctx.createBufferSource();
+            src.buffer = this._buf['theme_' + key];
+            src.loop = true;
+            const g = this.ctx.createGain();
+            g.gain.setValueAtTime(0.0001, now);
+            g.gain.linearRampToValueAtTime(0.30, now + 2.0);
+            src.connect(g); g.connect(this._mus() || this.ctx.destination);
+            src.start(now);
+            this._zone = { src, gain: g };
+            this._zoneKey = key;
+        } catch (e) { this._zone = null; this._zoneKey = null; }
+    }
+
+    stopZoneTheme() {
+        try {
+            if (this._zone && this._zone.src) {
+                const { src, gain } = this._zone;
+                const now = this.ctx.currentTime;
+                gain.gain.cancelScheduledValues(now);
+                gain.gain.setValueAtTime(gain.gain.value, now);
+                gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+                src.stop(now + 0.6);
+            }
+        } catch (e) {}
+        this._zone = null;
+        this._zoneKey = null;
+    }
+
+    // Called ~1Hz from the world tick: picks tide/cave/temple/isle by
+    // player map, yields to boss theme, resumes afterward automatically.
+    syncZoneMusic(zoneKey, bossOn) {
+        try {
+            if (this._gate()) return;
+            const now = (typeof performance !== 'undefined' && performance.now()) || 0;
+            if (bossOn || this._bossTheme) { this._wantZone = zoneKey || 'tide'; return; }
+            if (now - (this._syncT || 0) < 1000 && (this._zoneKey || 'tide') === (zoneKey || 'tide') && (this._zone || this._music)) return;
+            this._syncT = now;
+            this._wantZone = zoneKey || 'tide';
+            if (!zoneKey || zoneKey === 'tide') {
+                if (this._zone) this.stopZoneTheme();
+                try { this.startMusic(); } catch (e) {}
+                return;
+            }
+            try { this.startZoneTheme(zoneKey); } catch (e) {}
+        } catch (e) {}
     }
 }
 

@@ -236,13 +236,15 @@ const Multiplayer = {
 
     // Config: PeerJS cloud (free broker) + public STUN. No self-hosted
     // signaling server needed — rooms work from anywhere, itch.io included.
-    // Same-version gate: the room id embeds the version digits.
+    // Same-SNAPSHOT gate: the room id embeds the snapshot digits (legacy,
+    // unused — the live prefix lives in peerlink.js peerRoomPrefix()).
     peerRoomPrefix() {
         try {
-            const v = (typeof GAME_VERSION === 'string' && GAME_VERSION) ? GAME_VERSION : '1.2.5';
-            return 'aquatic-havoc-v' + String(v).replace(/[^0-9]/g, '') + '-';
+            const s = (typeof GAME_SNAPSHOT === 'string' && GAME_SNAPSHOT) ? GAME_SNAPSHOT
+                : ((typeof GAME_VERSION === 'string' && GAME_VERSION) ? GAME_VERSION : '1.2.5');
+            return 'aquatic-havoc-v' + String(s).replace(/[^0-9]/g, '') + '-';
         } catch (e) {
-            return 'aquatic-havoc-v120-';
+            return 'aquatic-havoc-v1400001-';
         }
     },
     
@@ -619,6 +621,13 @@ const Multiplayer = {
             }
             try { audio.playHit(); } catch (e) {}
             Particles.spawnWaterSplashes(st, hooked.x, hooked.y, 5);
+            try { Particles.spawnBloodImpact(st, hooked.x, hooked.y, (hooked.species && hooked.species.color) || '#38bdf8', 4); } catch (e) {}
+            // Blink + screen-space echo so overlapping models never bury the number.
+            hooked.hitFlash = 0.3;
+            try {
+                const txt = (crit ? 'CRIT -' : '-') + Math.round(dmg);
+                hooked._dmgPop = { txt, col: crit ? '#fde047' : '#38bdf8', t: (st.time || 0) };
+            } catch (e) {}
             try {
                 Particles.showFloatingText(st, (crit ? 'CRIT -' : '-') + Math.round(dmg),
                     hooked.x + (Math.random() - 0.5) * 40, hooked.y - 20 + (Math.random() - 0.5) * 20,
@@ -660,11 +669,27 @@ const Multiplayer = {
         };
         PeerLink.onMemberLeave = (peerId) => {
             try { this.mpLog('member-left', `${this.shortId(peerId)} left`); } catch (e) {}
-            if (this.hostPeers) delete this.hostPeers[peerId];
-            if (this.hostPeerOrder) this.hostPeerOrder = this.hostPeerOrder.filter(id => id !== peerId);
+            // Transport id ≠ game pid: drop BOTH spellings (plus the pid
+            // mapping, if known) or the roster + world keep a ghost body.
+            let gpid = null;
+            try {
+                gpid = (typeof PeerLink !== 'undefined' && PeerLink.peerToPid && PeerLink.peerToPid[peerId]) || null;
+            } catch (e) {}
+            if (this.hostPeers) {
+                delete this.hostPeers[peerId];
+                if (gpid) delete this.hostPeers[gpid];
+            }
+            if (Array.isArray(this.hostPeerOrder)) {
+                this.hostPeerOrder = this.hostPeerOrder.filter(id => id !== peerId && id !== gpid);
+            } else if (this.hostPeerOrder) {
+                this.hostPeerOrder = [];
+            }
             if (this.state) {
-                if (this.state.remotePlayers) delete this.state.remotePlayers[peerId];
-                if (this.state.remotePlayer && this.state.remotePlayer._pid === peerId) this.state.remotePlayer = null;
+                if (this.state.remotePlayers) {
+                    delete this.state.remotePlayers[peerId];
+                    if (gpid) delete this.state.remotePlayers[gpid];
+                }
+                if (this.state.remotePlayer && (this.state.remotePlayer._pid === peerId || this.state.remotePlayer.id === peerId)) this.state.remotePlayer = null;
             }
             if (peerId === this.remoteClientId) this.remoteClientId = null;
             this._lobbyCount = PeerLink.memberCount();
@@ -1554,6 +1579,9 @@ const Multiplayer = {
                 if (!pid) continue; // logged — never render unknowns
                 if (pid === this.localClientId) continue;
                 seen[pid] = true;
+                // Keyed by NORMALIZED pid (not the raw wire id): the prune
+                // loop below compares against `seen`, so a padded/placeholder
+                // id can never leave a ghost entry behind.
                 const cur = this.state.remotePlayers[pid] || {};
                 const firstSeen = !cur._seen;
                 Object.assign(cur, pl, { id: pid, _pid: pid, _seen: true });
@@ -1565,7 +1593,7 @@ const Multiplayer = {
                     cur._bx = cur.fishing && cur.fishing.bobber ? cur.fishing.bobber.x : null;
                     cur._by = cur.fishing && cur.fishing.bobber ? cur.fishing.bobber.y : null;
                 }
-                this.state.remotePlayers[pl.id] = cur;
+                this.state.remotePlayers[pid] = cur;
             }
             for (const id of Object.keys(this.state.remotePlayers)) {
                 if (!seen[id]) delete this.state.remotePlayers[id];
@@ -2290,8 +2318,15 @@ const Multiplayer = {
         }
         // Identity: the sender's chosen name rides every snapshot so the
         // host (and through the roster, everyone) always shows it.
+        // Stripped like the hello path: raw socket text must never carry
+        // markup into the DOM (roster renders through esc(), canvas is
+        // safe — this is defense in depth).
         if (input.playerName && typeof input.playerName === 'string') {
-            rp.playerName = input.playerName.slice(0, 12);
+            try {
+                rp.playerName = input.playerName.replace(/[<>&"']/g, '').slice(0, 12);
+            } catch (e) {
+                rp.playerName = 'Player';
+            }
         }
         // Map flags: which world slice this peer is on (mainland / isle /
         // cave). Remote bodies on another map are culled at render.
@@ -3255,6 +3290,40 @@ const Multiplayer = {
                     });
                 } catch (e) {}
             }
+            // Helper-hit blink (set in _remoteFishHelp / fx): white flash so
+            // the helper sees their own shots connect on the remote model.
+            try {
+                if ((h._hitFlash || 0) > 0 && !h.isDead) {
+                    h._hitFlash = Math.max(0, (h._hitFlash || 0) - 0.016);
+                    ctx.save();
+                    ctx.globalAlpha = Math.min(0.75, (h._hitFlash || 0.2) * 2.4);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.beginPath();
+                    ctx.arc(hp.x, hp.y, ((species.size || h.size || 16) * sc) * 0.85, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+            } catch (e) {}
+            // Damage echo drawn AFTER the model: world floating texts render
+            // under this overlay, so the number is re-drawn here on top.
+            try {
+                const dp = h._dmgPop;
+                const nowT = (this.state.time || 0);
+                if (dp && dp.txt && (nowT - dp.t) < 0.9 && !h.isDead) {
+                    const age = nowT - dp.t;
+                    ctx.save();
+                    ctx.globalAlpha = Math.max(0, 1 - age / 0.9);
+                    ctx.font = `bold ${15 * sc}px Work Sans`;
+                    ctx.textAlign = 'center';
+                    ctx.lineWidth = 3;
+                    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+                    const dy = hp.y - (species.size || 16) * sc - 34 - age * 26;
+                    ctx.strokeText(dp.txt, hp.x, dy);
+                    ctx.fillStyle = dp.col || '#38bdf8';
+                    ctx.fillText(dp.txt, hp.x, dy);
+                    ctx.restore();
+                }
+            } catch (e) {}
             if (h.isDead) {
                 ctx.font = `bold ${20 * sc}px Work Sans`;
                 ctx.textAlign = 'center';

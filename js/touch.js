@@ -13,6 +13,8 @@ const TouchControls = {
     fireTimer: 0,
     _padKeys: {},
     perf: 'high', // low | high
+    _editMode: false,
+    _layoutKey: 'ah_touch_layout_v1',
 
     isTouchDevice() {
         // Real mobile/tablet: touch support AND a coarse (finger) primary
@@ -111,6 +113,25 @@ const TouchControls = {
             this._bound = true;
             this._bindJoystick(state);
             this._bindButtons(state);
+            // Edit-mode drag for every button + joystick.
+            try {
+                const ui = document.getElementById('touch-ui');
+                if (ui) {
+                    ui.querySelectorAll('[data-tbtn]').forEach(el => {
+                        this._makeDraggable(el, el.getAttribute('data-tbtn'));
+                    });
+                    const joy = document.getElementById('touch-joy');
+                    if (joy) this._makeDraggable(joy, '_joy');
+                }
+                const t = document.getElementById('touch-edit-toggle');
+                if (t && !t._bound) {
+                    t._bound = true;
+                    t.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        this.setEditMode(!this._editMode);
+                    });
+                }
+            } catch (e) {}
         }
         // UI tier always applies (CSS hooks), even on desktop
         try { this.applyUiTier(); } catch (e) {}
@@ -131,6 +152,12 @@ const TouchControls = {
         this.detectPerf();
         const ui = document.getElementById('touch-ui');
         if (ui) ui.classList.remove('hidden');
+        try { this.applyLayout(); } catch (e) {}
+        // Show the ✥ move chip only on touch UI.
+        try {
+            const t = document.getElementById('touch-edit-toggle');
+            if (t) t.classList.remove('hidden');
+        } catch (e) {}
         try {
             if (typeof UI !== 'undefined' && state.player) {
                 Particles.showFloatingText(state, '📱 Touch controls on (' + this.perf + ' perf)', state.player.x, state.player.y - 60, '#7dd3fc');
@@ -147,11 +174,151 @@ const TouchControls = {
         return document.getElementById(id);
     },
 
+    // ---- Custom button layout (player-arranged, persisted) ----
+    // Each draggable keeps {dx, dy} px offsets from its CSS home, plus a
+    // global size scale. Edit mode is toggled from Settings or the ✥ chip.
+    loadLayout() {
+        try {
+            const raw = localStorage.getItem(this._layoutKey);
+            if (!raw) return { pos: {}, scale: 1 };
+            const d = JSON.parse(raw);
+            return { pos: (d && d.pos) || {}, scale: (d && d.scale) || 1 };
+        } catch (e) { return { pos: {}, scale: 1 }; }
+    },
+
+    saveLayout() {
+        try {
+            const cur = this.loadLayout();
+            localStorage.setItem(this._layoutKey, JSON.stringify(cur));
+        } catch (e) {}
+    },
+
+    setScale(s) {
+        try {
+            s = Math.max(0.8, Math.min(1.6, Number(s) || 1));
+            const cur = this.loadLayout();
+            cur.scale = s;
+            localStorage.setItem(this._layoutKey, JSON.stringify(cur));
+            this.applyLayout();
+        } catch (e) {}
+    },
+
+    resetLayout() {
+        try { localStorage.removeItem(this._layoutKey); } catch (e) {}
+        try { this.applyLayout(); } catch (e) {}
+    },
+
+    applyLayout() {
+        try {
+            const { pos, scale } = this.loadLayout();
+            const ui = document.getElementById('touch-ui');
+            if (ui) ui.style.setProperty('--touch-scale', String(scale || 1));
+            // Per-button offsets (dragged in edit mode).
+            const els = ui ? ui.querySelectorAll('[data-tbtn]') : [];
+            els.forEach(el => {
+                const k = el.getAttribute('data-tbtn');
+                const o = pos && pos[k];
+                if (o && (o.dx || o.dy)) {
+                    el.style.transform = `translate(${o.dx}px, ${o.dy}px)`;
+                    el.dataset._moved = '1';
+                } else {
+                    el.style.transform = '';
+                    delete el.dataset._moved;
+                }
+            });
+            // Joystick offset too.
+            const joy = document.getElementById('touch-joy');
+            if (joy) {
+                const o = pos && pos._joy;
+                joy.style.transform = (o && (o.dx || o.dy)) ? `translate(${o.dx}px, ${o.dy}px)` : '';
+            }
+        } catch (e) {}
+    },
+
+    setEditMode(on) {
+        this._editMode = !!on;
+        try {
+            const ui = document.getElementById('touch-ui');
+            if (ui) ui.classList.toggle('touch-edit', this._editMode);
+            const t = document.getElementById('touch-edit-toggle');
+            if (t) {
+                t.innerText = this._editMode ? '✓' : '✥';
+                t.title = this._editMode ? 'Done — tap to lock buttons' : 'Move buttons';
+            }
+            if (!this._editMode) this.saveLayout();
+        } catch (e) {}
+    },
+
+    _makeDraggable(el, key) {
+        if (!el || el._touchDragBound) return;
+        el._touchDragBound = true;
+        let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
+        const getPos = () => {
+            const cur = this.loadLayout();
+            return (cur.pos && cur.pos[key]) || { dx: 0, dy: 0 };
+        };
+        el.addEventListener('touchstart', (e) => {
+            if (!this._editMode) return;
+            e.preventDefault(); e.stopPropagation();
+            const t = e.changedTouches[0];
+            const p = getPos();
+            sx = t.clientX; sy = t.clientY; ox = p.dx || 0; oy = p.dy || 0;
+            dragging = true;
+        }, { passive: false });
+        el.addEventListener('touchmove', (e) => {
+            if (!this._editMode || !dragging) return;
+            e.preventDefault(); e.stopPropagation();
+            const t = e.changedTouches[0];
+            const dx = Math.round(ox + (t.clientX - sx));
+            const dy = Math.round(oy + (t.clientY - sy));
+            el.style.transform = `translate(${dx}px, ${dy}px)`;
+            el._pendingPos = { dx, dy };
+        }, { passive: false });
+        const end = (e) => {
+            if (!this._editMode || !dragging) return;
+            dragging = false;
+            try {
+                if (el._pendingPos) {
+                    const cur = this.loadLayout();
+                    cur.pos = cur.pos || {};
+                    cur.pos[key] = el._pendingPos;
+                    localStorage.setItem(this._layoutKey, JSON.stringify(cur));
+                    delete el._pendingPos;
+                }
+            } catch (err) {}
+        };
+        el.addEventListener('touchend', end);
+        el.addEventListener('touchcancel', end);
+        // Mouse fallback for desktop testing of edit mode.
+        el.addEventListener('mousedown', (e) => {
+            if (!this._editMode) return;
+            e.preventDefault(); e.stopPropagation();
+            const p = getPos();
+            sx = e.clientX; sy = e.clientY; ox = p.dx || 0; oy = p.dy || 0;
+            dragging = true;
+            const mv = (ev) => {
+                if (!dragging) return;
+                const dx = Math.round(ox + (ev.clientX - sx));
+                const dy = Math.round(oy + (ev.clientY - sy));
+                el.style.transform = `translate(${dx}px, ${dy}px)`;
+                el._pendingPos = { dx, dy };
+            };
+            const up = () => {
+                dragging = false;
+                window.removeEventListener('mousemove', mv);
+                window.removeEventListener('mouseup', up);
+                end();
+            };
+            window.addEventListener('mousemove', mv);
+            window.addEventListener('mouseup', up);
+        });
+    },
+
     _bindJoystick(state) {
         const zone = this._zone('touch-joy');
         const knob = this._zone('touch-joy-knob');
         if (!zone) return;
-        const R = 52; // px travel
+        const R = 62; // px travel (bigger thumb zone)
         const setKnob = (dx, dy) => {
             if (knob) knob.style.transform = `translate(${dx}px, ${dy}px)`;
         };
@@ -169,6 +336,7 @@ const TouchControls = {
             setKnob(dx, dy);
         };
         zone.addEventListener('touchstart', (e) => {
+            if (this._editMode) return; // edit mode: drag handler owns it
             e.preventDefault();
             try { if (typeof audio !== 'undefined' && audio.init) audio.init(); } catch (err) {}
             const t = e.changedTouches[0];
@@ -176,6 +344,7 @@ const TouchControls = {
             handle(t);
         }, { passive: false });
         zone.addEventListener('touchmove', (e) => {
+            if (this._editMode) return;
             e.preventDefault();
             for (const t of e.changedTouches) {
                 if (t.identifier === this.joy.id) handle(t);
@@ -199,6 +368,8 @@ const TouchControls = {
         if (!el) return;
         const buzz = (ms) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} };
         el.addEventListener('touchstart', (e) => {
+            // Edit mode: drag instead of pressing.
+            if (this._editMode) return;
             e.preventDefault();
             try { if (typeof audio !== 'undefined' && audio.init) audio.init(); } catch (err) {}
             try { el.classList.add('active-touch'); } catch (err) {}
@@ -206,6 +377,7 @@ const TouchControls = {
             try { down(); } catch (err) {}
         }, { passive: false });
         const release = (e) => {
+            if (this._editMode) return;
             if (e) e.preventDefault();
             try { el.classList.remove('active-touch'); } catch (err) {}
             try { if (up) up(); } catch (err) {}
@@ -214,9 +386,15 @@ const TouchControls = {
         el.addEventListener('touchcancel', release);
         el.addEventListener('contextmenu', (e) => { try { e.preventDefault(); } catch (err) {} });
         // Mouse fallback (desktop testing / hybrid laptops)
-        el.addEventListener('mousedown', (e) => { e.preventDefault(); try { el.classList.add('active-touch'); } catch (err) {} try { down(); } catch (err) {} });
+        el.addEventListener('mousedown', (e) => { if (this._editMode) return; e.preventDefault(); try { el.classList.add('active-touch'); } catch (err) {} try { down(); } catch (err) {} });
         el.addEventListener('mouseup', () => { try { el.classList.remove('active-touch'); } catch (err) {} try { if (up) up(); } catch (err) {} });
-        el.addEventListener('mouseleave', () => { try { el.classList.remove('active-touch'); } catch (err) {} });
+        // Bulletproof: pointer slides off the button (mouseup lands outside)
+        // must still release — otherwise FIRE/CAST sticks and the game plays
+        // itself. up() is idempotent, so a double release is harmless.
+        el.addEventListener('mouseleave', () => {
+            try { el.classList.remove('active-touch'); } catch (err) {}
+            try { if (!this._editMode && up) up(); } catch (err) {}
+        });
     },
 
     _bindButtons(state) {
@@ -241,9 +419,20 @@ const TouchControls = {
         // E interact (items are used via the F key / item-bar slot tap)
         this._press(this._zone('touch-act'),
             () => { if (typeof Input !== 'undefined') Input.interact(state); });
-        // R reload
+        // R reload (manual — auto-reload also runs in update())
         this._press(this._zone('touch-reload'),
             () => { if (typeof WeaponSystem !== 'undefined') WeaponSystem.reload(state); });
+        // Backpack (B on keyboard) — the full-bucket fix tool on mobile
+        this._press(this._zone('touch-bag'),
+            () => { try { if (typeof Inventory !== 'undefined') Inventory.toggle(state); } catch (e) {} });
+        // F use equipped item
+        this._press(this._zone('touch-item'),
+            () => {
+                try {
+                    if (typeof ItemSystem !== 'undefined' && ItemSystem.useEquipped) ItemSystem.useEquipped(state);
+                    else if (typeof Items !== 'undefined' && Items.useEquipped) Items.useEquipped(state);
+                } catch (e) {}
+            });
         // Weapon cycle
         this._press(this._zone('touch-weapon'),
             () => {
@@ -365,6 +554,20 @@ const TouchControls = {
                 this.shootAimed(state);
             }
         }
+        // AUTO RELOAD on mobile: empty mag (non-pistol, non-reloading,
+        // affordable/owned ammo) reloads itself — no tiny R hunt mid-fight.
+        try {
+            if (typeof WeaponSystem !== 'undefined' && WeaponSystem.getActiveWeapon) {
+                const w = WeaponSystem.getActiveWeapon(state);
+                if (w && w.id !== 'pistol' && !state.player.reloading) {
+                    const max = (typeof CONFIG !== 'undefined' && CONFIG.MAX_AMMO && CONFIG.MAX_AMMO[w.id]) || Infinity;
+                    const cur = state.player.weaponAmmo ? state.player.weaponAmmo[w.id] : undefined;
+                    if (max !== Infinity && cur !== undefined && cur <= 0) {
+                        WeaponSystem.reload(state);
+                    }
+                }
+            }
+        } catch (e) {}
     },
 };
 

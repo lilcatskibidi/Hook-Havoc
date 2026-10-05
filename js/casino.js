@@ -70,6 +70,7 @@ const Casino = {
         on('casino-buy-tokens', () => this.buyTokens(1));
         on('casino-buy-tokens-10', () => this.buyTokens(10));
         on('casino-buy-tokens-100', () => this.buyTokens(100));
+        on('casino-buy-tokens-custom', () => this.buyTokensCustom());
         on('casino-cashout', () => this.cashout());
     },
 
@@ -464,7 +465,7 @@ const Casino = {
         return total;
     },
 
-    spinRoulette() {
+    async spinRoulette() {
         const totalBet = this.getTotalRouletteBet();
         if (this.rouletteSpinning) return;
         if (totalBet === 0) {
@@ -485,17 +486,19 @@ const Casino = {
         this.rouletteSpinning = true;
         this.rouletteMsg = 'Spinning...'; this.rouletteMsgColor = 'text-amber-300';
         this.updateTokenDisplay(); this.renderTab();
-        // Server-authoritative pocket: prefetch during the animation so the
-        // final number comes from node:crypto when online (anti-F12).
+        // Server-authoritative pocket: awaited (capped) BEFORE the animation
+        // so the final number comes from node:crypto when online (anti-F12).
         // Falls back to local Math.random on itch.io static / offline.
         this._serverPocket = null;
         try {
             if (typeof SecureServer !== 'undefined') {
-                SecureServer.roll('roulette', totalBet).then(r => {
-                    if (r && Number.isInteger(r.pocket) && r.pocket >= 0 && r.pocket < 38) {
-                        this._serverPocket = r.pocket;
-                    }
-                }).catch(() => {});
+                const r = await Promise.race([
+                    SecureServer.roll('roulette', totalBet),
+                    new Promise(res => setTimeout(() => res(null), 1200)),
+                ]);
+                if (r && Number.isInteger(r.pocket) && r.pocket >= 0 && r.pocket < 38) {
+                    this._serverPocket = r.pocket;
+                }
             }
         } catch (e) {}
         // Animated number cycling (38 pockets, American wheel)
@@ -522,23 +525,34 @@ const Casino = {
         this.rouletteNumber = r === 37 ? '00' : r;
         const redNumbers = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
         const isZero = this.rouletteNumber === 0 || this.rouletteNumber === '00';
-        let winnings = 0;
-        if (this.rouletteBetNumbers?.includes(this.rouletteNumber)) winnings += this.betAmount * 35;
+        let winnings = 0, stakeBack = 0;
+        if (this.rouletteBetNumbers?.includes(this.rouletteNumber)) { winnings += this.betAmount * 35; stakeBack += this.betAmount; }
         if (this.rouletteBetColor) {
             const isRed = redNumbers.includes(this.rouletteNumber);
             const isBlack = !isZero && !isRed;
-            if ((this.rouletteBetColor === 'red' && isRed) || (this.rouletteBetColor === 'black' && isBlack) || (this.rouletteBetColor === 'green' && isZero)) winnings += this.betAmount * (isZero ? 35 : 1);
+            if ((this.rouletteBetColor === 'red' && isRed) || (this.rouletteBetColor === 'black' && isBlack) || (this.rouletteBetColor === 'green' && isZero)) {
+                winnings += this.betAmount * (isZero ? 35 : 1);
+                stakeBack += this.betAmount;
+            }
         }
         if (this.rouletteBetParity && !isZero) {
             const isEven = this.rouletteNumber % 2 === 0;
-            if ((this.rouletteBetParity === 'even' && isEven) || (this.rouletteBetParity === 'odd' && !isEven)) winnings += this.betAmount;
+            if ((this.rouletteBetParity === 'even' && isEven) || (this.rouletteBetParity === 'odd' && !isEven)) {
+                winnings += this.betAmount;
+                stakeBack += this.betAmount;
+            }
         }
         if (this.rouletteBetRange && !isZero) {
             const isLow = this.rouletteNumber <= 18;
-            if ((this.rouletteBetRange === 'low' && isLow) || (this.rouletteBetRange === 'high' && !isLow)) winnings += this.betAmount;
+            if ((this.rouletteBetRange === 'low' && isLow) || (this.rouletteBetRange === 'high' && !isLow)) {
+                winnings += this.betAmount;
+                stakeBack += this.betAmount;
+            }
         }
         if (winnings > 0) {
-            this.tokens += winnings + totalBet;
+            // Refund ONLY the winning lines' stakes — losing bets stay lost
+            // (refunding the whole table used to pay back losers too).
+            this.tokens += winnings + stakeBack;
             this.rouletteMsg = `WIN +${winnings}T! (landed ${this.rouletteNumber})`;
             this.rouletteMsgColor = 'text-emerald-400';
             try { audio.playCoin(); } catch (e) {}
@@ -556,24 +570,28 @@ const Casino = {
         this.saveTokens();
     },
 
-    spinSlots() {
+    async spinSlots() {
         if (this.betAmount > this.tokens || this.slotsSpinning) return;
         const bet = this.betAmount;
         this.tokens -= bet;
         this.slotsSpinning = true; this.slotsBest = -1; this.slotsWon = false;
         this.slotsResult = 'Spinning...'; this.slotsResultColor = 'text-amber-300';
         this.updateTokenDisplay(); this.renderTab();
-        // Server-authoritative reels (anti-F12). Prefetch, use when valid.
+        // Server-authoritative reels (anti-F12). Awaited (capped) BEFORE the
+        // animation so a slow network can't lock local reels first and
+        // silently void the server roll. Offline = instant local.
         const localFinal = [this.weightedSlotIndex(), this.weightedSlotIndex(), this.weightedSlotIndex()];
         const final = localFinal;
         try {
             if (typeof SecureServer !== 'undefined') {
-                SecureServer.roll('slots', bet).then(sv => {
-                    if (sv && Array.isArray(sv.reels) && sv.reels.length === 3 &&
-                        sv.reels.every(i => Number.isInteger(i) && i >= 0 && i < this.slotSymbols.length)) {
-                        final[0] = sv.reels[0]; final[1] = sv.reels[1]; final[2] = sv.reels[2];
-                    }
-                }).catch(() => {});
+                const sv = await Promise.race([
+                    SecureServer.roll('slots', bet),
+                    new Promise(res => setTimeout(() => res(null), 1200)),
+                ]);
+                if (sv && Array.isArray(sv.reels) && sv.reels.length === 3 &&
+                    sv.reels.every(i => Number.isInteger(i) && i >= 0 && i < this.slotSymbols.length)) {
+                    final[0] = sv.reels[0]; final[1] = sv.reels[1]; final[2] = sv.reels[2];
+                }
             }
         } catch (e) {}
         const flicker = setInterval(() => {
@@ -703,6 +721,11 @@ const Casino = {
     },
 
     async highlowGuess(higher) {
+        // In-flight guard: the server roll awaits network — a lagged
+        // double-click must not deduct the entry bet twice / race the pot.
+        if (this._highlowBusy) return;
+        this._highlowBusy = true;
+        try {
         const entryBet = this.highlowPot > 0 ? 0 : this.betAmount;
         if (entryBet > this.tokens) return;
         if (entryBet > 0) { this.tokens -= entryBet; this.highlowPot = entryBet; }
@@ -743,6 +766,9 @@ const Casino = {
             if (typeof Achievements !== 'undefined') Achievements.onCasinoLoss(this.state, lost);
         }
         this.updateTokenDisplay(); this.renderTab(); this.saveTokens();
+        } finally {
+            this._highlowBusy = false;
+        }
     },
 
     highlowCashout() {
@@ -780,7 +806,39 @@ const Casino = {
         }
     },
 
+    // Custom token amount via the in-game picker (max 50 per purchase,
+    // capped by what the wallet affords).
+    buyTokensCustom() {
+        try {
+            const afford = Math.floor((this.state.player.coins || 0) / this.TOKEN_PRICE);
+            if (afford <= 0) {
+                try { audio.playError(); } catch (e) {}
+                if (typeof Particles !== 'undefined') Particles.showFloatingText(this.state, `NEED ${this.TOKEN_PRICE} COINS FOR 1T`, this.state.player.x, this.state.player.y - 50, '#f87171');
+                return;
+            }
+            const cap = Math.min(afford, 50);
+            if (cap <= 1) { this.buyTokens(1); return; }
+            if (typeof QtyModal !== 'undefined' && QtyModal.ask) {
+                QtyModal.ask({
+                    title: '🪙 BUY TOKENS',
+                    sub: `${this.TOKEN_PRICE}c each · you afford ${afford}T`,
+                    min: 1, max: cap, value: cap,
+                }).then((n) => { if (n !== null && n !== undefined) this.buyTokens(n); });
+                return;
+            }
+            this.buyTokens(cap);
+        } catch (e) {}
+    },
+
     cashout() {
+        if (this.tokens <= 0 && !(this.highlowPot > 0)) { try { audio.playError(); } catch (e) {} return; }
+        // Rescue a live high-low pot first: it was already deducted from
+        // tokens, so wiping it here would delete real value. It rejoins
+        // the token balance, then everything converts together.
+        if (this.highlowPot > 0) {
+            this.tokens += this.highlowPot;
+            this.highlowPot = 0; this.highlowStreak = 0;
+        }
         if (this.tokens <= 0) { try { audio.playError(); } catch (e) {} return; }
         const coins = Math.floor(this.tokens * this.CASHOUT_RATE);
         this.state.player.coins += coins;

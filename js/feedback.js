@@ -87,7 +87,9 @@ const Feedback = {
 
     gameVersion() {
         try {
-            return (typeof GAME_VERSION === 'string' && GAME_VERSION) ? GAME_VERSION : '1.2.5';
+            const v = (typeof GAME_VERSION === 'string' && GAME_VERSION) ? GAME_VERSION : '1.2.5';
+            const s = (typeof GAME_SNAPSHOT === 'string' && GAME_SNAPSHOT) ? GAME_SNAPSHOT : '';
+            return s && s !== v ? v + '+' + s : v;
         } catch (e) { return '1.2.5'; }
     },
 

@@ -439,7 +439,26 @@ const WEAPONS = [
       rarity: 'mythic', pellets: 'Void Pierce',
       auto: false, pierce: true, explosive: false, burn: false,
       executeMult: 1.8, bossMult: 1.4,
-      sound: 'harpoon', shake: 18, muzzle: 34, recoil: 18 }
+      sound: 'harpoon', shake: 18, muzzle: 34, recoil: 18 },
+
+    // ---- Priest-core crafts (CRAFT ONLY — no coin price, forge only) ----
+    { id: 'heartlance', name: 'Heartlance', icon: 'fa-crosshair', type: 'rail',
+      damage: 1100, fireRate: 1.4, range: 1500, spread: 0.0, count: 1,
+      desc: 'CRAFT ONLY: a lance of choir-glass. 35% crits, +50% vs bosses. ~786 DPS.',
+      rarity: 'mythic', pellets: 'Pierce precision',
+      auto: false, pierce: true, explosive: false, burn: false,
+      critCh: 0.35, critMult: 2.5, bossMult: 1.5,
+      recipe: { coins: 60000, fish: [{ id: 'marlin_blue_giant', n: 2 }], keys: [{ id: 'priest_core', n: 2 }] },
+      sound: 'harpoon', shake: 14, muzzle: 30, recoil: 14 },
+
+    { id: 'choirgun', name: 'Choir Repeater', icon: 'fa-burst', type: 'shotgun',
+      damage: 130, fireRate: 1.1, range: 430, spread: 0.16, count: 8,
+      desc: 'CRAFT ONLY: eight chanting barrels. Point-blank annihilation. ~945 DPS.',
+      rarity: 'mythic', pellets: '8-pellet choir',
+      auto: false, pierce: false, explosive: false, burn: false,
+      critCh: 0.10, critMult: 2.0,
+      recipe: { coins: 45000, fish: [{ id: 'bluefin_tuna', n: 3 }], keys: [{ id: 'priest_core', n: 1 }] },
+      sound: 'shotgun', shake: 12, muzzle: 26, recoil: 12 },
 ];
 
 const BUCKET_UPGRADES = [
@@ -472,7 +491,12 @@ const RODS = [
     { id: 'rod_worldserpent', name: 'Worldserpent Coil', tensionMax: 880, reelPower: 390, luck: 2.90, price: 135000, desc: 'Shed skin of Jormungandr. 72% faster bites, 62% stamina save, +75% pull.', rarity: 'mythic', color: '#4ade80', biteTimeMult: 0.28, staminaSave: 0.62, pullMult: 1.75, bobberModel: 'glow', lineColor: '#4ade80' },
     { id: 'rod_eventide', name: 'Eventide Filament', tensionMax: 940, reelPower: 420, luck: 3.20, price: 160000, desc: 'Spun from dusk itself. 75% faster bites, 65% stamina save, +80% pull.', rarity: 'mythic', color: '#c084fc', biteTimeMult: 0.25, staminaSave: 0.65, pullMult: 1.80, bobberModel: 'glow', lineColor: '#c084fc' },
     { id: 'rod_whalefall', name: 'Whalefall Spine',  tensionMax: 1000, reelPower: 450, luck: 3.50, price: 200000, desc: 'A vertebra for a reel seat. Whales answer it. 78% faster bites, 68% stamina save, +85% pull.', rarity: 'mythic', color: '#93c5fd', biteTimeMult: 0.22, staminaSave: 0.68, pullMult: 1.85, bobberModel: 'rocket', lineColor: '#93c5fd' },
-    { id: 'rod_godline', name: 'Godline',            tensionMax: 1150, reelPower: 500, luck: 4.00, price: 280000, desc: 'The line the gods fish with. 80% faster bites, 70% stamina save, +95% pull.', rarity: 'mythic', color: '#fde047', biteTimeMult: 0.20, staminaSave: 0.70, pullMult: 1.95, bobberModel: 'glow', lineColor: '#fde047' }
+    { id: 'rod_godline', name: 'Godline',            tensionMax: 1150, reelPower: 500, luck: 4.00, price: 280000, desc: 'The line the gods fish with. 80% faster bites, 70% stamina save, +95% pull.', rarity: 'mythic', color: '#fde047', biteTimeMult: 0.20, staminaSave: 0.70, pullMult: 1.95, bobberModel: 'glow', lineColor: '#fde047' },
+    // ---- Priest-core crafts (CRAFT ONLY) ----
+    { id: 'rod_tithe', name: 'Abyssal Tithe', tensionMax: 640, reelPower: 300, luck: 2.00, desc: 'CRAFT ONLY: tithe-paid line. 62% faster bites, 52% stamina save, +60% pull.', rarity: 'legendary', color: '#0ea5e9', biteTimeMult: 0.38, staminaSave: 0.52, pullMult: 1.60, bobberModel: 'glow', lineColor: '#0ea5e9',
+      recipe: { coins: 25000, fish: [{ id: 'bluefin_tuna', n: 2 }], keys: [{ id: 'priest_core', n: 1 }] } },
+    { id: 'rod_heartstring', name: 'Heartstring', tensionMax: 900, reelPower: 420, luck: 3.00, desc: 'CRAFT ONLY: strung on a choir-note. 70% faster bites, 60% stamina save, +80% pull.', rarity: 'mythic', color: '#f0abfc', biteTimeMult: 0.30, staminaSave: 0.60, pullMult: 1.80, bobberModel: 'glow', lineColor: '#f0abfc',
+      recipe: { coins: 80000, fish: [{ id: 'marlin_blue_giant', n: 3 }], keys: [{ id: 'priest_core', n: 2 }] } },
 ];
 const ARMOR = [
     // Light Armor
@@ -565,15 +589,27 @@ const ARMOR = [
       defense: 28, hpBonus: 90, speedBonus: 15, weight: 'Legendary',
       recipe: { coins: 20000, fish: [{ id: 'crimson_tidereaver', n: 1 }, { id: 'bloodfin_tetra', n: 2 }] },
       desc: 'Walks the red tide. CRAFT ONLY.', rarity: 'legendary', color: '#ef4444' },
+    // ---- Priest-core crafts (Abyssal Tithe set) ----
+    { id: 'vest_tidefather', name: 'Tidefather Aegis', type: 'chest', slot: 'armor',
+      defense: 70, hpBonus: 300, speedPenalty: 8, damageReflect: 0.25, weight: 'Mythic',
+      recipe: { coins: 40000, fish: [{ id: 'bluefin_tuna', n: 2 }], keys: [{ id: 'priest_core', n: 2 }] },
+      desc: 'CRAFT ONLY: choir-blessed plate. Reflects a quarter of pain.', rarity: 'mythic', color: '#0ea5e9' },
+    { id: 'helm_drowned', name: 'Crown of the Drowned', type: 'head', slot: 'armor',
+      defense: 45, hpBonus: 180, luckBonus: 0.4, speedBonus: 5, weight: 'Mythic',
+      recipe: { coins: 25000, fish: [{ id: 'marlin_blue_giant', n: 1 }], keys: [{ id: 'priest_core', n: 1 }] },
+      desc: 'CRAFT ONLY: the drowned sing bite-timings to you.', rarity: 'mythic', color: '#7dd3fc' },
 ];
 
 const WeaponSystem = {
     // Returns the weapon currently held in the active slot, or null.
     getActiveWeapon(state) {
-        const p = state.player;
-        const id = p.equippedWeapons[p.activeSlot];
-        if (!id) return null;
-        return WEAPONS.find(w => w.id === id) || null;
+        try {
+            const p = state && state.player;
+            if (!p || !Array.isArray(p.equippedWeapons)) return null;
+            const id = p.equippedWeapons[p.activeSlot];
+            if (!id) return null;
+            return WEAPONS.find(w => w.id === id) || null;
+        } catch (e) { return null; }
     },
 
     // Shared damage roll: crit (rolled per-bullet at fire time) x execute
@@ -610,13 +646,23 @@ const WeaponSystem = {
     },
 
     shoot(state) {
-        const p = state.player;
+        const p = state && state.player;
+        if (!p || p.isDead) return;
         const w = this.getActiveWeapon(state);
         const now = Utils.now();
 
         if (!w) return;
         if (p.reloading) return;
         if (p.lastShotTime > 0 && now - p.lastShotTime < w.fireRate) return;
+        // Bulletproof: no mouse yet (first frame / headless sim) — aim
+        // along facing instead of crashing on null.worldY.
+        if (!state.mouse || typeof state.mouse.worldX !== 'number' || typeof state.mouse.worldY !== 'number') {
+            try {
+                state.mouse = state.mouse || {};
+                state.mouse.worldX = p.x + (p.facing === -1 ? -100 : 100);
+                state.mouse.worldY = p.y;
+            } catch (e) { return; }
+        }
 
         const ammo = p.weaponAmmo[w.id];
         if (ammo !== undefined && ammo <= 0) {
@@ -648,6 +694,9 @@ const WeaponSystem = {
             const spreadAngle = angle + (Math.random() - 0.5) * w.spread;
             // Crits roll per bullet so every pellet of a shotgun can crit
             const critMult = (w.critCh && Math.random() < w.critCh) ? (w.critMult || 2) : 1;
+            // Berserk Rum item: +50% bullet damage while it lasts.
+            let shotDmg = w.damage;
+            try { if ((p.rageT || 0) > 0) shotDmg = Math.round(w.damage * 1.5); } catch (e) {}
             const bullet = {
                 id: pid + ':' + (p._bulletSeq = (p._bulletSeq || 0) + 1),
                 pid,
@@ -655,7 +704,7 @@ const WeaponSystem = {
                 y: p.y + Math.sin(angle) * 26,
                 vx: Math.cos(spreadAngle) * 900,
                 vy: Math.sin(spreadAngle) * 900,
-                damage: w.damage,
+                damage: shotDmg,
                 range: w.range,
                 distTraveled: 0,
                 type: w.type,
@@ -807,6 +856,7 @@ const WeaponSystem = {
 
             const stepX = b.vx * delta;
             const stepY = b.vy * delta;
+            b._px = b.x; b._py = b.y;
             b.x += stepX; b.y += stepY;
             b.distTraveled = (b.distTraveled || 0) + Math.hypot(stepX, stepY);
 
@@ -852,6 +902,9 @@ const WeaponSystem = {
                     if (hooked.isInflated) dmg = Math.max(1, Math.round(dmg * 0.5));
                     hooked.hp -= dmg;
                     hooked.stamina -= dmg * CONFIG.STAMINA_DRAIN_PER_BULLET * (b.drainMult || 1);
+                    // Hit flash: white blink so every pellet reads visually.
+                    hooked.hitFlash = 0.25;
+                    hooked._dmgPop = { txt: (hr.crit ? 'CRIT -' : '-') + Math.round(dmg), col: hr.crit ? '#fde047' : '#38bdf8', t: (state.time || 0) };
                     // Special effects now work in WATER too (fixed)
                     if (b.burn) { hooked.burnTimer = Math.max(hooked.burnTimer || 0, 3.0); hooked.burnDps = b.burnDps || 12; }
                     if (b.poison) { hooked.poisonTimer = Math.max(hooked.poisonTimer || 0, 5.0); hooked.poisonDps = Math.round(dmg * (b.poisonDpsMult || 0.3)); }
@@ -868,7 +921,7 @@ const WeaponSystem = {
                         hooked.hp -= splash * 0.3;
                         hooked.stamina -= splash * 0.3 * CONFIG.STAMINA_DRAIN_PER_BULLET;
                         Particles.spawnParticles(state, hooked.x, hooked.y, '#f97316', 12, { size: 5 });
-                        state.screenShake = Math.max(state.screenShake, 8);
+                        state.screenShake = Math.max(state.screenShake || 0, 8);
                     }
                     try { audio.playHit(); } catch (e) {}
                     Particles.spawnWaterSplashes(state, hooked.x, hooked.y, 5);
@@ -907,6 +960,27 @@ const WeaponSystem = {
                         }
                         const hr = this.rollHit(b, m.hp, m.maxHp || m.species.maxHp || m.hp, m.species);
                         m.hp -= hr.dmg;
+                        // PRIEST SACRIFICE CORE: 3 heavy hits (sniper/rocket/
+                        // shotgun/cannon) within 2s stuns it 3.5s and cancels
+                        // whatever it was casting.
+                        try {
+                            if (m.species.id === 'leviathan_priest' && !m._kneeling &&
+                                ['rail', 'launcher', 'shotgun', 'cannon'].includes(b.type)) {
+                                const now = (state.time || 0);
+                                m._heartHits = (m._heartHits || []).filter(t => now - t < 2);
+                                m._heartHits.push(now);
+                                Particles.showFloatingText(state, `💓 HEART ${Math.min(3, m._heartHits.length)}/3`, m.x, m.y - 70, '#f0abfc');
+                                if (m._heartHits.length >= 3) {
+                                    m._heartHits = [];
+                                    m.stunTimer = Math.max(m.stunTimer || 0, 3.5);
+                                    m.skillCooldown = Math.max(m.skillCooldown || 0, 3.5);
+                                    m.isCharging = false;
+                                    Particles.spawnParticles(state, m.x, m.y - 40, '#f0abfc', 26, { size: 6 });
+                                    Particles.showFloatingText(state, '💔 HEART CRUSHED — STUNNED!', m.x, m.y - 95, '#f0abfc');
+                                    try { audio.playExplosion(); } catch (e2) {}
+                                }
+                            }
+                        } catch (e) {}
                         try { audio.playHit(); } catch (e) {}
                         Particles.spawnBloodImpact(state, m.x, m.y, m.species.color);
                         this.popText(state, (hr.crit ? 'CRIT -' : '-') + hr.dmg,
@@ -985,7 +1059,7 @@ const WeaponSystem = {
                                 }
                             }
                             Particles.spawnParticles(state, m.x, m.y, '#f97316', 20, { size: 6 });
-                            state.screenShake = Math.max(state.screenShake, 12);
+                            state.screenShake = Math.max(state.screenShake || 0, 12);
                         }
 
                         // NEW: Chain lightning (tesla gun)
@@ -1140,17 +1214,54 @@ const WeaponSystem = {
                 : Object.entries(state.remotePlayers || {});
         } catch (e) { return; }
         if (!remotes.length || !state.bullets) return;
+        // Track consumed helper bullets (non-pierce dies on first remote-fish hit).
+        const deadBullets = new Set();
         for (const b of state.bullets) {
             if (!b || b.owner !== 'player' || !b.id) continue;
+            if (deadBullets.has(b.id)) continue;
+            // Shooter's own bullets already damaged the local hooked fish
+            // above — never claim our own catch as "remote help".
+            const ownHooked = state.fishing && state.fishing.mode === 'HOOKED' ? state.fishing.hookedFish : null;
             for (const [pid, rp] of remotes) {
                 const h = rp && rp.fishing && rp.fishing.mode === 'HOOKED' ? rp.fishing.hooked : null;
                 if (!h || h.isDead || typeof h.x !== 'number') continue;
                 if (b._claimedFor && b._claimedFor[pid]) continue;
-                const hitR = (h.size || 16) + (h.isInflated ? 12 : 0) + 8;
-                if (Math.hypot(b.x - h.x, b.y - h.y) < hitR) {
+                if (b.hitSet && b.hitSet.has('rfish:' + pid)) continue;
+                const hitR = (h.size || h.species && h.species.size || 16) + (h.isInflated ? 12 : 0) + 8 + (b.scatter ? 10 : 0);
+                // Segment test (prev -> cur) so 900px/s bullets can't tunnel.
+                const px = (typeof b._px === 'number') ? b._px : (b.x - (b.vx || 0) * 0.016);
+                const py = (typeof b._py === 'number') ? b._py : (b.y - (b.vy || 0) * 0.016);
+                let hit = false;
+                try { hit = this.segHitsCircle(px, py, b.x, b.y, h.x, h.y, hitR); } catch (e) {
+                    hit = Math.hypot(b.x - h.x, b.y - h.y) < hitR;
+                }
+                if (hit) {
                     if (!b._claimedFor) b._claimedFor = {};
                     b._claimedFor[pid] = 1;
-                    try { Particles.spawnWaterSplashes(state, b.x, b.y, 4); } catch (e) {}
+                    if (b.hitSet) { try { b.hitSet.add('rfish:' + pid); } catch (e2) {} }
+                    // ---- INSTANT local feedback (no waiting for snapshot) ----
+                    // Same look/sound as a local hooked-fish hit: splash at
+                    // the FISH (not the bullet), damage number, hit sound,
+                    // and a blink flag the remote renderer picks up — so the
+                    // helper's screen feels exactly like the catcher's.
+                    let est = Math.max(1, Math.round(b.damage || 1));
+                    try {
+                        if (b.critMult && b.critMult > 1) est = Math.max(1, Math.round(est * b.critMult));
+                        if (b.executeMult && h.maxHp > 0 && h.hp / h.maxHp < 0.35) est = Math.max(1, Math.round(est * b.executeMult));
+                        if (b.bossMult && (h.isBoss || h.rarity === 'legendary' || h.rarity === 'mythic' || h.rarity === 'boss')) est = Math.max(1, Math.round(est * b.bossMult));
+                    } catch (e) {}
+                    const crit = (b.critMult || 1) > 1;
+                    try { Particles.spawnWaterSplashes(state, h.x, h.y, 5); } catch (e) {}
+                    try { Particles.spawnBloodImpact(state, h.x, h.y, h.color || '#38bdf8', 4); } catch (e) {}
+                    try { this.popText(state, (crit ? 'CRIT -' : '-') + est, h.x, h.y, crit ? '#fde047' : '#38bdf8'); } catch (e) {}
+                    try { audio.playHit(); } catch (e) {}
+                    // Screen-space echo drawn ABOVE the remote model (world
+                    // floating texts render under the remote overlay — this
+                    // one is re-drawn on top in _drawRemoteFishing).
+                    try {
+                        h._hitFlash = 0.3;
+                        h._dmgPop = { txt: (crit ? 'CRIT -' : '-') + est, col: crit ? '#fde047' : '#38bdf8', t: (state.time || 0) };
+                    } catch (e) {}
                     try {
                         Multiplayer.queueFishHit({
                             to: pid, bid: b.id, dmg: b.damage,
@@ -1163,9 +1274,16 @@ const WeaponSystem = {
                             bossMult: b.bossMult || 0, drainMult: b.drainMult || 0
                         });
                     } catch (e) {}
-                    if (!b.pierce) break;
+                    if (!b.pierce) { deadBullets.add(b.id); break; }
                 }
             }
+        }
+        // Remove helper-consumed bullets so shots visibly connect instead of
+        // flying through the fish.
+        if (deadBullets.size) {
+            try {
+                state.bullets = state.bullets.filter(b => !(b && b.id && deadBullets.has(b.id)));
+            } catch (e) {}
         }
     }
 };

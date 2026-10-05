@@ -42,6 +42,29 @@ const Player = {
                 p.adrenalineT = Math.max(0, p.adrenalineT - delta);
                 moveSpeed *= 1.5;
             }
+            // Swift Tide item: +40% legs while it lasts (stacks with adrenaline).
+            if ((p.swiftT || 0) > 0) {
+                p.swiftT = Math.max(0, p.swiftT - delta);
+                moveSpeed *= 1.4;
+            }
+            // Regen Kelp: +5 HP/s while it lasts.
+            if ((p.regenT || 0) > 0) {
+                p.regenT = Math.max(0, p.regenT - delta);
+                if ((p.hp || 0) > 0 && !p.isDead && p.hp < p.maxHp) {
+                    p.hp = Math.min(p.maxHp, p.hp + 5 * delta);
+                    p._regenTick = (p._regenTick || 0) + delta;
+                    if (p._regenTick >= 1) {
+                        p._regenTick = 0;
+                        try { this.refreshHUD(state); } catch (e) {}
+                    }
+                }
+            }
+            // Timed item buffs: just decay (hooks live in Combat/weapons/fishData).
+            if ((p.ironSkinT || 0) > 0) p.ironSkinT = Math.max(0, p.ironSkinT - delta);
+            if ((p.rageT || 0) > 0) p.rageT = Math.max(0, p.rageT - delta);
+            if ((p.thornT || 0) > 0) p.thornT = Math.max(0, p.thornT - delta);
+            if ((p.magnetT || 0) > 0) p.magnetT = Math.max(0, p.magnetT - delta);
+            if ((p.luckT || 0) > 0) p.luckT = Math.max(0, p.luckT - delta);
 
             p.x += dx * moveSpeed * 60 * delta;
             p.y += dy * moveSpeed * 60 * delta;
@@ -167,69 +190,6 @@ const Player = {
                 } catch (e) {}
             }
         }
-        // Void Leviathan LAND PULL tug-of-war: mash SPACE to fill the bar
-        // before the timer runs out while it drags you toward itself.
-        if (p.voidDrag && p.voidDrag.timer > 0) {
-            const vd = p.voidDrag;
-            vd.timer -= delta;
-            try {
-                const b = vd.boss;
-                if (b && Number.isFinite(b.x) && Number.isFinite(b.y)) {
-                    const dx = b.x - p.x, dy = b.y - p.y;
-                    const d = Math.hypot(dx, dy) || 1;
-                    p.x += (dx / d) * 190 * delta;
-                    p.y += (dy / d) * 190 * delta;
-                    for (let i = 1; i <= 4; i++) {
-                        const t = i / 5;
-                        Particles.spawnParticles(state, p.x + dx * t, p.y + dy * t, '#a855f7', 1, { size: 3 });
-                    }
-                }
-                if (typeof WorldSystem !== 'undefined' && WorldSystem.clampEntity) {
-                    WorldSystem.clampEntity(state, p, p.radius);
-                }
-            } catch (e) {}
-            // Tension bar doubles as the break-free meter.
-            try {
-                const bar = document.getElementById('tension-bar');
-                const txt = document.getElementById('tension-text');
-                const hud = document.getElementById('tension-hud');
-                if (hud) hud.classList.remove('hidden');
-                if (bar) bar.style.width = `${Math.min(100, Math.round((vd.mash / vd.need) * 100))}%`;
-                if (txt) { txt.innerText = `MASH SPACE! ${vd.mash}/${vd.need}`; txt.className = 'text-fuchsia-400'; }
-            } catch (e) {}
-            if (vd.mash >= vd.need) {
-                // SUCCESS: yanked aground — stunned 4s, free damage.
-                try {
-                    if (vd.boss) vd.boss.stunTimer = Math.max(vd.boss.stunTimer || 0, 4);
-                    Particles.showFloatingText(state, '💥 BEACHED! UNLOAD EVERYTHING!', p.x, p.y - 60, '#22d3ee');
-                    try { audio.playLevelUp(); } catch (e) {}
-                } catch (e) {}
-                p.voidDrag = null;
-                try { document.getElementById('tension-hud').classList.add('hidden'); } catch (e) {}
-            } else if (vd.timer <= 0) {
-                // FAIL: slammed toward the water for 30% max HP, boss opens P2.
-                try {
-                    if (typeof Combat !== 'undefined' && Combat.damagePlayer) {
-                        Combat.damagePlayer(state, Math.round((p.maxHp || 100) * 0.3), { knockback: 0 });
-                    } else {
-                        p.hp = Math.max(1, p.hp - Math.round((p.maxHp || 100) * 0.3));
-                    }
-                    if (typeof Player !== 'undefined' && Player.addPull && !(p.onIsland)) {
-                        // Mainland: slammed east toward the surf.
-                        Player.addPull(state, (500 / 0.8), 0, 0.8);
-                    }
-                    Particles.showFloatingText(state, '🌊 DRAGGED UNDER!', p.x, p.y - 60, '#38bdf8');
-                    if (vd.boss) {
-                        state.delayedBlasts.push({
-                            x: vd.boss.x, y: vd.boss.y, radius: 200, damage: 60,
-                            timer: 0.6, color: '#7c3aed', shake: 20,
-                        });
-                    }
-                } catch (e) {}
-                p.voidDrag = null;
-                try { document.getElementById('tension-hud').classList.add('hidden'); } catch (e) {}
-            }
-        }
         // Abyssal set regen
         if (p.armorSetBonus && p.armorSetBonus.hpRegen && p.hp < p.maxHp && !p.isDead) {
             p._regenTick = (p._regenTick || 0) + delta;
@@ -315,7 +275,13 @@ const Player = {
         if (coinsDisplay) coinsDisplay.innerText = p.coins;
 
         const bucketDisplay = document.getElementById('bucket-display');
-        if (bucketDisplay) bucketDisplay.innerText = `${p.bucket.length} / ${p.bucketCapacity}`;
+        if (bucketDisplay) {
+            bucketDisplay.innerText = `${p.bucket.length} / ${p.bucketCapacity}`;
+            // Full bucket reads instantly: red pulsing count (CSS .bucket-full).
+            try {
+                bucketDisplay.classList.toggle('bucket-full', (p.bucket.length || 0) >= (p.bucketCapacity || 15));
+            } catch (e) {}
+        }
 
         // Crafted bait chip (Ritual system)
         if (typeof Ritual !== 'undefined' && Ritual.refreshBaitHUD) {
@@ -616,6 +582,15 @@ const Player = {
             }
             state.enemies = (state.enemies || []).filter(e => !(e && e.isBoss));
             state.bossDeaths = 0;
+            // The sea belongs to the angler again: lift any boss curse
+            // (void black / hydra green) and let forced storms pass soon.
+            try {
+                if (typeof Ritual !== 'undefined') {
+                    if (Ritual.clearVoidBlackSea) Ritual.clearVoidBlackSea(state);
+                    if (Ritual.clearHydraSea) Ritual.clearHydraSea(state);
+                    if (Ritual.unwindBossStorm) Ritual.unwindBossStorm(state);
+                }
+            } catch (e) {}
             try { audio.playRoar(); } catch (e) {}
             Particles.showFloatingText(state, '💀 "YOU ARE NOT STRONG ENOUGH TO BEAT ME."', bx, by, '#ef4444');
             if (typeof UI !== 'undefined' && UI.updateStatusBanner) {
@@ -647,9 +622,8 @@ const Player = {
         p.burnTick = 0;
         p.flashTimer = 0;
         p.blurTimer = 0;
-        // Fresh body, fresh fight: drop boss debuffs (tether/QTE/drain).
+        // Fresh body, fresh fight: drop boss debuffs (tether/drain).
         p.tether = null;
-        p.voidDrag = null;
         p.voidDrain = null;
         try { document.getElementById('tension-hud').classList.add('hidden'); } catch (e) {}
         this.hideDeathMenu();

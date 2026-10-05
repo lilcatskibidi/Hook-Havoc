@@ -1,17 +1,31 @@
 /* ====================================================================
  * ItemSystem — buyable consumables (shop Items tab) + one equipped item
- * on E + dash slot. State: p.itemStock {id:count}, p.equippedItem id.
- *   bandage:    +60 HP
- *   adrenaline: dash cooldown reset + 1.5x move speed for 8s
- *   smoke:      stun nearby threats 2.5s + 1s i-frames
- * E uses the equipped item when Input.interact finds nothing nearby.
- * Only ONE item equipped at a time; quantities stack per id.
+ * on F + dash slot. State: p.itemStock {id:count}, p.equippedItem id.
+ * 16 items, cheap heals stack to 50, room-clearing ordnance caps at 5.
+ * Price scales with power (150c bandage → 4000c sunfall whistle).
+ * Timed buffs live on the player (ironSkinT/rageT/swiftT/magnetT/luckT/
+ * regenT/thornT) and decay in Player.update; hooks live in Combat
+ * (damagePlayer/thorns, loot magnet), WeaponSystem.shoot (rage) and
+ * rollFishSpecies (luck). F uses the equipped item.
  * ================================================================== */
 const ItemSystem = {
     ITEMS: [
-        { id: 'bandage', name: 'Bandage', icon: '🩹', desc: 'Restore 60 HP on use.', price: 150, max: 5 },
-        { id: 'adrenaline', name: 'Adrenaline', icon: '💉', desc: 'Reset dash cooldown + 1.5× speed for 8s.', price: 300, max: 3 },
-        { id: 'smoke', name: 'Smoke Bomb', icon: '💨', desc: 'Stun nearby threats 2.5s + dodge 1s.', price: 250, max: 3 },
+        { id: 'bandage', name: 'Bandage', icon: '🩹', desc: 'Restore 60 HP on use.', price: 150, max: 50 },
+        { id: 'smoke', name: 'Smoke Bomb', icon: '💨', desc: 'Stun nearby threats 2.5s + dodge 1s.', price: 250, max: 50 },
+        { id: 'adrenaline', name: 'Adrenaline', icon: '💉', desc: 'Reset dash cooldown + 1.5× speed for 8s.', price: 300, max: 30 },
+        { id: 'medkit', name: 'Medkit', icon: '⛑', desc: 'FULL heal + cleanse burn/slow.', price: 600, max: 20 },
+        { id: 'swift_tide', name: 'Swift Tide', icon: '🌊', desc: '+40% move speed for 20s. Stacks with adrenaline.', price: 700, max: 20 },
+        { id: 'magnet_charm', name: 'Magnet Charm', icon: '🧲', desc: 'Loot flies to you (3× magnet) for 60s.', price: 700, max: 20 },
+        { id: 'iron_skin', name: 'Ironskin Tonic', icon: '🛡', desc: 'Take 60% less damage for 12s.', price: 800, max: 20 },
+        { id: 'regen_kelp', name: 'Regen Kelp', icon: '🌿', desc: '+5 HP/s for 20s (100 HP total).', price: 850, max: 20 },
+        { id: 'lucky_lure', name: 'Lucky Lure', icon: '🍀', desc: '+2.0 fishing luck for 60s. Rarer bites!', price: 900, max: 20 },
+        { id: 'thorn_shell', name: 'Thorn Shell', icon: '🦔', desc: 'Reflect 50% damage back for 15s.', price: 1000, max: 15 },
+        { id: 'berserk', name: 'Berserk Rum', icon: '🍺', desc: '+50% bullet damage for 15s.', price: 1500, max: 15 },
+        { id: 'ghost_cloak', name: 'Ghost Cloak', icon: '👻', desc: 'Untouchable 4s + stun nearby 3s.', price: 2000, max: 10 },
+        { id: 'titan_heart', name: 'Titan Heart', icon: '💗', desc: 'Heal 150 + cleanse + 2s dodge.', price: 2500, max: 10 },
+        { id: 'storm_cell', name: 'Storm Cell', icon: '🌩', desc: 'Lightning smites threats near you (250 dmg + stun).', price: 3000, max: 10 },
+        { id: 'sunfall', name: 'Sunfall Whistle', icon: '☀', desc: '800 damage to EVERYTHING on screen. The sky answers.', price: 4000, max: 5 },
+        { id: 'timestop', name: 'Timestop Pocketwatch', icon: '⏳', desc: 'Freeze all threats 5s + reload free.', price: 3500, max: 5 },
     ],
 
     def(id) {
@@ -35,23 +49,41 @@ const ItemSystem = {
     },
 
     // ---- shop ----
-    buy(state, id) {
+    // qty: how many to buy (capped by stack space, affordability and 50).
+    buy(state, id, qty) {
         try {
             const def = this.def(id);
             if (!def) return false;
             const p = state.player;
             this.ensure(state);
-            if (this.stock(state, id) >= def.max) {
+            const have = this.stock(state, id);
+            const space = Math.max(0, def.max - have);
+            if (space <= 0) {
+                try {
+                    Particles.showFloatingText(state, `${def.name} stack full (×${def.max})!`, p.x, p.y - 50, '#fbbf24');
+                } catch (e) {}
                 try { audio.playError(); } catch (e) {}
                 return false;
             }
-            if ((p.coins || 0) < def.price) {
+            let n = Math.floor(Number(qty) || 1);
+            if (!isFinite(n) || n < 1) n = 1;
+            n = Math.min(n, space, 50);
+            // Affordability trims the stack (buy what you can).
+            const afford = Math.floor((p.coins || 0) / def.price);
+            if (afford <= 0) {
+                try {
+                    Particles.showFloatingText(state, `Need ${def.price}c for ${def.name}!`, p.x, p.y - 50, '#f87171');
+                } catch (e) {}
                 try { audio.playError(); } catch (e) {}
                 return false;
             }
-            p.coins -= def.price;
-            p.itemStock[id] = this.stock(state, id) + 1;
+            n = Math.min(n, afford);
+            p.coins -= def.price * n;
+            p.itemStock[id] = have + n;
             if (!p.equippedItem) p.equippedItem = id; // first buy auto-equips
+            try {
+                Particles.showFloatingText(state, `+${n} ${def.name} (−${def.price * n}c)`, p.x, p.y - 50, '#34d399');
+            } catch (e) {}
             try { audio.playCoin(); } catch (e) {}
             if (typeof Player !== 'undefined') {
                 try { Player.refreshHUD(state); } catch (e) {}
@@ -111,6 +143,46 @@ const ItemSystem = {
             p.itemStock[id] = this.stock(state, id) - 1;
             p.itemCd = 0.8;
             let ok = false;
+            const say = (txt, col) => {
+                try { Particles.showFloatingText(state, txt, p.x, p.y - 50, col || '#fff'); } catch (e) {}
+            };
+            const stunNear = (R, t) => {
+                let hit = 0;
+                try {
+                    for (const e of (state.enemies || [])) {
+                        if (!e || (e.hp || 0) <= 0) continue;
+                        if (Math.hypot(e.x - p.x, e.y - p.y) < R) { e.stunTimer = Math.max(e.stunTimer || 0, t); hit++; }
+                    }
+                    for (const m of (state.monstersOnLand || [])) {
+                        if (!m || (m.hp || 0) <= 0) continue;
+                        if (Math.hypot(m.x - p.x, m.y - p.y) < R) { m.stunTimer = Math.max(m.stunTimer || 0, t); hit++; }
+                    }
+                } catch (e) {}
+                return hit;
+            };
+            const hurtNear = (R, dmg, stun) => {
+                let hit = 0;
+                try {
+                    for (const e of (state.enemies || [])) {
+                        if (!e || (e.hp || 0) <= 0) continue;
+                        if (Math.hypot(e.x - p.x, e.y - p.y) < R) {
+                            e.hp -= dmg; e.hitFlash = 0.4;
+                            if (stun) e.stunTimer = Math.max(e.stunTimer || 0, stun);
+                            if (e.hp <= 0 && typeof EnemySpawner !== 'undefined') EnemySpawner.onEnemyKilled(e);
+                            hit++;
+                        }
+                    }
+                    for (const m of (state.monstersOnLand || [])) {
+                        if (!m || (m.hp || 0) <= 0) continue;
+                        if (Math.hypot(m.x - p.x, m.y - p.y) < R) {
+                            m.hp -= dmg; m.hitFlash = 0.4;
+                            if (stun) m.stunTimer = Math.max(m.stunTimer || 0, stun);
+                            hit++;
+                        }
+                    }
+                } catch (e) {}
+                return hit;
+            };
             if (id === 'bandage') {
                 if (typeof Player !== 'undefined' && Player.heal) {
                     try { Player.heal(state, 60); ok = true; } catch (e) {}
@@ -119,36 +191,139 @@ const ItemSystem = {
                 p.dashCd = 0;
                 p.adrenalineT = 8;
                 try {
-                    Particles.showFloatingText(state, '⚡ ADRENALINE! Dash ready, speed up!', p.x, p.y - 50, '#fde047');
+                    say('⚡ ADRENALINE! Dash ready, speed up!', '#fde047');
                     try { audio.playLevelUp(); } catch (e) {}
                     ok = true;
                 } catch (e) { ok = true; }
             } else if (id === 'smoke') {
-                const R = 420;
-                let hit = 0;
-                try {
-                    for (const e of (state.enemies || [])) {
-                        if (!e || (e.hp || 0) <= 0) continue;
-                        if (Math.hypot(e.x - p.x, e.y - p.y) < R) {
-                            e.stunTimer = Math.max(e.stunTimer || 0, 2.5);
-                            hit++;
-                        }
-                    }
-                    for (const m of (state.monstersOnLand || [])) {
-                        if (!m || (m.hp || 0) <= 0) continue;
-                        if (Math.hypot(m.x - p.x, m.y - p.y) < R) {
-                            m.stunTimer = Math.max(m.stunTimer || 0, 2.5);
-                            hit++;
-                        }
-                    }
-                } catch (e) {}
+                const hit = stunNear(420, 2.5);
                 p.iframes = Math.max(p.iframes || 0, 1.0);
                 try {
                     Particles.spawnParticles(state, p.x, p.y, '#cbd5e1', 24, { size: 6 });
-                    Particles.showFloatingText(state, hit > 0 ? `💨 Smoked ${hit} threats!` : '💨 Vanish...', p.x, p.y - 50, '#e2e8f0');
+                    say(hit > 0 ? `💨 Smoked ${hit} threats!` : '💨 Vanish...', '#e2e8f0');
                     try { audio.playWhoosh(); } catch (e) {}
                     ok = true;
                 } catch (e) { ok = true; }
+            } else if (id === 'medkit') {
+                p.hp = p.maxHp;
+                p.burnTimer = 0; p.slowTimer = 0; p.poisonTimer = 0;
+                if (typeof Player !== 'undefined') { try { Player.refreshHUD(state); } catch (e) {} }
+                say('⛑ FULL HEAL + cleansed!', '#34d399');
+                try { audio.playLevelUp(); } catch (e) {}
+                ok = true;
+            } else if (id === 'swift_tide') {
+                p.swiftT = 20;
+                say('🌊 SWIFT TIDE! +40% speed 20s', '#67e8f9');
+                try { audio.playWhoosh(); } catch (e) {}
+                ok = true;
+            } else if (id === 'magnet_charm') {
+                p.magnetT = 60;
+                say('🧲 LOOT MAGNET 60s!', '#fbbf24');
+                try { audio.playCoin(); } catch (e) {}
+                ok = true;
+            } else if (id === 'iron_skin') {
+                p.ironSkinT = 12;
+                say('🛡 IRONSKIN! −60% damage 12s', '#94a3b8');
+                try { audio.playUIClick(); } catch (e) {}
+                ok = true;
+            } else if (id === 'regen_kelp') {
+                p.regenT = 20;
+                say('🌿 REGENERATING 20s!', '#4ade80');
+                try { audio.playUIClick(); } catch (e) {}
+                ok = true;
+            } else if (id === 'lucky_lure') {
+                p.luckT = 60;
+                say('🍀 LUCKY! +2 luck 60s — cast now!', '#f0abfc');
+                try { audio.playLevelUp(); } catch (e) {}
+                ok = true;
+            } else if (id === 'thorn_shell') {
+                p.thornT = 15;
+                say('🦔 THORNS UP! Attackers bleed 15s', '#fb923c');
+                try { audio.playUIClick(); } catch (e) {}
+                ok = true;
+            } else if (id === 'berserk') {
+                p.rageT = 15;
+                say('🍺 BERSERK! +50% damage 15s', '#ef4444');
+                try { audio.playRoar(); } catch (e) {}
+                ok = true;
+            } else if (id === 'ghost_cloak') {
+                p.iframes = Math.max(p.iframes || 0, 4.0);
+                const hit = stunNear(420, 3.0);
+                try { Particles.spawnParticles(state, p.x, p.y, '#e9d5ff', 30, { size: 6 }); } catch (e) {}
+                say(hit > 0 ? `👻 UNTOUCHABLE 4s — ${hit} frozen!` : '👻 UNTOUCHABLE 4s!', '#e9d5ff');
+                try { audio.playWhoosh(); } catch (e) {}
+                ok = true;
+            } else if (id === 'titan_heart') {
+                if (typeof Player !== 'undefined' && Player.heal) {
+                    try { Player.heal(state, 150); } catch (e) { p.hp = Math.min(p.maxHp, (p.hp || 0) + 150); }
+                } else { p.hp = Math.min(p.maxHp, (p.hp || 0) + 150); }
+                p.burnTimer = 0; p.slowTimer = 0;
+                p.iframes = Math.max(p.iframes || 0, 2.0);
+                say('💗 TITAN HEART! +150 HP + dodge', '#f472b6');
+                try { audio.playLevelUp(); } catch (e) {}
+                ok = true;
+            } else if (id === 'storm_cell') {
+                const hit = hurtNear(600, 250, 2.0);
+                try {
+                    for (let k = 0; k < 5; k++) {
+                        Particles.spawnLightning(state, p.x + (Math.random() - 0.5) * 500, p.y - 200, p.x + (Math.random() - 0.5) * 500, p.y + 100, '#fde047');
+                    }
+                    Particles.spawnParticles(state, p.x, p.y, '#fde047', 30, { size: 6 });
+                } catch (e) {}
+                state.screenShake = Math.max(state.screenShake || 0, 14);
+                say(hit > 0 ? `🌩 STORM SMITES ${hit}!` : '🌩 The sky rumbles...', '#fde047');
+                try { audio.playThunder(); } catch (e) { try { audio.playExplosion(); } catch (e2) {} }
+                ok = true;
+            } else if (id === 'sunfall') {
+                let hit = 0;
+                try {
+                    for (const e of (state.enemies || [])) {
+                        if (!e || (e.hp || 0) <= 0 || e.isBoss) continue;
+                        e.hp -= 800; e.hitFlash = 0.6;
+                        if (e.hp <= 0 && typeof EnemySpawner !== 'undefined') EnemySpawner.onEnemyKilled(e);
+                        hit++;
+                    }
+                    for (const m of (state.monstersOnLand || [])) {
+                        if (!m || (m.hp || 0) <= 0) continue;
+                        if (m.species && m.species.isBoss) { m.hp -= 200; }
+                        else m.hp -= 800;
+                        m.hitFlash = 0.6;
+                        hit++;
+                    }
+                    Particles.spawnParticles(state, p.x, p.y - 100, '#fde047', 60, { size: 8 });
+                    Particles.spawnParticles(state, p.x, p.y, '#fb923c', 40, { size: 7 });
+                } catch (e) {}
+                state.screenShake = Math.max(state.screenShake || 0, 22);
+                say(hit > 0 ? `☀ SUNFALL! ${hit} scorched!` : '☀ The sky answers...', '#fde047');
+                try { audio.playExplosion(); } catch (e) {}
+                ok = true;
+            } else if (id === 'timestop') {
+                let hit = 0;
+                try {
+                    for (const e of (state.enemies || [])) {
+                        if (!e || (e.hp || 0) <= 0 || e.isBoss) continue;
+                        e.stunTimer = Math.max(e.stunTimer || 0, 5.0); e.freezeTimer = Math.max(e.freezeTimer || 0, 5.0); hit++;
+                    }
+                    for (const m of (state.monstersOnLand || [])) {
+                        if (!m || (m.hp || 0) <= 0) continue;
+                        if (m.species && m.species.isBoss) { m.stunTimer = Math.max(m.stunTimer || 0, 1.5); }
+                        else { m.stunTimer = Math.max(m.stunTimer || 0, 5.0); m.freezeTimer = Math.max(m.freezeTimer || 0, 5.0); }
+                        hit++;
+                    }
+                } catch (e) {}
+                // Free reload while time stands still.
+                try {
+                    if (typeof WeaponSystem !== 'undefined' && WeaponSystem.getActiveWeapon) {
+                        const w = WeaponSystem.getActiveWeapon(state);
+                        if (w && w.id !== 'pistol' && CONFIG.MAX_AMMO && CONFIG.MAX_AMMO[w.id] !== Infinity) {
+                            p.weaponAmmo[w.id] = CONFIG.MAX_AMMO[w.id];
+                            if (typeof Player !== 'undefined') { try { Player.refreshWeaponHUD(state); } catch (e) {} }
+                        }
+                    }
+                } catch (e) {}
+                say(hit > 0 ? `⏳ TIME FROZEN — ${hit} held!` : '⏳ Time stands still...', '#a5f3fc');
+                try { audio.playUIClick(); } catch (e) {}
+                ok = true;
             }
             if (ok) {
                 if (typeof Player !== 'undefined') {
@@ -187,25 +362,56 @@ const ItemSystem = {
                     '<div class="flex items-center gap-3">' +
                         `<div class="w-10 h-10 rounded-lg flex items-center justify-center text-2xl" style="background:rgba(52,211,153,0.12);border:1px solid rgba(52,211,153,0.35)">${def.icon}</div>` +
                         '<div>' +
-                            `<div class="font-bold text-white text-sm">${def.name} <span class="text-xs text-emerald-300">×${n}</span>` +
-                            (equipped ? ' <span class="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-500/30 text-emerald-200">[E] EQUIPPED</span>' : '') +
+                            `<div class="font-bold text-white text-sm">${def.name} <span class="text-xs text-emerald-300">×${n}/${def.max}</span>` +
+                            (equipped ? ' <span class="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-500/30 text-emerald-200">[F] EQUIPPED</span>' : '') +
                             '</div>' +
-                            `<div class="text-[10px] text-slate-400">${def.desc} Max ${def.max}.</div>` +
+                            `<div class="text-[10px] text-slate-400">${def.desc}</div>` +
+                            `<div class="text-[10px] text-amber-300/80 font-bold">${def.price}c each</div>` +
                         '</div>' +
                     '</div>' +
                     '<div class="flex items-center gap-1.5 shrink-0">' +
                         `<button data-item-equip="${def.id}" title="Equip on [F]" class="px-2.5 h-8 rounded-lg text-[11px] font-black border transition-all ${equipped ? 'bg-emerald-500/25 text-emerald-200 border-emerald-500/50' : 'bg-slate-800 text-slate-300 border-slate-600 hover:bg-slate-700'}">F</button>` +
-                        `<button data-item-buy="${def.id}" title="Buy 1 for ${def.price}c" ${(!afford || full) ? 'disabled' : ''} class="btn-buy px-3 h-8 rounded-lg text-[11px] font-black text-slate-950">` +
-                            `<i class="fa-solid fa-coins mr-1"></i>${def.price}c</button>` +
+                        `<button data-item-buy="${def.id}" title="Buy ${def.name} (pick qty, max 50)" ${(!afford || full) ? 'disabled' : ''} class="btn-buy px-3 h-8 rounded-lg text-[11px] font-black text-slate-950">` +
+                            `<i class="fa-solid fa-cart-plus mr-1"></i>BUY</button>` +
                     '</div>';
                 content.appendChild(div);
             }
             content.querySelectorAll('[data-item-buy]').forEach(btn => {
                 btn.onclick = () => {
                     try {
-                        if (this.buy(state, btn.dataset.itemBuy) && typeof Shop !== 'undefined' && Shop.renderTab) {
-                            Shop.renderTab(state, 'items');
+                        const def = this.def(btn.dataset.itemBuy);
+                        if (!def) return;
+                        const have = this.stock(state, def.id);
+                        const space = Math.max(0, def.max - have);
+                        if (space <= 0) return;
+                        const affordN = Math.floor((state.player.coins || 0) / def.price);
+                        if (affordN <= 0) {
+                            try { audio.playError(); } catch (e) {}
+                            return;
                         }
+                        const cap = Math.min(space, affordN, 50);
+                        const finish = () => {
+                            try {
+                                if (typeof Shop !== 'undefined' && Shop.renderTab) Shop.renderTab(state, 'items');
+                            } catch (e) {}
+                        };
+                        // Bulk picker (in-game modal, max 50) — 1-tap buy when cap is 1.
+                        if (cap <= 1) {
+                            if (this.buy(state, def.id, 1)) finish();
+                            return;
+                        }
+                        if (typeof QtyModal !== 'undefined' && QtyModal.ask) {
+                            QtyModal.ask({
+                                title: def.icon + ' ' + def.name.toUpperCase(),
+                                sub: `${def.price}c each · own ×${have}/${def.max} · you afford ${affordN}`,
+                                min: 1, max: cap, value: cap,
+                            }).then((qty) => {
+                                if (qty !== null && qty !== undefined && this.buy(state, def.id, qty)) finish();
+                                else finish();
+                            });
+                            return;
+                        }
+                        if (this.buy(state, def.id, 1)) finish();
                     } catch (e) {}
                 };
             });

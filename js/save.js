@@ -85,6 +85,10 @@ const SaveSystem = {
             equippedItem: (typeof p.equippedItem === 'string') ? p.equippedItem : null,
             caveUnlocked: !!p.caveUnlocked,
             inCave: !!p.inCave,
+            inVoidTemple: !!p.inVoidTemple,
+            voidTemple: (p.voidTemple && typeof p.voidTemple === 'object')
+                ? { legs: { ...(p.voidTemple.legs || {}) }, key: !!p.voidTemple.key, gateOpen: !!p.voidTemple.gateOpen, ready: !!p.voidTemple.ready }
+                : { legs: {}, key: false, gateOpen: false, ready: false },
             returnPos: (p.returnPos && typeof p.returnPos.x === 'number') ? { x: p.returnPos.x, y: p.returnPos.y } : null,
             casinoTokens: p.casinoTokens || 0,
             casinoLifetimeWinnings: p.casinoLifetimeWinnings || 0,
@@ -461,7 +465,7 @@ const SaveSystem = {
     apply(state, data) {
         const p = state.player;
 
-        if (typeof data.coins === 'number')    p.coins = data.coins;
+        if (Number.isFinite(data.coins) && data.coins >= 0) p.coins = Math.min(1e12, Math.floor(data.coins));
         // Level block: strict-guarded so a corrupt/NaN save can never wipe
         // progress (bare typeof checks used to assign NaN/0 verbatim).
         if (Number.isFinite(data.level) && data.level >= 1) p.level = Math.min(999, Math.floor(data.level));
@@ -652,6 +656,28 @@ const SaveSystem = {
         // Sealed cave stays solved once opened (+ where you are in it)
         p.caveUnlocked = !!data.caveUnlocked;
         p.inCave = !!data.inCave;
+        // Never reload INSIDE the shrine (its map is a ritual instance):
+        // wake at the cave circle with offerings kept.
+        p.inVoidTemple = false;
+        if (data.voidTemple && typeof data.voidTemple === 'object') {
+            const legs = {};
+            if (data.voidTemple.legs && typeof data.voidTemple.legs === 'object') {
+                for (const [k, v] of Object.entries(data.voidTemple.legs)) {
+                    if (!v) continue;
+                    // New shape: per-slot fish snapshots; legacy: true flags.
+                    if (typeof v === 'object') {
+                        legs[String(k)] = {
+                            id: v.id || 'unknown', name: v.name || 'Void fish',
+                            size: v.size || 30, color: v.color || '#a855f7',
+                            accent: v.accent || '#7c3aed', shape: v.shape || 'oval',
+                            finColor: v.finColor || '#4c1d95',
+                            rarity: v.rarity || 'common', mutation: v.mutation || 'void',
+                        };
+                    } else legs[String(k)] = true;
+                }
+            }
+            p.voidTemple = { legs, key: !!data.voidTemple.key, gateOpen: !!data.voidTemple.gateOpen && !data.voidTemple.ready, ready: !!data.voidTemple.ready };
+        } else if (!p.voidTemple) p.voidTemple = { legs: {}, key: false, gateOpen: false, ready: false };
         p.returnPos = (data.returnPos && typeof data.returnPos.x === 'number') ? { x: data.returnPos.x, y: data.returnPos.y } : null;
 
         if (typeof data.casinoTokens === 'number') p.casinoTokens = Math.max(0, Math.floor(data.casinoTokens));

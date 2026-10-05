@@ -9,7 +9,7 @@
 // ============================================================
 const WorldSystem = {
     DAY_LENGTH_SEC: 900, // one full 24h day (slowed for readable windows)
-    WEATHERS: ['clear', 'clouds', 'rain', 'storm', 'fog'],
+    WEATHERS: ['clear', 'clouds', 'rain', 'storm', 'fog', 'aurora', 'monsoon'],
 
     // Each isle sits in a SHARED-style big sea (the room water outside the
     // sand disc fishes exactly like mainland sea: shore/shallow/deep by
@@ -124,15 +124,15 @@ const WorldSystem = {
     },
 
     weatherIcon(w) {
-        return w === 'clear' ? '☀' : w === 'clouds' ? '☁' : w === 'rain' ? '🌧' : w === 'storm' ? '⛈' : '🌫';
+        return w === 'clear' ? '☀' : w === 'clouds' ? '☁' : w === 'rain' ? '🌧' : w === 'storm' ? '⛈' : w === 'aurora' ? '🌌' : w === 'monsoon' ? '🌊' : '🌫';
     },
 
     weatherName(w) {
-        return w === 'clear' ? 'Clear' : w === 'clouds' ? 'Cloudy' : w === 'rain' ? 'Rain' : w === 'storm' ? 'Storm' : 'Fog';
+        return w === 'clear' ? 'Clear' : w === 'clouds' ? 'Cloudy' : w === 'rain' ? 'Rain' : w === 'storm' ? 'Storm' : w === 'aurora' ? 'Aurora' : w === 'monsoon' ? 'Monsoon' : 'Fog';
     },
 
     pickWeather(current) {
-        const bag = ['clear', 'clear', 'clear', 'clouds', 'clouds', 'rain', 'rain', 'fog', 'storm'];
+        const bag = ['clear', 'clear', 'clear', 'clouds', 'clouds', 'rain', 'rain', 'fog', 'storm', 'monsoon', 'monsoon', 'aurora'];
         let w = bag[Math.floor(Math.random() * bag.length)];
         if (w === current && Math.random() < 0.5) w = bag[Math.floor(Math.random() * bag.length)];
         return w;
@@ -181,6 +181,8 @@ const WorldSystem = {
         if (w === 'rain') return 'shallow feeders wake up';
         if (w === 'fog') return 'ambush fish strike unseen';
         if (w === 'clouds') return 'dusk/dawn fish linger';
+        if (w === 'aurora') return 'MYTHICS + mutations bite hard under the lights';
+        if (w === 'monsoon') return 'epic/legendary feeding frenzy — bites come fast';
         return 'fair skies — day fish active';
     },
 
@@ -386,12 +388,13 @@ const WorldSystem = {
         else if (rarity === 'epic') time = ['dawn', 'dusk', 'night'][h % 3];
         else if (rarity === 'rare') time = ['day', 'dawn', 'any'][h % 3];
         else time = ['day', 'any', 'dawn'][h % 3];
-        // weather
+        // weather (aurora/monsoon added to the pools so radar + index
+        // hunters can actually chase them — mythics love the lights)
         let weather = 'any';
         const h2 = (((h >>> 3) % 5) + 5) % 5; // h>>>3 keeps it unsigned
-        if (size >= 55 || rarity === 'mythic') weather = ['storm', 'rain', 'storm', 'storm', 'any'][h2];
-        else if (rarity === 'legendary') weather = ['storm', 'rain', 'fog', 'any', 'storm'][h2];
-        else if (rarity === 'epic') weather = ['rain', 'clouds', 'storm', 'any', 'clear'][h2];
+        if (size >= 55 || rarity === 'mythic') weather = ['aurora', 'storm', 'aurora', 'monsoon', 'any'][h2];
+        else if (rarity === 'legendary') weather = ['storm', 'aurora', 'monsoon', 'any', 'storm'][h2];
+        else if (rarity === 'epic') weather = ['monsoon', 'clouds', 'storm', 'any', 'monsoon'][h2];
         else if (rarity === 'rare') weather = ['clear', 'clouds', 'rain', 'any', 'fog'][h2];
         else weather = ['clear', 'clear', 'clouds', 'any', 'rain'][h2];
         return { time, weather, zone };
@@ -431,6 +434,10 @@ const WorldSystem = {
                 else if (pref.weather === 'storm' || pref.weather === 'rain') mult *= 0.85;
                 else mult *= 0.9;
             }
+            // Sky jackpots: aurora crowns mythics/legendaries, monsoon
+            // feeds epics/legendaries — the index-completion weathers.
+            if (w.weather === 'aurora' && (species.rarity === 'mythic' || species.rarity === 'legendary')) mult *= 1.6;
+            if (w.weather === 'monsoon' && (species.rarity === 'epic' || species.rarity === 'legendary')) mult *= 1.5;
             // Event boosts (place-gated): the ONLY island buffs. Rarity
             // boosts are gone — luck flows through sky + clock + events,
             // exactly what the radar reads.
@@ -453,6 +460,8 @@ const WorldSystem = {
             if (w.weather === 'rain') m *= 0.9;
             if (w.weather === 'storm') m *= 0.8;
             if (w.weather === 'fog') m *= 0.92;
+            if (w.weather === 'monsoon') m *= 0.85;
+            if (w.weather === 'aurora') m *= 0.9;
             if (night) m *= 0.95;
             if (this.seaZone(state).id === 'deep') m *= 0.9;
             if (this.seaZone(state).id === 'island') m *= 0.75;
@@ -1123,7 +1132,10 @@ const WorldSystem = {
             const B = (typeof CONFIG !== 'undefined' && CONFIG.WORLD) || { MIN_X: 40, MAX_X: 4500, MIN_Y: 40, MAX_Y: 3500 };
             const rad = (p.radius || 16);
             if (p.inCave && typeof Ritual !== 'undefined' && Ritual.caveCollide) {
-                try { Ritual.caveCollide(state); } catch (e) {}
+                try {
+                    if (p.inVoidTemple && Ritual.voidTempleCollide) Ritual.voidTempleCollide(state);
+                    else Ritual.caveCollide(state);
+                } catch (e) {}
                 return;
             }
             if (p.onIsland) { this.collide(state); return; }
@@ -1960,13 +1972,14 @@ const WorldSystem = {
                 if (period === 'night') alpha = 0.42;
                 else if (period === 'dusk') alpha = 0.22;
                 else if (period === 'dawn') alpha = 0.10;
-                if (w.weather === 'storm') alpha += 0.22;
-                else if (w.weather === 'rain') alpha += 0.10;
+                if (w.weather === 'storm') alpha += 0.10;
+                else if (w.weather === 'rain') alpha += 0.06;
+                else if (w.weather === 'monsoon') alpha += 0.08;
+                else if (w.weather === 'aurora') alpha += 0.04;
                 else if (w.weather === 'fog') { alpha += 0.06; color = '100,116,139'; }
                 else if (w.weather === 'clouds') alpha += 0.05;
                 alpha = Math.min(0.62, alpha);
-                if (alpha > 0.01) {
-                    ctx.save();
+                if (alpha > 0.01) {                    ctx.save();
                     ctx.fillStyle = `rgba(${color},${alpha})`;
                     ctx.fillRect(0, 0, W, H);
                     // warm dusk band / dawn glow
@@ -1988,11 +2001,13 @@ const WorldSystem = {
                 }
             }
             // --- weather particles (always visual, cheap) ---
-            if (w.weather === 'rain' || w.weather === 'storm') {
+            // Bright-storm rule: rain reads bright, lightning hits harder.
+            if (w.weather === 'rain' || w.weather === 'storm' || w.weather === 'monsoon') {
+                const heavy = w.weather === 'monsoon';
                 ctx.save();
-                ctx.strokeStyle = w.weather === 'storm' ? 'rgba(165,243,252,0.5)' : 'rgba(186,230,253,0.4)';
-                ctx.lineWidth = 2;
-                const n = w.weather === 'storm' ? 90 : 55;
+                ctx.strokeStyle = w.weather === 'storm' ? 'rgba(186,242,253,0.65)' : heavy ? 'rgba(186,230,253,0.6)' : 'rgba(186,230,253,0.4)';
+                ctx.lineWidth = heavy ? 3 : 2;
+                const n = w.weather === 'storm' ? 90 : heavy ? 130 : 55;
                 const t = (state.time || 0) * 900;
                 for (let i = 0; i < n; i++) {
                     const x = ((i * 173.3 + t * 0.3) % (W + 40)) - 20;
@@ -2003,10 +2018,33 @@ const WorldSystem = {
                     ctx.stroke();
                 }
                 // lightning
-                if (w.weather === 'storm' && Math.random() < 0.012) w.flashT = 0.18;
+                if ((w.weather === 'storm' || heavy) && Math.random() < (heavy ? 0.02 : 0.012)) w.flashT = 0.18;
                 if (w.flashT > 0) {
-                    ctx.fillStyle = `rgba(224,242,254,${Math.min(0.5, w.flashT * 2)})`;
+                    ctx.fillStyle = `rgba(240,249,255,${Math.min(0.65, w.flashT * 2.4)})`;
                     ctx.fillRect(0, 0, W, H);
+                }
+                ctx.restore();
+            } else if (w.weather === 'aurora') {
+                // Aurora curtains: bright green/violet bands + starfield.
+                ctx.save();
+                const t = state.time || 0;
+                for (let k = 0; k < 3; k++) {
+                    const x0 = W * (0.2 + k * 0.28) + Math.sin(t * 0.5 + k * 2.1) * 40;
+                    const g = ctx.createLinearGradient(x0 - 60, 0, x0 + 60, 0);
+                    const cols = [['74,222,128', '168,85,247'], ['52,211,153', '129,140,248'], ['110,231,183', '192,132,252']][k];
+                    g.addColorStop(0, `rgba(${cols[0]},0)`);
+                    g.addColorStop(0.5, `rgba(${cols[0]},0.22)`);
+                    g.addColorStop(0.75, `rgba(${cols[1]},0.18)`);
+                    g.addColorStop(1, `rgba(${cols[1]},0)`);
+                    ctx.fillStyle = g;
+                    ctx.fillRect(x0 - 60, 0, 120, H * 0.55);
+                }
+                ctx.fillStyle = 'rgba(255,255,255,0.8)';
+                for (let i = 0; i < 40; i++) {
+                    const sx = (i * 197.3) % W, sy = (i * 131.7) % (H * 0.5);
+                    const tw = 0.4 + 0.6 * Math.abs(Math.sin(t * 1.5 + i));
+                    ctx.globalAlpha = tw * 0.7;
+                    ctx.fillRect(sx, sy, 2, 2);
                 }
                 ctx.restore();
             } else if (w.weather === 'fog') {

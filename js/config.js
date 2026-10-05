@@ -123,7 +123,9 @@ const CONFIG = {
         event_horizon:   45,
         magma_shotgun:   3,
         sonic_pistol:    4,
-        foghorn:         6
+        foghorn:         6,
+        heartlance:      30,
+        choirgun:        24
     },
 
     // Magazine / reserve size per weapon
@@ -181,7 +183,9 @@ const CONFIG = {
         event_horizon:   5,
         magma_shotgun:   24,
         sonic_pistol:    50,
-        foghorn:         40
+        foghorn:         40,
+        heartlance:      6,
+        choirgun:        30
     },
     //  FX — global particle density (0-1). Lowers visual clutter so
     // enemy projectiles stay readable. Does not touch damage.

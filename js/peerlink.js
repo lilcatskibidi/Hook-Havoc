@@ -8,12 +8,17 @@
  * WebRTC; the cloud only brokers the handshake.
  *
  * Room model (unchanged for players): the host claims a fixed PeerJS id
- *   `aquatic-havoc-v<VERSION>-<CODE>` (e.g. aquatic-havoc-v120-AB7K).
- * The version digits are baked into the id, so different game versions
- * can never even find each other's rooms; the hello handshake carries
- * an explicit version string too, for a human-readable reject message.
+ *   `aquatic-havoc-v<SNAPSHOT>-<CODE>` (e.g. aquatic-havoc-v1400001-AB7K).
+ * The snapshot digits are baked into the id, so different snapshots
+ * (even same VERSION, e.g. 1.4.0.0001 vs 1.4.0.0002) can never even
+ * find each other's rooms; the hello handshake carries the explicit
+ * snapshot string too, for a human-readable reject message.
  * Topology stays star-shaped (max 4): clients only ever connect to the
  * host, and the host relays client<->client traffic (announces, skins).
+ *
+ * Bump rule: GAME_SNAPSHOT in main.js gains +1 build on EVERY shipped
+ * change (code, data, art tables). Same VERSION + different snapshot =
+ * different rooms, no silent desync.
  *
  * Also in this file:
  *   PeerSkins    — shares per-PC custom art (fish/gun/bobber PNG uploads)
@@ -29,15 +34,29 @@
 
 function peerRoomPrefix() {
     try {
-        const v = (typeof GAME_VERSION === 'string' && GAME_VERSION) ? GAME_VERSION : '1.2.5';
-        return 'aquatic-havoc-v' + String(v).replace(/[^0-9]/g, '') + '-';
+        // Snapshot first (1.4.0.0001): same-version-different-build rooms
+        // must be invisible to each other. Falls back to GAME_VERSION.
+        const s = (typeof GAME_SNAPSHOT === 'string' && GAME_SNAPSHOT) ? GAME_SNAPSHOT
+            : ((typeof GAME_VERSION === 'string' && GAME_VERSION) ? GAME_VERSION : '1.2.5');
+        return 'aquatic-havoc-v' + String(s).replace(/[^0-9]/g, '') + '-';
     } catch (e) {
-        return 'aquatic-havoc-v125-';
+        return 'aquatic-havoc-v1400001-';
     }
 }
 
 function peerGameVersion() {
     try {
+        return (typeof GAME_VERSION === 'string' && GAME_VERSION) ? GAME_VERSION : '1.2.5';
+    } catch (e) {
+        return '1.2.5';
+    }
+}
+
+// Full snapshot gate string (e.g. '1.4.0.0001'). Compared strictly in the
+// hello handshake — same VERSION but different build = rejected.
+function peerSnapshot() {
+    try {
+        if (typeof GAME_SNAPSHOT === 'string' && GAME_SNAPSHOT) return GAME_SNAPSHOT;
         return (typeof GAME_VERSION === 'string' && GAME_VERSION) ? GAME_VERSION : '1.2.5';
     } catch (e) {
         return '1.2.5';
@@ -400,7 +419,7 @@ const PeerLink = {
                         skin = (typeof Multiplayer !== 'undefined' && Multiplayer.playerSkin)
                             ? Multiplayer.playerSkin() : '';
                     } catch (e) {}
-                    this._sendDirect(conn, { t: 'hello', v: peerGameVersion(), id, name: nm, pid: spid, skin });
+                    this._sendDirect(conn, { t: 'hello', v: peerGameVersion(), s: peerSnapshot(), id, name: nm, pid: spid, skin });
                     // The host answers with welcome/reject (handled below).
                 });
                 conn.on('data', (msg) => {
@@ -539,6 +558,18 @@ const PeerLink = {
             setTimeout(() => { try { conn.close(); } catch (e) {} }, 400);
             return;
         }
+        // Snapshot gate: same VERSION is NOT enough (1.4.0.0001 vs
+        // 1.4.0.0002 desync silently). Old clients that predate the
+        // snapshot field send no `s` — treat missing as mismatch so they
+        // update instead of joining a build they can't simulate.
+        const hs = (hello && hello.s) || '?';
+        if (hs !== peerSnapshot()) {
+            try {
+                conn.send({ t: 'reject', why: 'Snapshot mismatch — host is on snapshot ' + peerSnapshot() + ', you are on ' + hs + '. Everyone must run the exact same build (same uploaded zip).' });
+            } catch (e) {}
+            setTimeout(() => { try { conn.close(); } catch (e) {} }, 400);
+            return;
+        }
         if (Object.keys(this.conns).length >= 3) {
             try { conn.send({ t: 'reject', why: 'Room is full (4 players max).' }); } catch (e) {}
             setTimeout(() => { try { conn.close(); } catch (e) {} }, 400);
@@ -602,7 +633,7 @@ const PeerLink = {
                 ? { color: Multiplayer.playerSkin() } : null;
         } catch (e) { hostName = 'Host'; }
         try {
-            conn.send({ t: 'welcome', room: this.roomCode, id: remoteId, count, members: this.members.slice(), roster: this._roster(), hostName, hostSkin, hostPid: this._hostPid(), v: peerGameVersion() });
+            conn.send({ t: 'welcome', room: this.roomCode, id: remoteId, count, members: this.members.slice(), roster: this._roster(), hostName, hostSkin, hostPid: this._hostPid(), v: peerGameVersion(), s: peerSnapshot() });
         } catch (e) {}
         this._broadcastLobby();
         try { if (this.onMemberJoin) this.onMemberJoin(remoteId); } catch (e) {}

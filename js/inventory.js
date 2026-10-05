@@ -36,7 +36,19 @@ const Inventory = {
         try { audio.playUIClick(); } catch (e) {}
         this.renderTab(this.state, tab || this._tab || 'fish');
         const modal = document.getElementById('inventory-modal');
-        if (modal) modal.classList.remove('hidden');
+        if (modal) {
+            modal.classList.remove('hidden');
+            // Re-trigger the pop-in animation every open (no animation =
+            // the "dead UI" feel). Forced reflow restarts the keyframes.
+            try {
+                const panel = modal.querySelector('.glass-panel');
+                if (panel) {
+                    panel.classList.remove('modal-pop');
+                    void panel.offsetWidth;
+                    panel.classList.add('modal-pop');
+                }
+            } catch (e) {}
+        }
         try { Player.refreshHUD(this.state); } catch (e) {}
     },
 
@@ -70,21 +82,34 @@ const Inventory = {
     renderFish(state, content) {
         const p = state.player;
         const bucket = p.bucket || [];
+        const cap = p.bucketCapacity || 15;
+        const full = bucket.length >= cap;
+        const pct = Math.max(0, Math.min(100, bucket.length / cap * 100));
         const head = document.createElement('div');
-        head.className = 'glass-panel-light p-3 rounded-xl text-center mb-1 flex items-center justify-center gap-3';
+        head.className = 'glass-panel-light p-3 rounded-xl text-center mb-1 flex items-center justify-center gap-3' +
+            (full ? ' inv-full' : '');
         head.innerHTML = `
             <i class="fa-solid fa-fish text-sky-400 text-xl"></i>
-            <div class="text-left">
-                <div class="font-bold text-white text-sm">Bucket — ${bucket.length} / ${p.bucketCapacity || 15}</div>
-                <div class="text-[10px] text-slate-400">Lock keepers 🔒 · 🗑 removes · selling happens at the shop</div>
-            </div>`;
+            <div class="text-left flex-1">
+                <div class="font-bold text-white text-sm">Bucket — ${bucket.length} / ${cap}${full ? ' <span class="text-rose-400 font-black">FULL</span>' : ''}</div>
+                <div class="w-full h-1.5 bg-slate-900/80 rounded-full overflow-hidden mt-1 border border-slate-700/60">
+                    <div class="h-full rounded-full transition-all ${full ? 'bg-gradient-to-r from-rose-500 to-red-400' : 'bg-gradient-to-r from-sky-500 to-cyan-400'}" style="width:${pct}%"></div>
+                </div>
+                <div class="text-[10px] text-slate-400 mt-1">Lock keepers 🔒 · 🗑 removes · selling happens at the shop${full ? ' · <span class="text-rose-300 font-bold">drop something to pick up loot!</span>' : ''}</div>
+            </div>
+            <button data-inv-drop-cheapest title="Drop the cheapest unlocked fish (1 tap room)"
+                    class="px-2.5 py-2 rounded-xl text-[11px] font-black bg-slate-800 text-slate-300 border border-slate-600 hover:bg-rose-900/60 hover:text-rose-200 hover:border-rose-500/50 shrink-0">🗑<br>CHEAP</button>`;
         content.appendChild(head);
+        const cheapBtn = head.querySelector('[data-inv-drop-cheapest]');
+        if (cheapBtn) cheapBtn.onclick = () => this.dropCheapest(state);
 
         if (!bucket.length) {
-            content.innerHTML += `<div class="text-center py-12">
+            const empty = document.createElement('div');
+            empty.className = 'text-center py-12';
+            empty.innerHTML = `
                 <i class="fa-solid fa-fish text-5xl text-slate-700 mb-3"></i>
-                <p class="text-slate-500 text-sm">Your bucket is empty — go fishing!</p>
-            </div>`;
+                <p class="text-slate-500 text-sm">Your bucket is empty — go fishing!</p>`;
+            content.appendChild(empty);
             return;
         }
 
@@ -96,11 +121,13 @@ const Inventory = {
             if (fish.locked) grouped[fish.id].locked++;
         });
 
+        let rowIdx = 0;
         Object.values(grouped).forEach(({ species, count, locked }) => {
             const r = (typeof RARITY_LABELS !== 'undefined' && RARITY_LABELS[species.rarity]) || { label: species.rarity || '', color: '#94a3b8' };
             const allLocked = locked === count;
             const div = document.createElement('div');
-            div.className = 'shop-item glass-panel-light p-3 rounded-xl flex items-center justify-between';
+            div.className = 'shop-item inv-row glass-panel-light p-3 rounded-xl flex items-center justify-between';
+            div.style.animationDelay = `${Math.min(rowIdx++, 10) * 30}ms`;
             div.innerHTML = `
                 <div class="flex items-center gap-3">
                     <div class="w-10 h-10 rounded-lg flex items-center justify-center"
@@ -202,6 +229,37 @@ const Inventory = {
         });
     },
 
+    // One-tap room maker for a full bucket: drops the single cheapest
+    // UNLOCKED regular fish (locked keepers + summon keys never touched).
+    dropCheapest(state) {
+        const bucket = state.player.bucket || [];
+        let best = -1, bestVal = Infinity;
+        for (let i = 0; i < bucket.length; i++) {
+            const f = bucket[i];
+            if (!f || f.keyItem || f.locked) continue;
+            let v = (f.value || 0);
+            try {
+                if (typeof Ritual !== 'undefined' && Ritual.entryValue) v = Ritual.entryValue(f);
+            } catch (e) {}
+            if (v < bestVal) { bestVal = v; best = i; }
+        }
+        if (best < 0) {
+            try { audio.playError(); } catch (e) {}
+            if (typeof Particles !== 'undefined') {
+                Particles.showFloatingText(state, 'Nothing droppable — all locked or keys!', state.player.x, state.player.y - 50, '#fbbf24');
+            }
+            return;
+        }
+        const gone = bucket.splice(best, 1)[0];
+        try { audio.playUIClick(); } catch (e) {}
+        if (typeof Particles !== 'undefined') {
+            Particles.showFloatingText(state, `🗑 Dropped cheapest: ${gone.name} (${bestVal}c)`, state.player.x, state.player.y - 50, '#f87171');
+        }
+        try { if (typeof Player !== 'undefined') Player.refreshHUD(state); } catch (e) {}
+        try { if (typeof SaveSystem !== 'undefined') SaveSystem.save(state); } catch (e) {}
+        this.render(state);
+    },
+
     // Same thinning rules as the shop (locked are keepers, prompt when
     // dropping from a group bigger than 2), but re-renders inventory.
     removeGroup(state, id, isKey) {
@@ -217,34 +275,44 @@ const Inventory = {
             }
             return;
         }
-        let n = unlocked.length;
+        const doRemove = (n) => {
+            n = Math.max(1, Math.min(unlocked.length, Math.floor(Number(n)) || 0));
+            if (!n) return;
+            let left = n;
+            for (let i = 0; i < bucket.length && left > 0; i++) {
+                const f = bucket[i];
+                if (f && f.id === id && !!f.keyItem === !!isKey && !f.locked) {
+                    bucket.splice(i, 1);
+                    i--;
+                    left--;
+                }
+            }
+            const removed = n - left;
+            if (removed > 0) {
+                try { audio.playUIClick(); } catch (e) {}
+                if (typeof Particles !== 'undefined') {
+                    Particles.showFloatingText(state, `🗑 Removed ×${removed} ${name}`, state.player.x, state.player.y - 50, '#f87171');
+                }
+                try { if (typeof Player !== 'undefined') Player.refreshHUD(state); } catch (e) {}
+                try { if (typeof SaveSystem !== 'undefined') SaveSystem.save(state); } catch (e) {}
+                this.render(state);
+            }
+        };
         if (items.length > 2) {
-            let raw = null;
-            try { raw = window.prompt(`Remove how many ${name}? (1–${unlocked.length} unlocked)`, String(unlocked.length)); } catch (e) { return; }
-            if (raw === null || raw === undefined) return;
-            n = Math.floor(Number(raw));
-            if (!n || n < 1) return;
-            n = Math.min(n, unlocked.length);
+            try {
+                if (typeof QtyModal !== 'undefined' && QtyModal.ask) {
+                    QtyModal.ask({
+                        title: 'REMOVE FISH?',
+                        sub: `${name} — ${unlocked.length} unlocked`,
+                        min: 1, max: unlocked.length, value: unlocked.length,
+                    }).then((n) => { if (n !== null && n !== undefined) doRemove(n); });
+                    return;
+                }
+            } catch (e) {}
+            doRemove(unlocked.length);
+            return;
         }
-        let left = n;
-        for (let i = 0; i < bucket.length && left > 0; i++) {
-            const f = bucket[i];
-            if (f && f.id === id && !!f.keyItem === !!isKey && !f.locked) {
-                bucket.splice(i, 1);
-                i--;
-                left--;
-            }
-        }
-        const removed = n - left;
-        if (removed > 0) {
-            try { audio.playUIClick(); } catch (e) {}
-            if (typeof Particles !== 'undefined') {
-                Particles.showFloatingText(state, `🗑 Removed ×${removed} ${name}`, state.player.x, state.player.y - 50, '#f87171');
-            }
-            try { if (typeof Player !== 'undefined') Player.refreshHUD(state); } catch (e) {}
-            try { if (typeof SaveSystem !== 'undefined') SaveSystem.save(state); } catch (e) {}
-            this.render(state);
-        }
+        doRemove(unlocked.length);
     },
 
     // ---- Bait: stock counts + hook management, no crafting/buying -------
@@ -264,10 +332,12 @@ const Inventory = {
 
         const owned = defs.filter(d => (stock[d.id] || 0) > 0);
         if (!owned.length) {
-            content.innerHTML += `<div class="text-center py-12">
+            const empty = document.createElement('div');
+            empty.className = 'text-center py-12';
+            empty.innerHTML = `
                 <i class="fa-solid fa-worm text-5xl text-slate-700 mb-3"></i>
-                <p class="text-slate-500 text-sm">No bait — craft some at the shop Bait tab.</p>
-            </div>`;
+                <p class="text-slate-500 text-sm">No bait — craft some at the shop Bait tab.</p>`;
+            content.appendChild(empty);
             return;
         }
         owned.forEach(def => {
@@ -329,10 +399,12 @@ const Inventory = {
         content.appendChild(head);
 
         if (!owned.length) {
-            content.innerHTML += `<div class="text-center py-12">
+            const empty = document.createElement('div');
+            empty.className = 'text-center py-12';
+            empty.innerHTML = `
                 <i class="fa-solid fa-briefcase-medical text-5xl text-slate-700 mb-3"></i>
-                <p class="text-slate-500 text-sm">No items — stock up at the shop Items tab.</p>
-            </div>`;
+                <p class="text-slate-500 text-sm">No items — stock up at the shop Items tab.</p>`;
+            content.appendChild(empty);
             return;
         }
         owned.forEach(def => {

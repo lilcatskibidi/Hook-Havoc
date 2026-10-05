@@ -64,6 +64,12 @@ setInterval(() => {
         if (!fresh.length) hits.delete(ip);
         else hits.set(ip, fresh);
     }
+    // econHits gets the same janitor (it previously grew forever per IP).
+    for (const [ip, arr] of econHits) {
+        const fresh = arr.filter(t => now - t < 60000);
+        if (!fresh.length) econHits.delete(ip);
+        else econHits.set(ip, fresh);
+    }
 }, 30_000).unref?.();
 
 // --- Canonical odds (MUST mirror js/casino.js) -------------------------------
@@ -95,8 +101,7 @@ function rollSlots() { return [weightedSlotIndex(), weightedSlotIndex(), weighte
 
 function rollFishbet(rarity) {
     const odds = FISHBET_ODDS[rarity] || { mult: 1, ch: 5 };
-    const roll = Math.random() * 100; // uniformity is fine; secrecy comes from server
-    // Use crypto for the deciding bit:
+    // Single crypto deciding bit (no Math.random shadow roll).
     const winRoll = randInt(10000) / 100; // 0..99.99
     return { won: winRoll < odds.ch, roll: winRoll, mult: odds.mult, ch: odds.ch };
 }
@@ -275,4 +280,6 @@ async function handleApi(req, res, clientIp) {
     return false;
 }
 
-module.exports = { handleApi, verify, sign, SECRET: '[redacted]' };
+// SECRET stays in-process: exported surface is API + verify only, so a
+// leaked handle can never mint receipts elsewhere.
+module.exports = { handleApi, verify, sign };

@@ -143,14 +143,18 @@ const GamepadControls = {
         }
         if (!state.player || state.player.isDead || state.paused) {
             this.prevButtons = [];
-            // Don't leave virtual movement stuck while paused/dead.
+            // Don't leave virtual movement stuck while paused/dead — and
+            // never leave the virtual SPACE (A = cast/reel) held, or the
+            // player respawns already reeling.
             try {
+                if (!this._padKeys) this._padKeys = {};
                 for (const k of Object.keys(this._padKeys)) {
                     if (this._padKeys[k]) {
                         state.keys[k] = false;
                         this._padKeys[k] = false;
                     }
                 }
+                state.keys[' '] = false;
                 state.mouse.isDown = false;
             } catch (e) {}
             return;

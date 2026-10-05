@@ -30,6 +30,7 @@ const Shop = {
 
     init(state) {
         const modal = document.getElementById('shop-modal');
+        if (!modal) return; // bulletproof: no shop DOM (embed/partial) — never throw
         const mpHud = document.getElementById('mp-hud');
 
         // When a gun PNG finishes probing, refresh the open Guns tab so
@@ -89,7 +90,9 @@ const Shop = {
             };
         });
 
-        document.getElementById('btn-sell-all').onclick = async () => {
+        const sellAllBtn = document.getElementById('btn-sell-all');
+        if (!sellAllBtn) return;
+        sellAllBtn.onclick = async () => {
             // In-flight guard: the server clamp awaits network, and a lagged
             // double-click must not sell twice.
             if (this._selling) return;
@@ -152,9 +155,10 @@ const Shop = {
         };
     },
 
-    renderTab(state, tab) {
+    renderTab(state, tab, sub) {
         this._tab = tab;
         const content = document.getElementById('shop-content');
+        if (!content || !state || !state.player) return;
         content.innerHTML = '';
 
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -168,6 +172,9 @@ const Shop = {
         else if (tab === 'ammo')    this.renderAmmo(state, content);
         else if (tab === 'bucket')  this.renderBucketTab(state, content);
         else if (tab === 'bait')    this.renderBaitTab(state, content);
+        else if (tab === 'craft') {
+            if (typeof Craft !== 'undefined') Craft.renderTab(state, content, sub);
+        }
         else if (tab === 'items') {
             if (typeof ItemSystem !== 'undefined') ItemSystem.renderItemsTab(state, content);
         }
@@ -189,7 +196,7 @@ const Shop = {
 
     // Discard bucket entries (thinning a full bucket). Locked entries are
     // keepers and are never removed — unlock first. Groups of more than 2
-    // ask how many to drop (oldest unlocked first).
+    // ask how many to drop (oldest unlocked first) via the in-game picker.
     dropGroup(state, id, isKey) {
         const bucket = state.player.bucket || [];
         const items = bucket.filter(f => f && f.id === id && !!f.keyItem === !!isKey);
@@ -203,37 +210,139 @@ const Shop = {
             }
             return;
         }
-        let n = unlocked.length;
+        const doDrop = (n) => {
+            n = Math.max(1, Math.min(unlocked.length, Math.floor(Number(n)) || 0));
+            if (!n) return;
+            let left = n;
+            for (let i = 0; i < bucket.length && left > 0; i++) {
+                const f = bucket[i];
+                if (f && f.id === id && !!f.keyItem === !!isKey && !f.locked) {
+                    bucket.splice(i, 1);
+                    i--;
+                    left--;
+                }
+            }
+            const removed = n - left;
+            if (removed > 0) {
+                try { audio.playUIClick(); } catch (e) {}
+                if (typeof Particles !== 'undefined') {
+                    Particles.showFloatingText(state, `🗑 Removed ×${removed} ${name}`, state.player.x, state.player.y - 50, '#f87171');
+                }
+                if (typeof Player !== 'undefined') {
+                    try { Player.refreshHUD(state); } catch (e) {}
+                    try { if (typeof UI !== 'undefined') UI.renderWeaponToolbar(state); } catch (e) {}
+                }
+                if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+                this.renderTab(state, 'sell');
+            }
+        };
         if (items.length > 2) {
-            let raw = null;
-            try { raw = window.prompt(`Remove how many ${name}? (1–${unlocked.length} unlocked)`, String(unlocked.length)); } catch (e) { return; }
-            if (raw === null || raw === undefined) return; // cancelled
-            n = Math.floor(Number(raw));
-            if (!n || n < 1) return;
-            n = Math.min(n, unlocked.length);
+            // In-game picker (async) — falls back to dropping all on legacy.
+            try {
+                if (typeof QtyModal !== 'undefined' && QtyModal.ask) {
+                    QtyModal.ask({
+                        title: 'REMOVE FISH?',
+                        sub: `${name} — ${unlocked.length} unlocked`,
+                        min: 1, max: unlocked.length, value: unlocked.length,
+                    }).then((n) => { if (n !== null && n !== undefined) doDrop(n); });
+                    return;
+                }
+            } catch (e) {}
+            doDrop(unlocked.length);
+            return;
         }
-        let left = n;
-        for (let i = 0; i < bucket.length && left > 0; i++) {
-            const f = bucket[i];
-            if (f && f.id === id && !!f.keyItem === !!isKey && !f.locked) {
-                bucket.splice(i, 1);
-                i--;
-                left--;
-            }
-        }
-        const removed = n - left;
-        if (removed > 0) {
-            try { audio.playUIClick(); } catch (e) {}
+        doDrop(unlocked.length);
+    },
+
+    // Sell ONE group (a fish species or a summon key) with a picker
+    // quantity — same economics + server clamp as SELL ALL, but scoped to
+    // this id. Locked keepers are never touched.
+    async sellGroup(state, id, isKey) {
+        const bucket = state.player.bucket || [];
+        const items = bucket.filter(f => f && f.id === id && !!f.keyItem === !!isKey);
+        const unlocked = items.filter(f => !f.locked);
+        const name = (items[0] && items[0].name) || id;
+        if (!unlocked.length) {
+            try { audio.playError(); } catch (e) {}
             if (typeof Particles !== 'undefined') {
-                Particles.showFloatingText(state, `🗑 Removed ×${removed} ${name}`, state.player.x, state.player.y - 50, '#f87171');
+                Particles.showFloatingText(state, `All ${name} locked — unlock first!`, state.player.x, state.player.y - 50, '#fbbf24');
             }
-            if (typeof Player !== 'undefined') {
-                try { Player.refreshHUD(state); } catch (e) {}
-                try { if (typeof UI !== 'undefined') UI.renderWeaponToolbar(state); } catch (e) {}
-            }
-            if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
-            this.renderTab(state, 'sell');
+            return;
         }
+        const keyVal = (f) => {
+            try {
+                if (typeof Ritual !== 'undefined' && Ritual.entryValue) return Ritual.entryValue(f);
+            } catch (e) {}
+            return (f && f.value) || 0;
+        };
+        const doSell = async (n) => {
+            if (this._selling) return;
+            this._selling = true;
+            try {
+                n = Math.max(1, Math.min(unlocked.length, Math.floor(Number(n)) || 0));
+                if (!n) return;
+                const subset = unlocked.slice(0, n);
+                let total = subset.reduce((acc, f) => acc + keyVal(f), 0);
+                if (total <= 0) {
+                    try { audio.playError(); } catch (e) {}
+                    return;
+                }
+                // Same server sell-clamp as SELL ALL (anti-F12 value edits).
+                try {
+                    if (typeof SecureServer !== 'undefined') {
+                        const clamp = await SecureServer.sellClamp(subset.map(f => ({ id: f.id, value: keyVal(f) })));
+                        if (clamp && typeof clamp.approvedTotal === 'number') {
+                            if (clamp.approvedTotal < total) {
+                                total = clamp.approvedTotal;
+                                if (typeof AntiCheat !== 'undefined') AntiCheat.violations++;
+                            }
+                        }
+                    }
+                } catch (e) {}
+                if (total <= 0) {
+                    try { audio.playError(); } catch (e) {}
+                    return;
+                }
+                state.player.coins += total;
+                // Remove EXACTLY n (count-based, not identity-based: loaded
+                // plain fish share one species ref, so a Set would wipe every
+                // duplicate while paying for one).
+                let left = subset.length;
+                state.player.bucket = (state.player.bucket || []).filter(f => {
+                    if (left > 0 && f && f.id === id && !!f.keyItem === !!isKey && !f.locked) { left--; return false; }
+                    return true;
+                });
+                try { audio.playCoin(); } catch (e) {}
+                if (typeof Particles !== 'undefined') {
+                    Particles.showFloatingText(state, `SOLD ×${subset.length} ${name} +${total}c`, state.player.x, state.player.y - 50, '#facc15');
+                }
+                Player.addXP(state, Math.round(total / 5));
+                Player.refreshHUD(state);
+                try {
+                    if (typeof NPC !== 'undefined' && NPC.syncActive) NPC.syncActive(state);
+                    if (typeof NPC !== 'undefined' && NPC.updateTracker) NPC.updateTracker(state);
+                } catch (e) {}
+                if (typeof AntiCheat !== 'undefined') AntiCheat.markLegit();
+                if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+                this.renderTab(state, 'sell');
+            } finally {
+                this._selling = false;
+            }
+        };
+        if (unlocked.length > 1) {
+            try {
+                if (typeof QtyModal !== 'undefined' && QtyModal.ask) {
+                    const unit = keyVal(unlocked[0]);
+                    QtyModal.ask({
+                        title: 'SELL ' + String(name).toUpperCase(),
+                        sub: `${unit}c each · ${unlocked.length} unlocked`,
+                        min: 1, max: unlocked.length, value: unlocked.length,
+                    }).then((n) => { if (n !== null && n !== undefined) doSell(n); });
+                    return;
+                }
+            } catch (e) {}
+        }
+        doSell(unlocked.length);
     },
 
     renderSell(state, content) {
@@ -291,7 +400,7 @@ const Shop = {
                                 <span class="text-[10px] font-black px-1.5 py-0.5 rounded"
                                       style="background:${r.color}20;color:${r.color}">${r.label}</span>
                             </div>
-                            <span class="text-xs text-slate-400">×${count} · ${species.value}c each${locked > 0 ? ` · <span class="text-amber-300 font-bold">🔒${locked} locked</span>` : ''}</span>
+                            <span class="text-xs text-slate-400">×${count} · ${keyVal(species)}c each${locked > 0 ? ` · <span class="text-amber-300 font-bold">🔒${locked} locked</span>` : ''}</span>
                         </div>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
@@ -303,8 +412,12 @@ const Shop = {
                                 class="w-8 h-8 rounded-lg text-sm font-black border transition-all bg-slate-800 text-slate-400 border-slate-600 hover:bg-rose-900/60 hover:text-rose-300 hover:border-rose-500/50">
                             🗑
                         </button>
+                        <button data-sell-group="${species.id}" title="Sell this fish (pick quantity)" ${allLocked ? 'disabled' : ''}
+                                class="px-2.5 h-8 rounded-lg text-[11px] font-black bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                            SELL
+                        </button>
                         <span class="text-amber-400 font-bold">
-                            <i class="fa-solid fa-coins mr-1"></i>${species.value * unlocked}
+                            <i class="fa-solid fa-coins mr-1"></i>${keyVal(species) * unlocked}
                         </span>
                     </div>
                 `;
@@ -325,6 +438,9 @@ const Shop = {
             content.querySelectorAll('[data-drop-group]').forEach(btn => {
                 btn.onclick = () => this.dropGroup(state, btn.dataset.dropGroup, false);
             });
+            content.querySelectorAll('[data-sell-group]').forEach(btn => {
+                btn.onclick = () => this.sellGroup(state, btn.dataset.sellGroup, false);
+            });
 
             // Summon keys / trophies: sellable like fish (🔒 locks protect
             // them from SELL ALL AND from ritual/craft spending).
@@ -343,7 +459,7 @@ const Shop = {
                 Object.entries(kGrouped).forEach(([kid, { item, count, locked, unlocked }]) => {
                     const price = keyVal(item);
                     const allLocked = locked === count;
-                    const hint = item.id === 'storm_egg' ? 'Bake into a Hydra Lure (Bait tab)' : item.id === 'shard' ? '3 open the Void Leviathan (Ritual)' : 'Emperor gate piece (Ritual)';
+                    const hint = item.id === 'storm_egg' ? 'Bake into a Hydra Lure (Bait tab)' : item.id === 'shard' ? '7 open the Void Gate (Ritual)' : item.id === 'void_key' ? 'Shrine center pillar (fish the sea)' : 'Emperor gate piece (Ritual)';
                     const div = document.createElement('div');
                     div.className = 'shop-item glass-panel-light p-3 rounded-xl flex items-center justify-between';
                     div.style.borderLeft = `3px solid ${item.color || '#fbbf24'}`;
@@ -368,6 +484,10 @@ const Shop = {
                                     class="w-8 h-8 rounded-lg text-sm font-black border transition-all bg-slate-800 text-slate-400 border-slate-600 hover:bg-rose-900/60 hover:text-rose-300 hover:border-rose-500/50">
                                 🗑
                             </button>
+                            <button data-sell-key="${kid}" title="Sell this item (pick quantity)" ${allLocked ? 'disabled' : ''}
+                                    class="px-2.5 h-8 rounded-lg text-[11px] font-black bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                                SELL
+                            </button>
                             <span class="text-amber-400 font-bold">
                                 <i class="fa-solid fa-coins mr-1"></i>${price * unlocked}
                             </span>
@@ -388,6 +508,9 @@ const Shop = {
                 });
                 content.querySelectorAll('[data-drop-key]').forEach(btn => {
                     btn.onclick = () => this.dropGroup(state, btn.dataset.dropKey, true);
+                });
+                content.querySelectorAll('[data-sell-key]').forEach(btn => {
+                    btn.onclick = () => this.sellGroup(state, btn.dataset.sellKey, true);
                 });
             }
         }
@@ -507,10 +630,21 @@ const Shop = {
 
             if (!owned) {
                 const btn = document.createElement('button');
-                btn.className = 'btn-buy px-4 py-2 text-slate-950 text-xs font-black rounded-xl';
-                btn.innerText = `${w.price} C`;
-                btn.disabled = p.coins < w.price;
-                btn.onclick = async () => {
+                // Craft-only forge pieces (no coin price): point at Craft.
+                const craftOnly = !!(w.recipe && (w.price === undefined || w.price === null));
+                if (craftOnly) {
+                    btn.className = 'btn-buy px-4 py-2 text-slate-950 text-xs font-black rounded-xl';
+                    btn.textContent = 'CRAFT ONLY';
+                    btn.onclick = () => {
+                        try { audio.playUIClick(); } catch (e) {}
+                        this.renderTab(state, 'craft', 'weapons');
+                    };
+                    right.appendChild(btn);
+                } else {
+                    btn.className = 'btn-buy px-4 py-2 text-slate-950 text-xs font-black rounded-xl';
+                    btn.innerText = w.price + ' C';
+                    btn.disabled = p.coins < w.price;
+                    btn.onclick = async () => {
                     // In-flight guard: the server quote awaits network — a
                     // lagged double-click must not buy (and push) twice.
                     if (btn.disabled) return;
@@ -550,6 +684,7 @@ const Shop = {
                     this.renderTab(state, 'weapons');
                 };
                 right.appendChild(btn);
+                } // end craftOnly else (buy path)
             } else {
                 const label = document.createElement('div');
                 label.className = 'text-[9px] text-slate-400 font-bold uppercase';
@@ -674,8 +809,9 @@ const Shop = {
         } catch (e) {}
 
         // Cheapest first — power progression reads top to bottom
+        // (craft-only forge pieces sink to the bottom).
         [...RODS.map((r, i) => ({ r, i }))]
-            .sort((a, b) => a.r.price - b.r.price)
+            .sort((a, b) => ((a.r.price === undefined || a.r.price === null) ? Infinity : a.r.price) - ((b.r.price === undefined || b.r.price === null) ? Infinity : b.r.price))
             .forEach((o) => {
             const r = o.r;
             const idx = o.i;
@@ -710,7 +846,9 @@ const Shop = {
                         ? `<span class="text-xs text-emerald-400 font-bold px-3 py-1.5 bg-emerald-500/20 rounded-lg border border-emerald-500/30">EQUIPPED</span>`
                         : isUnlocked
                             ? `<button data-equip-rod="${idx}" class="px-4 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-black rounded-xl">EQUIP</button>`
-                            : `<button data-buy-rod="${idx}" class="btn-buy px-4 py-2 text-slate-950 text-xs font-black rounded-xl" ${p.coins < r.price ? 'disabled' : ''}>${r.price} C</button>`}
+                            : (r.recipe && (r.price === undefined || r.price === null))
+                                ? `<button data-craft-rod-go="${idx}" class="btn-buy px-4 py-2 text-slate-950 text-xs font-black rounded-xl"><i class="fa-solid fa-hammer mr-1"></i>CRAFT ONLY</button>`
+                                : `<button data-buy-rod="${idx}" class="btn-buy px-4 py-2 text-slate-950 text-xs font-black rounded-xl" ${p.coins < r.price ? 'disabled' : ''}>${r.price} C</button>`}
                     <div class="flex items-center gap-1">
                         <span class="text-[9px] font-black text-slate-400">BOBBER: <span style="color:${r.color}">${(r.bobberModel || 'classic').toUpperCase()}</span></span>
                         <button data-upload-bobber="${idx}" class="text-[9px] font-black px-2 py-0.5 rounded-lg border bg-slate-800 text-slate-300 border-slate-600 hover:bg-slate-700" title="Upload a custom bobber PNG for this model (left-click: pick/replace, right-click: remove)">UPLOAD</button>
@@ -718,6 +856,13 @@ const Shop = {
                 </div>
             `;
             content.appendChild(div);
+        });
+
+        content.querySelectorAll('[data-craft-rod-go]').forEach(btn => {
+            btn.onclick = () => {
+                try { audio.playUIClick(); } catch (e) {}
+                this.renderTab(state, 'craft', 'rods');
+            };
         });
 
         content.querySelectorAll('[data-buy-rod]').forEach(btn => {
@@ -879,7 +1024,13 @@ const Shop = {
         content.querySelectorAll('[data-buy-ammo-id]').forEach(btn => {
             btn.onclick = () => {
                 const id = btn.dataset.buyAmmoId;
-                const pack = +btn.dataset.buyAmmoPack;
+                // Bulletproof: dataset is DOM-editable — pack must be a
+                // positive finite int or the math below mints NaN/free coins.
+                let pack = Math.floor(Number(btn.dataset.buyAmmoPack));
+                if (!Number.isFinite(pack) || pack < 1) {
+                    try { audio.playError(); } catch (e) {}
+                    return;
+                }
                 const w = WEAPONS.find(x => x.id === id);
                 if (!w) return;
 

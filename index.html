@@ -252,6 +252,7 @@
                     <button id="tab-ammo" class="tab-btn py-3 px-4 font-bold text-sm text-slate-400" data-lang="tab_ammo">Ammo</button>
                     <button id="tab-bucket" class="tab-btn py-3 px-4 font-bold text-sm text-slate-400" data-lang="tab_bucket">Bucket</button>
                     <button id="tab-bait" class="tab-btn py-3 px-4 font-bold text-sm text-slate-400" data-lang="tab_bait">Bait</button>
+                    <button id="tab-craft" class="tab-btn py-3 px-4 font-bold text-sm text-slate-400">Craft</button>
                     <button id="tab-items" class="tab-btn py-3 px-4 font-bold text-sm text-slate-400" data-lang="tab_items">Items</button>
                     <button id="tab-casino" class="tab-btn py-3 px-4 font-bold text-sm text-slate-400" data-lang="tab_casino">Casino</button>
                 </div>
@@ -406,6 +407,9 @@
                         <button id="casino-buy-tokens-100" class="px-3 py-2 bg-gradient-to-r from-fuchsia-500 to-pink-600 hover:from-fuchsia-400 hover:to-pink-500 text-slate-950 text-xs font-black rounded-xl transition-all">
                             +100T (10k)
                         </button>
+                        <button id="casino-buy-tokens-custom" class="px-3 py-2 bg-slate-700/70 hover:bg-slate-600/70 text-fuchsia-200 text-xs font-black rounded-xl transition-all border border-fuchsia-500/40" title="Pick any amount (max 50)">
+                            CUSTOM…
+                        </button>
                         <button id="casino-cashout" class="px-3 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-black rounded-xl transition-all">
                             <i class="fa-solid fa-sack-dollar mr-1"></i> Cashout <span id="casino-cashout-label">0T → 0c</span>
                         </button>
@@ -487,20 +491,26 @@
         <!-- ================= TOUCH CONTROLS (mobile) ================= -->
         <div id="touch-ui" class="hidden">
             <div id="touch-joy"><div id="touch-joy-knob"></div></div>
+            <!-- 4 main gamepad-style buttons: SHOOT / CAST / E / DASH -->
             <div id="touch-btns">
                 <div class="touch-row-big">
-                    <button id="touch-fire" class="touch-btn touch-big touch-fire" data-lang="touch_fire">FIRE</button>
-                    <button id="touch-cast" class="touch-btn touch-big touch-cast" data-lang="touch_cast">CAST</button>
+                    <button id="touch-fire" class="touch-btn touch-big touch-fire" data-tbtn="fire" data-lang="touch_fire">FIRE</button>
+                    <button id="touch-cast" class="touch-btn touch-big touch-cast" data-tbtn="cast" data-lang="touch_cast">CAST</button>
+                </div>
+                <div class="touch-row-big">
+                    <button id="touch-act" class="touch-btn touch-big touch-act" data-tbtn="act" title="Interact (E)">E</button>
+                    <button id="touch-dash" class="touch-btn touch-big touch-dash" data-tbtn="dash" title="Dash">DASH</button>
                 </div>
                 <div class="touch-row-small">
-                    <button id="touch-act" class="touch-btn touch-small" title="Interact">E</button>
-                    <button id="touch-reload" class="touch-btn touch-small" title="Reload">R</button>
-                    <button id="touch-weapon" class="touch-btn touch-small" title="Weapon"><i class="fa-solid fa-gun"></i></button>
-                    <button id="touch-dash" class="touch-btn touch-small" title="Dash">»</button>
-                    <button id="touch-zoom-out" class="touch-btn touch-small" title="Zoom out">−</button>
-                    <button id="touch-zoom-in" class="touch-btn touch-small" title="Zoom in">+</button>
+                    <button id="touch-weapon" class="touch-btn touch-small" data-tbtn="weapon" title="Switch weapon"><i class="fa-solid fa-gun"></i></button>
+                    <button id="touch-bag" class="touch-btn touch-small" data-tbtn="bag" title="Backpack (B)"><i class="fa-solid fa-backpack"></i></button>
+                    <button id="touch-reload" class="touch-btn touch-small" data-tbtn="reload" title="Reload (auto)">R</button>
+                    <button id="touch-item" class="touch-btn touch-small" data-tbtn="item" title="Use item (F)">F</button>
+                    <button id="touch-zoom-out" class="touch-btn touch-small" data-tbtn="zoomout" title="Zoom out">−</button>
+                    <button id="touch-zoom-in" class="touch-btn touch-small" data-tbtn="zoomin" title="Zoom in">+</button>
                 </div>
             </div>
+            <button id="touch-edit-toggle" class="touch-edit-toggle hidden" title="Move buttons">✥</button>
         </div>
 
         <!-- ================= FISH RADAR MODAL ================= -->
@@ -575,6 +585,42 @@
                     <button id="btn-feedback-send" class="flex-1 px-4 py-2.5 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-400 hover:to-pink-500 text-white font-black rounded-xl transition-all shadow-lg active:scale-95 text-sm">
                         <i class="fa-solid fa-paper-plane mr-1"></i> Send to Discord
                     </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= QTY PICKER MODAL (replaces window.prompt) ================= -->
+        <div id="qtymodal-overlay" class="absolute inset-0 bg-slate-950/85 backdrop-blur-md hidden items-center justify-center z-50 pointer-events-auto p-4">
+            <div class="glass-panel w-full max-w-xs rounded-3xl overflow-hidden border border-sky-500/40 shadow-2xl p-5 flex flex-col gap-3">
+                <h2 id="qtymodal-title" class="font-header text-2xl text-white font-bold text-center tracking-wide">HOW MANY?</h2>
+                <p id="qtymodal-sub" class="text-center text-xs text-slate-400 font-bold">Pick 1–1</p>
+                <div class="flex items-center justify-center gap-3">
+                    <button id="qtymodal-minus10" class="w-11 h-11 rounded-xl bg-slate-700/70 hover:bg-slate-600/70 text-slate-200 font-black border border-slate-600" title="-10">−10</button>
+                    <button id="qtymodal-minus" class="w-14 h-14 rounded-2xl bg-slate-700/70 hover:bg-slate-600/70 text-white text-2xl font-black border border-slate-600">−</button>
+                    <div id="qtymodal-num" class="font-header text-4xl text-amber-300 font-bold min-w-[84px] text-center">×1</div>
+                    <button id="qtymodal-plus" class="w-14 h-14 rounded-2xl bg-slate-700/70 hover:bg-slate-600/70 text-white text-2xl font-black border border-slate-600">+</button>
+                    <button id="qtymodal-plus10" class="w-11 h-11 rounded-xl bg-slate-700/70 hover:bg-slate-600/70 text-slate-200 font-black border border-slate-600" title="+10">+10</button>
+                </div>
+                <input id="qtymodal-range" type="range" min="1" max="1" value="1" class="vol-slider w-full">
+                <div class="flex items-center gap-2">
+                    <input id="qtymodal-field" type="number" min="1" value="1" class="flex-1 bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-2 text-sm font-black text-white text-center focus:outline-none focus:border-sky-500">
+                    <div id="qtymodal-chips" class="flex gap-1.5"></div>
+                </div>
+                <div class="flex gap-2">
+                    <button id="qtymodal-cancel" class="flex-1 px-4 py-3 bg-slate-700/60 hover:bg-slate-600/60 text-slate-200 font-bold rounded-xl transition-all border border-slate-600 text-sm">Cancel</button>
+                    <button id="qtymodal-ok" class="flex-1 px-4 py-3 bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-400 hover:to-sky-500 text-slate-950 font-black rounded-xl transition-all shadow-lg active:scale-95 text-sm">OK ×1</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= CONFIRM MODAL (replaces window.confirm) ================= -->
+        <div id="confirmmodal-overlay" class="absolute inset-0 bg-slate-950/85 backdrop-blur-md hidden items-center justify-center z-50 pointer-events-auto p-4">
+            <div class="glass-panel w-full max-w-xs rounded-3xl overflow-hidden border border-rose-500/40 shadow-2xl p-5 flex flex-col gap-3">
+                <h2 id="confirmmodal-title" class="font-header text-2xl text-white font-bold text-center tracking-wide">ARE YOU SURE?</h2>
+                <p id="confirmmodal-sub" class="text-center text-xs text-slate-300 leading-relaxed"></p>
+                <div class="flex gap-2">
+                    <button id="confirmmodal-cancel" class="flex-1 px-4 py-3 bg-slate-700/60 hover:bg-slate-600/60 text-slate-200 font-bold rounded-xl transition-all border border-slate-600 text-sm">Cancel</button>
+                    <button id="confirmmodal-ok" class="flex-1 px-4 py-3 font-black rounded-xl transition-all shadow-lg active:scale-95 text-sm">CONFIRM</button>
                 </div>
             </div>
         </div>
@@ -1038,6 +1084,22 @@
                         <button id="set-touch" class="menu-btn justify-between"><span><i class="fa-solid fa-mobile-screen mr-2"></i> <span data-lang="set_touch">Touch UI</span></span><span id="set-touch-val" class="text-emerald-300 font-black">AUTO</span></button>
                         <div class="glass-panel-light px-3 py-2 rounded-xl">
                             <div class="flex items-center justify-between mb-1.5">
+                                <div class="text-[10px] font-black tracking-widest text-slate-400">📱 TOUCH BUTTONS</div>
+                                <span id="set-touchsize-val" class="text-xs text-sky-300 font-black">100%</span>
+                            </div>
+                            <label class="flex items-center gap-2 text-xs font-bold text-slate-300">
+                                <span class="text-slate-500">S-</span>
+                                <input id="set-touchsize" type="range" min="80" max="160" step="5" value="100" class="vol-slider flex-1">
+                                <span class="text-slate-500">L+</span>
+                            </label>
+                            <div class="flex gap-1.5 mt-2">
+                                <button id="set-touch-edit" class="flex-1 px-2 py-2 rounded-xl text-xs font-black bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30">✥ MOVE BUTTONS</button>
+                                <button id="set-touch-reset" class="flex-1 px-2 py-2 rounded-xl text-xs font-black bg-slate-700/60 border border-slate-600 text-slate-200 hover:bg-slate-600/60">RESET POS</button>
+                            </div>
+                            <p class="text-[10px] text-slate-500 mt-1.5">MOVE: drag any button / joystick anywhere — saved on this device. R auto-reloads.</p>
+                        </div>
+                        <div class="glass-panel-light px-3 py-2 rounded-xl">
+                            <div class="flex items-center justify-between mb-1.5">
                                 <div class="text-[10px] font-black tracking-widest text-slate-400">⌨ KEYBINDS <span class="text-slate-600">(WASD fixed)</span></div>
                                 <button id="bind-reset" class="text-[10px] font-black px-2 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700" title="Reset all keys to defaults">RESET</button>
                             </div>
@@ -1120,6 +1182,7 @@
     <script src="js/touch.js?v=141"></script>
     <script src="js/bgtick.js?v=141"></script>
     <script src="js/feedback.js?v=141"></script>
+    <script src="js/qtymodal.js?v=141"></script>
     <script src="js/main.js?v=141"></script>
     <script src="js/admin.js?v=141"></script>
 </body>

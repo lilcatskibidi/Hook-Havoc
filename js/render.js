@@ -338,7 +338,13 @@ const Render = {
         const onIsland = !!((typeof WorldSystem !== 'undefined' && WorldSystem.islandOf)
             ? WorldSystem.islandOf(state) : (state.player && state.player.onIsland));
         if (inCave && typeof Ritual !== 'undefined' && Ritual.drawCaveInterior) {
-            Ritual.drawCaveInterior(state, ctx);
+            // Void shrine reuses the cave chamber look with its own tint
+            // + title (separate map region, same renderer).
+            if (state.player.inVoidTemple && Ritual.drawVoidTempleInterior) {
+                Ritual.drawVoidTempleInterior(state, ctx);
+            } else {
+                Ritual.drawCaveInterior(state, ctx);
+            }
         } else if (onIsland && typeof WorldSystem !== 'undefined' && WorldSystem.drawIslandBase) {
             // 1.2.1: detached isle — its own sand + lakes + pier, not the beach.
             WorldSystem.drawIslandBase(state, ctx);
@@ -598,6 +604,58 @@ const Render = {
             ctx.fill();
         }
         ctx.restore();
+        // VOID BLACK SEA: pitch black while the Star-Eater walks, fading
+        // back to normal over ~3s after it dies (see Ritual black-sea).
+        try {
+            const k = (typeof state._voidBlackSea === 'number') ? state._voidBlackSea : 0;
+            if (k > 0.01) {
+                const a = Math.max(0, Math.min(1, k));
+                ctx.save();
+                ctx.fillStyle = `rgba(0,0,2,${0.93 * a})`;
+                ctx.fillRect(w, B.MIN_Y - 500, (B.MAX_X - w) + 2000, (B.MAX_Y - B.MIN_Y) + 1000);
+                // Faint violet fissures breathing in the black.
+                const tt = state.time || 0;
+                ctx.strokeStyle = `rgba(124,58,237,${0.25 * a})`;
+                ctx.lineWidth = 2;
+                for (let i = 0; i < 6; i++) {
+                    const yy = B.MIN_Y + ((tt * 24 + i * 430) % (B.MAX_Y - B.MIN_Y));
+                    ctx.globalAlpha = a * (0.4 + 0.3 * Math.sin(tt * 1.6 + i * 2));
+                    ctx.beginPath();
+                    ctx.moveTo(w + 60 + i * 160, yy);
+                    ctx.lineTo(w + 120 + i * 160 + Math.sin(tt * 2 + i) * 30, yy + 60);
+                    ctx.lineTo(w + 80 + i * 160, yy + 130);
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+        } catch (e) {}
+        // HYDRA GREEN SEA: deep green while the Stormlord fights, fading
+        // back over ~3s after it dies (see Ritual hydra-sea).
+        try {
+            const k2 = (typeof state._hydraSea === 'number') ? state._hydraSea : 0;
+            if (k2 > 0.01) {
+                const a2 = Math.max(0, Math.min(1, k2));
+                ctx.save();
+                ctx.fillStyle = `rgba(2,42,26,${0.88 * a2})`;
+                ctx.fillRect(w, B.MIN_Y - 500, (B.MAX_X - w) + 2000, (B.MAX_Y - B.MIN_Y) + 1000);
+                // Rolling wave crests breathing in the green.
+                const t2 = state.time || 0;
+                ctx.strokeStyle = `rgba(52,211,153,${0.30 * a2})`;
+                ctx.lineWidth = 2.5;
+                for (let i = 0; i < 7; i++) {
+                    const yy = B.MIN_Y + ((t2 * 40 + i * 380) % (B.MAX_Y - B.MIN_Y));
+                    ctx.globalAlpha = a2 * (0.35 + 0.3 * Math.sin(t2 * 2 + i * 1.8));
+                    ctx.beginPath();
+                    for (let x = w + 40; x < B.MAX_X + 200; x += 90) {
+                        const yo = Math.sin(x * 0.02 + t2 * 3 + i) * 14;
+                        if (x === w + 40) ctx.moveTo(x, yy + yo);
+                        else ctx.lineTo(x, yy + yo);
+                    }
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+        } catch (e) {}
     },
 
     drawWorldBorder(state, ctx) {
@@ -1013,7 +1071,10 @@ const Render = {
             g.addColorStop(1, '#ef4444');
             ctx.fillStyle = g;
             ctx.beginPath();
-            ctx.roundRect(p.x - 38, p.y - 53, (f.castPower / 100) * (meterW - 4), 8, 3);
+            // Bulletproof: a NaN castPower (corrupt sync) throws inside
+            // roundRect on Chrome — clamp to a finite width.
+            const meterFill = Math.max(0, Math.min(1, (Number(f.castPower) || 0) / 100)) * (meterW - 4);
+            ctx.roundRect(p.x - 38, p.y - 53, meterFill, 8, 3);
             ctx.fill();
         }
 
@@ -1072,6 +1133,24 @@ const Render = {
         if (f.mode !== 'HOOKED' || !f.hookedFish) return;
 
         const fish = f.hookedFish;
+        // Hidden boss (priest pre-bells): sea shadow only, no model,
+        // no bars, no skill text — the deep keeps its secret.
+        if (fish._priestHidden) {
+            ctx.save();
+            ctx.globalAlpha = 0.45;
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.ellipse(fish.x, fish.y, (fish.species.size || 60) * 0.8, (fish.species.size || 60) * 0.45, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 0.25;
+            ctx.strokeStyle = '#0ea5e9';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(fish.x, fish.y, (fish.species.size || 60) * 1.05, (fish.species.size || 60) * 0.6, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+            return;
+        }
         const broken = !!fish.lineBroken;
         const isHighTension = !broken && f.lineTension / p.equippedRod.tensionMax > 0.8;
         const rodCol = (p.equippedRod && p.equippedRod.lineColor) || '#38bdf8';
@@ -1097,15 +1176,68 @@ const Render = {
             angle: fish.rotation,
             isRaging: fish.isRaging && !fish.isDead,
             isInflated: fish.isInflated,
-            glow: (fish.species.rarity === 'legendary' || fish.species.mutation === 'void') && !fish.isDead ? 1 : 0
+            glow: (fish.species.rarity === 'legendary' || fish.species.mutation === 'void' || fish.species.mutation === 'blood') && !fish.isDead ? 1 : 0
         });
+        // Hit blink: white flash so every connecting shot reads instantly.
+        try {
+            const hf = Math.max(fish.hitFlash || 0, fish._hitFlash || 0);
+            if (hf > 0 && !fish.isDead) {
+                ctx.globalAlpha = Math.min(0.75, hf * 2.4);
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(fish.x, fish.y, (fish.species.size || 20) * 0.85, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = fish.isDead ? 0.6 : 1;
+            }
+        } catch (e) {}
         ctx.restore();
+        // Screen-space damage echo drawn AFTER the model so overlapping
+        // sprites can never bury the number (MP helper hits reuse this).
+        try {
+            const dp = fish._dmgPop;
+            if (dp && dp.txt && typeof state.time === 'number' && (state.time - dp.t) < 0.9 && !fish.isDead) {
+                const age = state.time - dp.t;
+                ctx.save();
+                ctx.globalAlpha = Math.max(0, 1 - age / 0.9);
+                ctx.font = 'bold 15px Work Sans';
+                ctx.textAlign = 'center';
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+                const dy = fish.y - (fish.species.size || 20) - 34 - age * 26;
+                ctx.strokeText(dp.txt, fish.x, dy);
+                ctx.fillStyle = dp.col || '#38bdf8';
+                ctx.fillText(dp.txt, fish.x, dy);
+                ctx.restore();
+            }
+        } catch (e) {}
+        // Condensing signature orb above the hooked boss (sea phase) —
+        // same spot the shot leaves from.
+        try {
+            if (!fish.isDead && fish._chargeOrb && typeof this.drawChargeOrb === 'function') {
+                const oy2 = (typeof fish._chargeOrb.oy === 'number') ? fish._chargeOrb.oy : (-(fish.species.size || 40) - 60);
+                this.drawChargeOrb(ctx, fish.x, fish.y + oy2, fish._chargeOrb, state.time);
+            }
+        } catch (e) {}
 
         if (fish.isDead) {
             ctx.font = 'bold 20px Work Sans';
             ctx.textAlign = 'center';
             ctx.fillStyle = '#ef4444';
             ctx.fillText('☠', fish.x, fish.y - fish.species.size - 12);
+            return;
+        }
+
+        // Hooked BOSSES read HP off the big top boss bar — the small
+        // catch bars stay for normal fish only (boss numbers overflowed
+        // them and sub-zero frames glitched the canvas).
+        const isHookedBoss = !!(fish.species && fish.species.isBoss);
+        if (isHookedBoss) {
+            if (fish.skillCooldown < 0.5) {
+                ctx.fillStyle = '#ef4444';
+                ctx.font = 'bold 11px Work Sans';
+                ctx.textAlign = 'center';
+                ctx.fillText(`⚠ ${fish.species.skillName}`, fish.x, fish.y - fish.species.size - 30);
+            }
             return;
         }
 
@@ -1116,12 +1248,15 @@ const Render = {
         ctx.roundRect(fish.x - barW / 2 - 2, barY - 2, barW + 4, 16, 4);
         ctx.fill();
 
+        // Clamped: mid-frame gun hits can push hp/stamina below zero and
+        // negative widths glitch roundRect.
+        const hpRatio = Math.max(0, Math.min(1, fish.hp / (fish.maxHp || 1)));
         ctx.fillStyle = '#38bdf8';
         ctx.beginPath();
-        ctx.roundRect(fish.x - barW / 2, barY, (fish.hp / fish.maxHp) * barW, 5, 2);
+        ctx.roundRect(fish.x - barW / 2, barY, hpRatio * barW, 5, 2);
         ctx.fill();
 
-        const staminaRatio = fish.stamina / fish.staminaMax;
+        const staminaRatio = Math.max(0, Math.min(1, fish.stamina / (fish.staminaMax || 1)));
         if (staminaRatio <= 0.01) {
             ctx.fillStyle = `rgba(251, 191, 36, ${0.6 + Math.sin(state.time * 8) * 0.4})`;
         } else {
@@ -1143,6 +1278,9 @@ const Render = {
         const p = state.player;
         if (!state.monstersOnLand) return;
         state.monstersOnLand.forEach(m => {
+            // Bulletproof: a species-less body (corrupt sync/save) renders
+            // nothing instead of throwing on null.size mid-frame.
+            if (!m || !m.species) return;
             // Bosses get their own fancy renderer (aura, crown, phase glow)
             if (m.species && m.species.isBoss) {
                 this.drawBossMonster(state, ctx, m);
@@ -1150,13 +1288,16 @@ const Render = {
             }
 
             const angle = Math.atan2(p.y - m.y, p.x - m.x);
-            this.drawFishModel(ctx, m.x, m.y, m.species.size, m.species, { angle: angle + Math.PI });
+            this.drawFishModel(ctx, m.x, m.y, m.species.size, m.species, { angle: angle });
 
             const barW = 50;
             ctx.fillStyle = 'rgba(15,23,42,0.9)';
             ctx.fillRect(m.x - barW / 2, m.y - m.species.size - 18, barW, 7);
             ctx.fillStyle = '#ef4444';
-            ctx.fillRect(m.x - barW / 2, m.y - m.species.size - 18, (m.hp / m.maxHp) * barW, 7);
+            // Clamped: mid-frame gun hits push hp below zero / NaN — a
+            // non-finite width glitches or throws inside canvas calls.
+            const mRatio = Math.max(0, Math.min(1, (Number(m.hp) || 0) / (Number(m.maxHp) || 1)));
+            ctx.fillRect(m.x - barW / 2, m.y - m.species.size - 18, mRatio * barW, 7);
             ctx.strokeStyle = 'rgba(0,0,0,0.5)';
             ctx.lineWidth = 1;
             ctx.strokeRect(m.x - barW / 2, m.y - m.species.size - 18, barW, 7);
@@ -1183,7 +1324,7 @@ const Render = {
         const phase2 = m.phase === 2;
         const t = state.time;
 
-        const angle = Math.atan2(p.y - m.y, p.x - m.x) + Math.PI;
+        const angle = Math.atan2(p.y - m.y, p.x - m.x);
 
         // Ground aura ring
         ctx.save();
@@ -1234,8 +1375,12 @@ const Render = {
             ctx.restore();
         }
 
-        // The fish model
+        // The fish model (void-gate arrivals fade alpha 0 -> 1 so PNG
+        // art materializes FROM the gate instead of popping in).
         ctx.save();
+        if (m._voidPortal && (m._voidFade || 0) < 1) {
+            ctx.globalAlpha = Math.max(0, Math.min(1, m._voidFade || 0));
+        }
         ctx.shadowColor = phase2 ? '#dc2626' : species.color;
         ctx.shadowBlur = 30 + Math.sin(t * 4) * 8;
         this.drawFishModel(ctx, m.x, m.y, S, species, {
@@ -1266,6 +1411,16 @@ const Render = {
         ctx.fillStyle = phase2 ? '#991b1b' : '#b45309';
         ctx.fillRect(-10, 4, 20, 2);
         ctx.restore();
+
+        // Condensing signature orb above the head (grows while channeling).
+        // Drawn exactly where the shot fires from (orb.oy) — the ball
+        // IS the projectile, not a ground ring.
+        try {
+            if (m._chargeOrb) {
+                const oy = (typeof m._chargeOrb.oy === 'number') ? m._chargeOrb.oy : (-S - 60);
+                this.drawChargeOrb(ctx, m.x, m.y + oy, m._chargeOrb, t);
+            }
+        } catch (e) {}
 
         // Self-destruct countdown above the crown (Void P3).
         try {
@@ -1611,6 +1766,9 @@ const Render = {
         const t = state.time;
 
         state.delayedBlasts.forEach(b => {
+            // Hidden timers (e.g. orb convergence): still tick + detonate
+            // in Combat, but draw nothing — the charge orb is the visual.
+            if (b.hidden) return;
             const progress = 1 - Math.max(0, b.timer) / 1.5;
             const pulse = 0.5 + Math.sin(t * 20) * 0.5;
 
@@ -1643,6 +1801,49 @@ const Render = {
 
             ctx.restore();
         });
+    },
+
+    // Condensing energy orb: a ROUND ball that grows above the caster's
+    // head while channeling (void/hydra signature shots). Pure visual —
+    // the hidden delayed blast owns the timer, this owns the look.
+    // orb = { t, dur, r, color, core } — progress = t/dur.
+    drawChargeOrb(ctx, x, y, orb, time) {
+        try {
+            if (!orb) return;
+            const prog = Math.max(0, Math.min(1, (orb.t || 0) / (orb.dur || 2)));
+            const R = (orb.r || 26) * (0.25 + 0.75 * prog);
+            const col = orb.color || '#a855f7';
+            const core = orb.core || '#ffffff';
+            const t = time || 0;
+            ctx.save();
+            // Outer glow.
+            const haze = ctx.createRadialGradient(x, y, 2, x, y, R * 2.4);
+            haze.addColorStop(0, col);
+            haze.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.globalAlpha = 0.35 + prog * 0.4;
+            ctx.fillStyle = haze;
+            ctx.beginPath(); ctx.arc(x, y, R * 2.4, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 1;
+            // Body: bright core fading to caster color.
+            const body = ctx.createRadialGradient(x - R * 0.3, y - R * 0.3, 1, x, y, R);
+            body.addColorStop(0, core);
+            body.addColorStop(0.55, col);
+            body.addColorStop(1, 'rgba(0,0,0,0.9)');
+            ctx.fillStyle = body;
+            ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.fill();
+            // Crackling surface arcs.
+            ctx.strokeStyle = core;
+            ctx.globalAlpha = 0.8;
+            ctx.lineWidth = Math.max(1.5, R * 0.08);
+            for (let k = 0; k < 4; k++) {
+                const a0 = t * (3 + k) + k * 1.7;
+                ctx.beginPath();
+                ctx.arc(x, y, R * (0.55 + 0.25 * Math.sin(t * 5 + k * 2)), a0, a0 + 1.6);
+                ctx.stroke();
+            }
+            ctx.globalAlpha = 1;
+            ctx.restore();
+        } catch (e) {}
     },
 
     drawPlayer(state, ctx) {
@@ -2426,20 +2627,20 @@ const Render = {
                 if (segs.length < 2) continue;
                 const a = 1 - p;
                 const w = (l.width || 5);
-                // Colored glow pass.
-                ctx.globalAlpha = a * 0.55;
+                // Colored glow pass (bright bolts, not drowned in dark).
+                ctx.globalAlpha = a * 0.7;
                 ctx.strokeStyle = l.color || '#fef08a';
-                ctx.lineWidth = w * 2.4;
+                ctx.lineWidth = w * 2.8;
                 ctx.shadowColor = l.color || '#fef08a';
-                ctx.shadowBlur = 24;
+                ctx.shadowBlur = 36;
                 ctx.beginPath();
                 ctx.moveTo(segs[0][0], segs[0][1]);
                 for (let i = 1; i < segs.length; i++) ctx.lineTo(segs[i][0], segs[i][1]);
                 ctx.stroke();
                 // White-hot core pass.
-                ctx.globalAlpha = a * 0.95;
+                ctx.globalAlpha = a;
                 ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = Math.max(1.5, w * 0.8);
+                ctx.lineWidth = Math.max(2.5, w * 1.0);
                 ctx.shadowBlur = 0;
                 ctx.beginPath();
                 ctx.moveTo(segs[0][0], segs[0][1]);
@@ -2545,10 +2746,21 @@ const Render = {
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(angle);
+        // All fish art faces RIGHT (head +X). When the heading points left
+        // the rotated model would swim belly-up — mirror Y so the head
+        // stays a head and PNG art flips with the procedural bodies.
+        if (Math.cos(angle) < 0) ctx.scale(1, -1);
 
         const s = size * (isInflated ? 1.4 : 1);
         const col = species.color;
-        const acc = species.accent;
+        // Mutations tint the body: accent override + aura ring below.
+        let mutColor = null;
+        try {
+            if (species.mutation && typeof MUTATIONS !== 'undefined' && MUTATIONS[species.mutation]) {
+                mutColor = MUTATIONS[species.mutation].color || species.mutColor || null;
+            } else if (species.mutColor) mutColor = species.mutColor;
+        } catch (e) {}
+        const acc = mutColor || species.accent;
         this._cur = species;
 
         if (glow > 0) {
@@ -2556,12 +2768,13 @@ const Render = {
             ctx.shadowBlur = 20 * glow;
         }
 
-        // Custom art is OPT-IN only. Local bodies: your upload (by species
-        // id) wins, then explicit species.image. FOREIGN bodies (opts.holder
-        // = { pid, me }): the HOLDER's upload wins, then the shared shipped
-        // species.image — never YOUR upload on THEIR fish.
-        // Everything else is procedural — no network request, no 404.
-        if (typeof FishImageLoader !== 'undefined') {
+        // Custom art is ID-based: assets/fish/<species-id>.png.
+        // Local bodies: your upload (by species id) wins, then the
+        // shipped id file. FOREIGN bodies (opts.holder = { pid, me }):
+        // the HOLDER's upload wins, then the shared shipped file —
+        // never YOUR upload on THEIR fish.
+        // Missing files fall back to procedural (probed once/session).
+        if (typeof FishImageLoader !== 'undefined' && species && species.id) {
             let holderPid = null, myPid = null, foreign = false;
             try {
                 holderPid = (typeof holder === 'string') ? holder : (holder && holder.pid);
@@ -2574,8 +2787,13 @@ const Render = {
             } else {
                 customImg = FishImageLoader.get(species.id);
             }
+            // Lazy probe: first draw of an uncached species fires one
+            // request for <id>.png; misses are remembered (no repeat).
+            if (!customImg && typeof FishImageLoader.ensure === 'function') {
+                try { FishImageLoader.ensure(species.id); } catch (e) {}
+            }
             const imgId = customImg ? species.id
-                : (typeof species.image === 'string' && species.image.length > 0 ? species.image : null);
+                : (FishImageLoader.resolveId ? FishImageLoader.resolveId(species) : species.id);
             const img = imgId ? (customImg || FishImageLoader.get(imgId)) : null;
             if (img && img.complete && img.naturalWidth > 0) {
                 // Contain (never stretch): any shape — square, 1900x800,
@@ -2671,6 +2889,27 @@ const Render = {
                 ctx.beginPath();
                 ctx.arc(d.dx * s, d.dy * s, Math.max(1.5, d.r * s), 0, Math.PI * 2);
                 ctx.fill();
+            }
+            ctx.restore();
+        }
+
+        // Mutation aura: colored ring + breathing glow in trait color.
+        if (mutColor) {
+            const mt = performance.now() / 350;
+            ctx.save();
+            ctx.strokeStyle = mutColor;
+            ctx.lineWidth = 2.5;
+            ctx.shadowColor = mutColor;
+            ctx.shadowBlur = 16;
+            ctx.globalAlpha = 0.75;
+            ctx.beginPath();
+            ctx.arc(0, 0, s * 1.25, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = mutColor;
+            for (let i = 0; i < 2; i++) {
+                const a = mt + i * Math.PI;
+                ctx.beginPath(); ctx.arc(Math.cos(a) * s * 1.25, Math.sin(a) * s * 1.25, 2.2, 0, Math.PI * 2); ctx.fill();
             }
             ctx.restore();
         }

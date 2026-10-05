@@ -1,8 +1,12 @@
 const Combat = {
     // Armor + umbrella mitigation shared by all enemy damage
     damagePlayer(state, raw, opts = {}) {
-        const p = state.player;
-        if (p.isDead) return 0;
+        const p = state && state.player;
+        if (!p || p.isDead) return 0;
+        // Bulletproof: every caller funnels here — a single NaN/undefined
+        // damage (custom enemy, corrupt sync) must never poison p.hp.
+        let base = Number(raw);
+        if (!Number.isFinite(base)) base = 5;
         // Dash i-frames: a clean dodge eats the hit entirely (no chip).
         if ((p.iframes || 0) > 0) {
             try {
@@ -13,18 +17,28 @@ const Combat = {
             } catch (e) {}
             return 0;
         }
-        let dmg = Math.max(1, Math.round(raw));
+        let dmg = Math.max(1, Math.round(base));
         let dr = 0;
         if (typeof Shop !== 'undefined' && Shop.getDamageReduction) {
             try { dr = Shop.getDamageReduction(state); } catch (e) {}
         }
+        if (!Number.isFinite(dr)) dr = 0;
         if (p.umbrellaTimer > 0) dr = Math.min(0.8, dr + 0.35);
-        dmg = Math.max(1, Math.round(dmg * (1 - dr)));
+        // Ironskin Tonic item: −60% damage while it lasts.
+        if ((p.ironSkinT || 0) > 0) dr = Math.min(0.85, dr + 0.60);
+        dmg = Math.max(1, Math.round(base * (1 - dr)));
         if (p.armorAnchor && opts.knockback) opts.knockback = 0;
         p.hp -= dmg;
         // Reflect back to attacker
         if (opts.attacker && p.armorReflect > 0) {
-            opts.attacker.hp -= Math.round(raw * p.armorReflect);
+            opts.attacker.hp -= Math.round(base * p.armorReflect);
+        }
+        // Thorn Shell item: attackers bleed 50% back while it lasts.
+        if (opts.attacker && (p.thornT || 0) > 0) {
+            try {
+                opts.attacker.hp -= Math.max(1, Math.round(base * 0.5));
+                if (Math.random() < 0.3) Particles.spawnParticles(state, p.x, p.y, '#fb923c', 4, { size: 3 });
+            } catch (e) {}
         }
         // Gamepad rumble (guarded, throttled inside)
         try { if (typeof GamepadControls !== 'undefined') GamepadControls.rumble(0.25, 0.7, 0.5); } catch (e) {}
@@ -104,14 +118,16 @@ const Combat = {
             const m = state.monstersOnLand[i];
 
             // --- Boss intro tracking ---
-            if (m.species.isBoss && !m._announced) {
+            if (m.species && m.species.isBoss && !m._announced) {
                 m._announced = true;
                 state.activeBoss = m;
                 // Full cinematic (pad summons already played it in spawnBoss,
                 // beached/hooked bosses arrive here) + standard 3-2-1 AFTER
                 // the default 10s intro reveal.
+                // Shore re-entries stay quiet: the name was said exactly
+                // once at first arrival (beachFish thuds instead).
                 try {
-                    if (typeof Ritual !== 'undefined' && Ritual.bossIntro) Ritual.bossIntro(state, m.species, m.x, m.y, m);
+                    if (typeof Ritual !== 'undefined' && Ritual.bossIntro) Ritual.bossIntro(state, m.species, m.x, m.y, m, undefined, undefined, m._reentry ? true : undefined);
                     else {
                         try { audio.playRoar(); } catch (e) {}
                         Particles.showFloatingText(state,
@@ -123,9 +139,52 @@ const Combat = {
                 } catch (e) {}
             }
 
+            // --- Priest finisher: at 0 HP it KNEELS instead of dying.
+            // Burn/poison ticks land here too, so clamp first: the heart
+            // must be ripped out by hand (E + SPACE), never burned down.
+            if (m.species.id === 'leviathan_priest' && m._kneeling) {
+                if (m.hp <= 0) m.hp = 1;
+                try {
+                    if (Math.random() < 0.4) {
+                        Particles.spawnParticles(state, m.x, m.y - 50, '#7dd3fc', 1, { size: 3 });
+                    }
+                    m._kneelMsgT = (m._kneelMsgT || 0) - delta;
+                    const pd = Math.hypot(p.x - m.x, p.y - m.y);
+                    if (pd < 220 && m._kneelMsgT <= 0) {
+                        m._kneelMsgT = 2.2;
+                        Particles.showFloatingText(state, 'ⓔ RIP THE HEART — press E!', m.x, m.y - 110, '#fef08a');
+                    }
+                } catch (e) {}
+                continue;
+            }
+
             // --- Death ---
             if (m.hp <= 0) {
                 if (isMPClient) continue; // host owns death + loot
+                // Priest at 0 HP kneels for the heart-rip finisher.
+                if (m.species && m.species.id === 'leviathan_priest' && !m._kneeling) {
+                    m._kneeling = true;
+                    m.hp = 1;
+                    m.skillCooldown = 9999;
+                    m.stunTimer = 0;
+                    m.isCharging = false;
+                    m._kneelMsgT = 0;
+                    state.screenShake = Math.max(state.screenShake || 0, 18);
+                    try {
+                        Particles.spawnParticles(state, m.x, m.y, '#0ea5e9', 40, { size: 6 });
+                        if (typeof Combat !== 'undefined' && Combat.roarShockwave) {
+                            Combat.roarShockwave(state, m.x, m.y, { color: '#0ea5e9', rings: 3, maxR: 220, shake: 14 });
+                        }
+                    } catch (e) {}
+                    Particles.showFloatingText(state, '💙 THE PRIEST KNEELS — RIP ITS HEART!', m.x, m.y - 110, '#7dd3fc');
+                    try {
+                        if (typeof UI !== 'undefined' && UI.updateStatusBanner) {
+                            UI.updateStatusBanner('It kneels! Get close and press <b>E</b>, then mash <b>SPACE</b> to rip the heart free!', 'Finisher', 'sky');
+                        }
+                    } catch (e) {}
+                    try { audio.playBossRoar(); } catch (e) {}
+                    continue;
+                }
                 Particles.spawnBloodImpact(state, m.x, m.y, '#ef4444', 30);
                 const isBoss = m.species.isBoss ||
                                m.species.rarity === 'legendary' ||
@@ -159,10 +218,17 @@ const Combat = {
                 if (m.species.isBoss) {
                     state.activeBoss = null;
                     state.bossDeaths = 0; // won — chances reset
-                    // Boss down: release its grips (tether, QTE, apocalypse).
+                    // The black sea lifts once the Star-Eater falls.
+                    try {
+                        if (m.species.id === 'void_shepherd' && typeof Ritual !== 'undefined' && Ritual.clearVoidBlackSea) Ritual.clearVoidBlackSea(state);
+                        if (m.species.id === 'stormlord_hydra' && typeof Ritual !== 'undefined') {
+                            if (Ritual.clearHydraSea) Ritual.clearHydraSea(state);
+                            if (Ritual.unwindBossStorm) Ritual.unwindBossStorm(state);
+                        }
+                    } catch (e) {}
+                    // Boss down: release its grips (tether, apocalypse).
                     try {
                         state.player.tether = null;
-                        state.player.voidDrag = null;
                         state.player.voidDrain = null;
                         document.getElementById('tension-hud').classList.add('hidden');
                     } catch (e) {}
@@ -245,11 +311,80 @@ const Combat = {
                 // Per-tick arrival FX by intro mode (theatre only).
                 // Portal-grow: bosses that step out of portals scale from
                 // 25% to full across the cinematic (see drawBossMonster).
+                // VOID GATE 3-act play (see spawnVoidBossFromGate):
+                //  act I holds it INSIDE the portal, growing 0.05 -> 1;
+                //  act II breaches (roar) and assigns the swim;
+                //  act III names it ONCE on arrival. Never swims + grows.
                 try {
-                    if (typeof m._sizeMult === 'number' && m._sizeMult < 1) {
+                    if (m._voidPortal) {
+                        const vt = state.time || 0;
+                        if (vt < (m._voidSwimAt || 0)) {
+                            const g0 = (typeof m._voidGrowFrom === 'number') ? m._voidGrowFrom : vt;
+                            const g1 = (typeof m._voidGrowTo === 'number') ? m._voidGrowTo : vt;
+                            if (vt < g0) { m._sizeMult = 0.05; m._voidFade = 0; }
+                            else {
+                                const k = Math.max(0, Math.min(1, (vt - g0) / Math.max(0.01, g1 - g0)));
+                                m._sizeMult = 0.05 + 0.95 * k;
+                                m._voidFade = k;
+                            }
+                            // Growing crackle inside the gate.
+                            if (Math.random() < 0.5 && typeof Particles !== 'undefined') {
+                                try {
+                                    Particles.spawnParticles(state, m._voidPortal.x + (Math.random() - 0.5) * 220, m._voidPortal.y + (Math.random() - 0.5) * 160, '#a855f7', 2, { size: 3 });
+                                } catch (e2) {}
+                            }
+                        } else {
+                            if (!m._voidBreached && (m.hp || 0) > 0) {
+                                m._voidBreached = true;
+                                const a = m._voidArena || { x: m.x, y: m.y };
+                                const d = Math.hypot(a.x - m.x, 0) || 1;
+                                m._swimIn = { x: a.x, y: a.y, spd: d / 7 };
+                                try { audio.playBossRoar(); } catch (e2) {}
+                                try {
+                                    if (typeof Combat !== 'undefined' && Combat.roarShockwave) {
+                                        Combat.roarShockwave(state, m.x, m.y, { color: '#a855f7', rings: 5, maxR: 340, shake: 22, gap: 0.16 });
+                                    }
+                                } catch (e2) {}
+                                if (typeof Particles !== 'undefined' && Particles.spawnWaterSplashes) {
+                                    try { Particles.spawnWaterSplashes(state, m.x, m.y + 20, 20); } catch (e2) {}
+                                }
+                                Particles.showFloatingText(state, '🌌 THE STAR-EATER BREACHES!', m.x, m.y - 130, '#c084fc');
+                                state.screenShake = Math.max(state.screenShake || 0, 24);
+                            }
+                            m._sizeMult = 1;
+                            m._voidFade = 1;
+                            // Arrival: ONE name banner as it grounds ashore.
+                            if (!m._swimIn && m._voidBreached && !m._voidNamed && (m.hp || 0) > 0) {
+                                m._voidNamed = true;
+                                try {
+                                    state.delayedBlasts = state.delayedBlasts || [];
+                                    state.delayedBlasts.push({
+                                        x: m.x, y: m.y, radius: 300, damage: 0,
+                                        timer: 0.4, color: '#22d3ee', shake: 24,
+                                    });
+                                } catch (e2) {}
+                                try {
+                                    const host = document.getElementById('game-container') || document.body;
+                                    const old = document.getElementById('boss-intro-banner');
+                                    if (old) old.remove();
+                                    const meta = { title: 'THE STAR-EATER', color: '#a855f7', glow: '#22d3ee' };
+                                    const div = document.createElement('div');
+                                    div.id = 'boss-intro-banner';
+                                    div.innerHTML =
+                                        `<div class="boss-intro-kicker">UNHOLY CATCH</div>` +
+                                        `<div class="boss-intro-name" style="--boss-color:${meta.color};--boss-glow:${meta.glow};">${m.species.name.toUpperCase()}</div>` +
+                                        `<div class="boss-intro-sub">${meta.title}</div>`;
+                                    host.appendChild(div);
+                                    setTimeout(() => { try { div.remove(); } catch (e) {} }, 3200);
+                                } catch (e2) {}
+                                try { audio.playBossRoar(); } catch (e2) {}
+                            }
+                        }
+                    } else if (typeof m._sizeMult === 'number' && m._sizeMult < 1) {
                         const total = Math.max(1, m._introDur || 6);
                         const left = Math.max(0, (m.dormantUntil || 0) - state.time);
-                        m._sizeMult = Math.min(1, Math.max(0.25, 1 - left / total) * 0.75 + 0.25);
+                        const from = 0.25;
+                        m._sizeMult = Math.min(1, Math.max(from, 1 - left / total) * (1 - from) + from);
                     }
                 } catch (e) {}
                 try {
@@ -278,6 +413,14 @@ const Combat = {
 
             m.ageOnLand += delta;
             m.skillCooldown -= delta;
+            if (m._voidChannelCd > 0) m._voidChannelCd -= delta;
+            if (m._hydraChannelCd > 0) m._hydraChannelCd -= delta;
+            if (m._overloadCd > 0) m._overloadCd -= delta;
+            // Signature-orb gather progress (render reads t/dur).
+            if (m._chargeOrb) {
+                m._chargeOrb.t = (m._chargeOrb.t || 0) + delta;
+                if (m._chargeOrb.t > (m._chargeOrb.dur || 2) + 0.5) m._chargeOrb = null;
+            }
             m.actionTimer -= delta;
             m.meleeCd -= delta;
             if (m.stealthTimer > 0) m.stealthTimer -= delta;
@@ -485,35 +628,14 @@ const Combat = {
         } catch (e) {}
     },
 
-    // Void Leviathan's script: P1 unstable star, BEACH-BREACH tug QTE
-    // at 65% (then P2 cosmic rift), mutation at 30% (P3 star-eater),
-    // Void Apocalypse final enrage below 10%.
+    // Void Leviathan's script: P1 unstable star, COSMIC RIFT entry at
+    // 65% (then P2), mutation at 30% (P3 star-eater), Void Apocalypse
+    // final enrage below 10%.
     updateVoidPhases(state, m, hpRatio) {
         try {
             const p = state.player;
-            if (m.phase === 1 && hpRatio < 0.65 && !m._breach) {
-                m._breach = true;
-                // LAND PULL: the line burns red — mash SPACE to break free
-                // while it drags you. (Sea/hooked instances skip the QTE
-                // and roll on; the shared land body runs it.)
-                p.voidDrag = { boss: m, timer: 6, mash: 0, need: 14, slammed: false };
-                try {
-                    const hud = document.getElementById('tension-hud');
-                    if (hud) hud.classList.remove('hidden');
-                } catch (e) {}
-                Particles.showFloatingText(state, '🪢 LAND PULL — MASH SPACE TO BREAK FREE!', p.x, p.y - 70, '#a855f7');
-                try { audio.playRoar(); } catch (e) {}
-                // Tail slams chase the drag (dodgeable telegraphs).
-                for (let i = 0; i < 3; i++) {
-                    state.delayedBlasts.push({
-                        x: p.x + (Math.random() - 0.5) * 160,
-                        y: p.y + (Math.random() - 0.5) * 160,
-                        radius: 100, damage: Math.round(120 + (m.species.attack || 400) * 0.15),
-                        timer: 1.2 + i * 1.4, color: '#6d28d9', shake: 16, stunOnBlast: 0.4,
-                    });
-                }
-            } else if (m.phase === 1 && m._breach && !p.voidDrag) {
-                // QTE resolved (see Player.update): enter P2 crawling.
+            if (m.phase === 1 && hpRatio < 0.65) {
+                // No tug-of-war: it tears the rift open and crawls out.
                 m.phase = 2;
                 m.isEnraged = true;
                 m.enrageTimer = 999;
@@ -523,6 +645,15 @@ const Combat = {
                 try { audio.playBossRoar(); } catch (e) {}
                 const mouth = this.mouthXY(m);
                 this.roarShockwave(state, mouth.x, mouth.y, { color: '#7c3aed', rings: 4, maxR: 280, shake: 18 });
+                // Rift-entry burst: tail slams chase you as it lands.
+                for (let i = 0; i < 3; i++) {
+                    state.delayedBlasts.push({
+                        x: p.x + (Math.random() - 0.5) * 160,
+                        y: p.y + (Math.random() - 0.5) * 160,
+                        radius: 100, damage: Math.round(120 + (m.species.attack || 400) * 0.15),
+                        timer: 1.2 + i * 1.4, color: '#6d28d9', shake: 16, stunOnBlast: 0.4,
+                    });
+                }
             } else if (m.phase === 2 && hpRatio < 0.3) {
                 m.phase = 3;
                 // Star-Eater's clock: 60s to kill it or it eats itself
@@ -656,6 +787,7 @@ const Combat = {
             try { audio.playBossRoar(); } catch (e) {}
             Particles.showFloatingText(state, '🕳 THE VOID CONSUMES ITSELF — NOTHING REMAINS', m.x, m.y - 100, '#c084fc');
             if (state.activeBoss === m) state.activeBoss = null;
+            try { if (typeof Ritual !== 'undefined' && Ritual.clearVoidBlackSea) Ritual.clearVoidBlackSea(state); } catch (e) {}
             try { if (typeof SaveSystem !== 'undefined') SaveSystem.save(state); } catch (e) {}
         } catch (e) {}
     },
@@ -706,7 +838,7 @@ const Combat = {
                         p.stunTimer = Math.max(p.stunTimer || 0, b.stunOnBlast);
                     }
                 }
-                state.screenShake = Math.max(state.screenShake, b.shake || 8);
+                state.screenShake = Math.max(state.screenShake || 0, b.shake || 8);
                 Particles.spawnParticles(state, b.x, b.y, b.color, 18, { size: 6 });
 
                 // Sound per blast type
@@ -783,7 +915,7 @@ const Combat = {
                     const dealt = this.damagePlayer(state, e.damage || 35);
                     Particles.showFloatingText(state, `-${dealt}`, p.x, p.y - 25, '#f97316');
                     Particles.spawnParticles(state, p.x, p.y, '#f97316', 10, { size: 5 });
-                    state.screenShake = Math.max(state.screenShake, 10);
+                    state.screenShake = Math.max(state.screenShake || 0, 10);
                     try { audio.playHurt(); } catch (err) {}
                     if (p.hp <= 0) return;
                 }
@@ -813,7 +945,7 @@ const Combat = {
                 Particles.showFloatingText(state, `-${dealt}`, p.x, p.y - 25, b.color || '#facc15');
                 Particles.spawnParticles(state, b.x, b.y, b.color || '#facc15', 6);
                 try { audio.playHurt(); } catch (err) {}
-                state.screenShake = Math.max(state.screenShake, 6);
+                state.screenShake = Math.max(state.screenShake || 0, 6);
                 if (p.hp <= 0) return;
             }
         }
@@ -889,7 +1021,7 @@ const Combat = {
                     b.color || '#facc15');
                 Player.refreshHUD(state);
                 UI.triggerDamageFlash();
-                state.screenShake = Math.max(state.screenShake, 6);
+                state.screenShake = Math.max(state.screenShake || 0, 6);
                 Particles.spawnParticles(state, b.x, b.y, b.color || '#facc15', 8);
                 try { audio.playHurt(); } catch (e) {}
                 state.bullets.splice(i, 1);
@@ -1133,10 +1265,27 @@ const Combat = {
 
     pickSkill(m) {
         // Hydra phase 2 (ashore): a different, meaner shore moveset.
+        // Storm-orb convergence locks it like the void orb (shore too).
         try {
             if (m && m.species && m.species.id === 'stormlord_hydra' && m.phase === 2) {
-                const shore = ['hydraLightning', 'hydraRoar', 'hydraBiteShore', 'hydraTether', 'hydraVenom', 'danmakuRing', 'danmakuFan'];
+                if ((m._hydraChannelCd || 0) > 0) return null;
+                const shore = ['hydraLightning', 'hydraRoar', 'hydraBiteShore', 'hydraTether', 'hydraVenom', 'hydraStormOrb', 'danmakuRing', 'danmakuFan'];
                 return shore[Math.floor(Math.random() * shore.length)];
+            }
+        } catch (e) {}
+        // Priest ashore: land kit, Heart Overload on a strict 15s clock.
+        try {
+            if (m && m.species && m.species.id === 'leviathan_priest') {
+                if ((m._overloadCd || 0) <= 0) { m._overloadCd = 15; return 'heartOverload'; }
+                const land = (m.species.landSkills && m.species.landSkills.length)
+                    ? m.species.landSkills : (m.species.skills || []);
+                if (land.length) return land[Math.floor(Math.random() * land.length)];
+            }
+        } catch (e) {}
+        // Hydra at sea (hooked phase 1): no other cast mid-converge.
+        try {
+            if (m && m.species && m.species.id === 'stormlord_hydra') {
+                if ((m._hydraChannelCd || 0) > 0) return null;
             }
         } catch (e) {}
         // Crimson Emperor: 3-phase movesets, plus a death-throe below 10%
@@ -1161,17 +1310,20 @@ const Combat = {
         // frenzy barrage below 10%.
         try {
             if (m && m.species && m.species.id === 'void_shepherd') {
+                // Star-Eater Orb convergence locks the boss: while the orb
+                // gathers it cannot cast anything else.
+                if ((m._voidChannelCd || 0) > 0) return null;
                 const r = m.hp / (m.maxHp || 1);
                 if (r < 0.1 && Math.random() < 0.5) return 'phaseBarrage';
                 if (m.phase >= 3) {
-                    const p3 = ['cosmicBlast', 'cosmicBlast', 'phaseBarrage', 'starRain', 'realityShear', 'voidBarrage', 'danmakuSpiral'];
+                    const p3 = ['cosmicBlast', 'cosmicBlast', 'phaseBarrage', 'starRain', 'realityShear', 'voidBarrage', 'voidStarEaterOrb', 'danmakuSpiral'];
                     return p3[Math.floor(Math.random() * p3.length)];
                 }
                 if (m.phase === 2) {
-                    const p2 = ['realityShear', 'voidPit', 'starRain', 'cosmicBlast', 'voidBarrage', 'danmakuRing'];
+                    const p2 = ['realityShear', 'voidPit', 'starRain', 'cosmicBlast', 'voidBarrage', 'voidStarEaterOrb', 'danmakuRing'];
                     return p2[Math.floor(Math.random() * p2.length)];
                 }
-                const p1 = ['voidSpitting', 'voidBarrage', 'abyssalGeyser', 'voidTentacle', 'danmakuFan'];
+                const p1 = ['voidSpitting', 'voidBarrage', 'abyssalGeyser', 'voidTentacle', 'voidStarEaterOrb', 'danmakuFan'];
                 return p1[Math.floor(Math.random() * p1.length)];
             }
         } catch (e) {}
@@ -1641,7 +1793,7 @@ const Combat = {
                         hazard(p.x, p.y, 70, 4.0, 16, 'poison', '#a855f7');
                     }
                 }
-                state.screenShake = Math.max(state.screenShake, 14);
+                state.screenShake = Math.max(state.screenShake || 0, 14);
                 try {
                     const c = (color || '').toLowerCase();
                     if (skill === 'solarBeam' || skill === 'radiantBarb') audio.playThunder();
@@ -1900,12 +2052,17 @@ const Combat = {
 
             const dist = Math.hypot(p.x - h.x, p.y - h.y);
             if (dist < h.radius + (p.radius || 15)) {
-                const tickDmg = h.damagePerSec * delta;
+                // Bulletproof: a hazard without damagePerSec (hand-made /
+                // corrupt sync) must never NaN the player's HP into godmode.
+                const dps = Number(h.damagePerSec);
+                const tickDmg = (Number.isFinite(dps) ? dps : 8) * delta;
                 let dr = 0;
                 if (typeof Shop !== 'undefined' && Shop.getDamageReduction) {
                     try { dr = Shop.getDamageReduction(state); } catch (e) {}
                 }
+                if (!Number.isFinite(dr)) dr = 0;
                 if (p.umbrellaTimer > 0) dr = Math.min(0.8, dr + 0.35);
+                if ((p.ironSkinT || 0) > 0) dr = Math.min(0.85, dr + 0.60);
                 p.hp -= tickDmg * (1 - dr);
                 // Sticky ground slows you while you stand in it — walk out
                 // to end it (no more instant slows from skills).
@@ -1950,6 +2107,12 @@ const Combat = {
         try {
             if (typeof WorldSystem !== 'undefined' && WorldSystem.islandOf && WorldSystem.islandOf(state)) {
                 magnetR = 150; pickupR = 80;
+            }
+        } catch (e) {}
+        // Magnet Charm item: loot flies from 3x farther, grabs at 2x range.
+        try {
+            if (state.player && (state.player.magnetT || 0) > 0) {
+                magnetR *= 3; pickupR *= 2;
             }
         } catch (e) {}
         const B = (typeof CONFIG !== 'undefined' && CONFIG.WORLD) || { MIN_X: 0, MAX_X: 9999, MIN_Y: 0, MAX_Y: 9999 };
@@ -2037,7 +2200,20 @@ const Combat = {
 
             // Host owns loot physics — clients only pick up (then claim)
             const isMPClient = (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient());
-            if (dist < magnetR && dist > 4 && !isMPClient) {
+            // Full bucket: leave loot where it lies instead of dragging a
+            // dead pile to the player's feet. One global hint (throttled),
+            // not one "BUCKET FULL!" text per item — freeing space resumes
+            // the magnet on the very next frame.
+            const bucketFull = (p.bucket.length >= p.bucketCapacity);
+            if (bucketFull) {
+                if (dist < magnetR + 40 && state.time - (state._bucketFullHintT || 0) > 6) {
+                    state._bucketFullHintT = state.time;
+                    Particles.showFloatingText(state, '🎒 BUCKET FULL! Press B — drop cheap fish, or sell at shop', p.x, p.y - 60, '#f87171');
+                    try { audio.playError(); } catch (e2) {}
+                }
+            }
+
+            if (dist < magnetR && dist > 4 && !isMPClient && !bucketFull) {
                 const strength = 1 + (1 - dist / magnetR) * 3;
                 const pullSpeed = 260 * strength;
                 item.x += (dx / dist) * pullSpeed * DT;
@@ -2060,12 +2236,8 @@ const Combat = {
                             if (item.id && Multiplayer.sendLootDelete) Multiplayer.sendLootDelete(item.id);
                         }
                         if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
-                    } else if (state.time - (item._fullT || 0) > 3) {
-                        // Bucket-full nag, throttled (was a new text EVERY frame).
-                        item._fullT = state.time;
-                        Particles.showFloatingText(state, "BUCKET FULL!",
-                            item.x, item.y - 20, '#f87171');
-                    }
+                    } // Full bucket: silent here — the global throttled hint
+                      // above already fired (no per-item spam pile-up).
                     continue;
                 }
                 // Personal loot: whoever grabs it keeps it. In MP the host
@@ -2117,11 +2289,8 @@ const Combat = {
                     
                     Player.addXP(state, Math.round((item.species.value || 10) / 10) + 5);
                     UI.updateStatusBanner('Loot Claimed! Return to shop.', 'Claimed!', 'emerald');
-                } else if (state.time - (item._fullT || 0) > 3) {
-                    item._fullT = state.time;
-                    Particles.showFloatingText(state, "BUCKET FULL!",
-                        item.x, item.y - 20, '#f87171');
-                }
+                } // Full bucket: silent here — the global throttled hint
+                  // above already fired (no per-item spam pile-up).
             }
         }
     }

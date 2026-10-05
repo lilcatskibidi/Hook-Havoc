@@ -429,4 +429,508 @@ const N = sec => Math.floor(sec * SR);
   writeWav('portal.wav', normalize(x, 0.8));
 })();
 
+// ---- THUNDER: rolling crack (1.1s) ----
+(function thunder() {
+  const n = N(1.1), R = rng(505);
+  const raw = new Float64Array(n);
+  for (let i = 0; i < n; i++) raw[i] = R() * 2 - 1;
+  const x = Float64Array.from(lowpass(raw, 420));
+  let p = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    p += (75 - 45 * (t / 1.1)) / SR;
+    x[i] = x[i] * 0.9 * Math.exp(-t / 0.55) + sine(p) * 0.45 * Math.exp(-t / 0.5);
+  }
+  // initial crack transient
+  for (let i = 0; i < Math.floor(0.02 * SR); i++) x[i] += (R() * 2 - 1) * 0.7;
+  writeWav('thunder.wav', normalize(x, 0.85));
+})();
+
+// ---- EXPLOSION: deep boom + debris (0.9s) ----
+(function explosion() {
+  const n = N(0.9), R = rng(606);
+  const x = new Float64Array(n);
+  let p = 0, p2 = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR, k = t / 0.9;
+    p += (95 - 65 * k) / SR; p2 += (58 - 32 * k) / SR;
+    x[i] = sine(p) * 0.6 * Math.exp(-t / 0.3)
+         + sine(p2) * 0.4 * Math.exp(-t / 0.45)
+         + (R() * 2 - 1) * 0.45 * Math.exp(-t / 0.25);
+  }
+  writeWav('explosion.wav', normalize(Float64Array.from(lowpass(x, 2800)), 0.85));
+})();
+
+// ---- SPLASH: water slap (0.35s) ----
+(function splash() {
+  const n = N(0.35), R = rng(707);
+  const raw = new Float64Array(n);
+  for (let i = 0; i < n; i++) raw[i] = R() * 2 - 1;
+  const x = Float64Array.from(lowpass(raw, 1800));
+  const env = adsr(n, 0.005, 0.09);
+  for (let i = 0; i < n; i++) x[i] *= env[i];
+  writeWav('splash.wav', normalize(x, 0.8));
+})();
+
+// ---- CAST: line whistle up (0.18s) ----
+(function cast() {
+  const n = N(0.18);
+  const x = new Float64Array(n);
+  let p = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR, k = t / 0.18;
+    p += (200 + 420 * k) / SR;
+    x[i] = sine(p) * 0.6 * Math.sin(Math.PI * Math.min(1, k * 1.1));
+  }
+  writeWav('cast.wav', normalize(x, 0.75));
+})();
+
+// ---- SNAP: line crack (0.12s) ----
+(function snap() {
+  const n = N(0.12), R = rng(808);
+  const x = new Float64Array(n);
+  let p = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    p += (900 - 780 * Math.min(1, t / 0.1)) / SR;
+    x[i] = (saw(p) * 0.6 + (R() * 2 - 1) * 0.4) * Math.exp(-t / 0.035);
+  }
+  writeWav('snap.wav', normalize(x, 0.8));
+})();
+
+// ---- BEACH: soft thud + droplets (0.45s) ----
+(function beach() {
+  const n = N(0.45), R = rng(909);
+  const x = new Float64Array(n);
+  let p = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    p += (120 - 80 * Math.min(1, t / 0.3)) / SR;
+    x[i] = sine(p) * 0.55 * Math.exp(-t / 0.16);
+  }
+  const raw = new Float64Array(n);
+  for (let i = 0; i < n; i++) raw[i] = R() * 2 - 1;
+  const spl = lowpass(raw, 2200);
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    x[i] += spl[i] * 0.5 * Math.exp(-Math.max(0, t - 0.06) / 0.1) * (t >= 0.06 ? 1 : 0);
+  }
+  writeWav('beach.wav', normalize(x, 0.8));
+})();
+
+// ---- LEVELUP: rising arp (0.55s) ----
+(function levelup() {
+  const n = N(0.55);
+  const x = new Float64Array(n);
+  [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+    let p = 0;
+    const s0 = Math.floor(i * 0.1 * SR);
+    for (let j = s0; j < n; j++) {
+      const t = (j - s0) / SR;
+      p += f / SR;
+      x[j] += sine(p) * 0.3 * Math.exp(-t / 0.14);
+    }
+  });
+  writeWav('levelup.wav', normalize(x, 0.8));
+})();
+
+// ---- REELTICK: tiny click (0.05s) ----
+(function reeltick() {
+  const n = N(0.05);
+  const x = new Float64Array(n);
+  let p = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    p += (1100 - 200 * (t / 0.05)) / SR;
+    x[i] = sqr(p) * 0.4 * Math.exp(-t / 0.015);
+  }
+  writeWav('reeltick.wav', normalize(x, 0.7));
+})();
+
+// ---- TENSIONSTRESS: strained whine (0.2s) ----
+(function tensionstress() {
+  const n = N(0.2);
+  const x = new Float64Array(n);
+  let p = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    p += (1800 + 500 * Math.sin(2 * Math.PI * 30 * t)) / SR;
+    x[i] = saw(p) * 0.4 * Math.exp(-t / 0.09);
+  }
+  writeWav('tensionstress.wav', normalize(Float64Array.from(lowpass(x, 5000)), 0.75));
+})();
+
+// ---- FISHSCREECH: wet shriek (0.35s) ----
+(function fishscreech() {
+  const n = N(0.35), R = rng(111);
+  const x = new Float64Array(n);
+  let p = 0, p2 = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR, k = t / 0.35;
+    p += (820 - 480 * k) / SR; p2 += (1230 - 700 * k) / SR;
+    x[i] = (saw(p) * 0.35 + sine(p2) * 0.3) * Math.exp(-t / 0.16)
+         + (R() * 2 - 1) * 0.12 * Math.exp(-t / 0.1);
+  }
+  writeWav('fishscreech.wav', normalize(x, 0.8));
+})();
+
+// ---- WHOOSH: air rush (0.3s) ----
+(function whoosh() {
+  const n = N(0.3), R = rng(222);
+  const raw = new Float64Array(n);
+  for (let i = 0; i < n; i++) raw[i] = R() * 2 - 1;
+  const lp = lowpass(raw, 2400);
+  const x = new Float64Array(n);
+  for (let i = 1; i < n; i++) {
+    const k = i / n;
+    x[i] = (lp[i] - lp[i - 1]) * 2.4 * Math.sin(Math.PI * k);
+  }
+  writeWav('whoosh.wav', normalize(x, 0.8));
+})();
+
+// ---- BUBBLE: rising blip (0.16s) ----
+(function bubble() {
+  const n = N(0.16);
+  const x = new Float64Array(n);
+  let p = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR, k = t / 0.16;
+    p += (320 + 560 * k) / SR;
+    x[i] = sine(p) * 0.55 * Math.sin(Math.PI * k);
+  }
+  writeWav('bubble.wav', normalize(x, 0.75));
+})();
+
+// ---- ICECRACK: brittle snaps (0.3s) ----
+(function icecrack() {
+  const n = N(0.3), R = rng(333);
+  const x = new Float64Array(n);
+  let p = 0;
+  const hits = [0.02, 0.09, 0.16, 0.23];
+  hits.forEach(h => {
+    const s0 = Math.floor(h * SR);
+    for (let i = s0; i < Math.min(n, s0 + Math.floor(0.05 * SR)); i++) {
+      const t = (i - s0) / SR;
+      p += (1400 + R() * 800) / SR;
+      x[i] += (sine(p) * 0.4 + (R() * 2 - 1) * 0.4) * Math.exp(-t / 0.014);
+    }
+  });
+  writeWav('icecrack.wav', normalize(x, 0.8));
+})();
+
+// ---- HURT: player grunt-hit (0.2s) ----
+(function hurt() {
+  const n = N(0.2), R = rng(444);
+  const x = new Float64Array(n);
+  let p = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    p += (190 - 120 * (t / 0.2)) / SR;
+    x[i] = (saw(p) * 0.5 + (R() * 2 - 1) * 0.25) * Math.exp(-t / 0.07);
+  }
+  writeWav('hurt.wav', normalize(x, 0.8));
+})();
+
+// ---- FISHDEATH: descending wail (0.7s) ----
+(function fishdeath() {
+  const n = N(0.7), R = rng(555);
+  const x = new Float64Array(n);
+  let p = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR, k = t / 0.7;
+    p += (520 - 430 * k) / SR;
+    x[i] = (saw(p) * 0.45 + (R() * 2 - 1) * 0.15) * Math.exp(-t / 0.3);
+  }
+  writeWav('fishdeath.wav', normalize(Float64Array.from(lowpass(x, 3000)), 0.8));
+})();
+
+// ---- BOSSKILLED: kill fanfare boom (1.4s) ----
+(function bosskilled() {
+  const n = N(1.4), R = rng(666);
+  const x = new Float64Array(n);
+  let p = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR, k = t / 1.4;
+    p += (210 - 165 * k) / SR;
+    x[i] = (saw(p) * 0.5 + (R() * 2 - 1) * 0.25) * Math.exp(-t / 0.5);
+  }
+  [523.25, 659.25, 783.99].forEach((f, i) => {
+    let pp = 0;
+    const s0 = Math.floor((0.35 + i * 0.14) * SR);
+    for (let j = s0; j < n; j++) {
+      const t = (j - s0) / SR;
+      pp += f / SR;
+      x[j] += sine(pp) * 0.22 * Math.exp(-t / 0.3);
+    }
+  });
+  writeWav('bosskilled.wav', normalize(x, 0.82));
+})();
+
+// ---- VICTORY: major arp (0.6s) ----
+(function victory() {
+  const n = N(0.6);
+  const x = new Float64Array(n);
+  [392.0, 523.25, 659.25, 783.99].forEach((f, i) => {
+    let p = 0;
+    const s0 = Math.floor(i * 0.09 * SR);
+    for (let j = s0; j < n; j++) {
+      const t = (j - s0) / SR;
+      p += f / SR;
+      x[j] += sine(p) * 0.3 * Math.exp(-t / 0.18);
+    }
+  });
+  writeWav('victory.wav', normalize(x, 0.8));
+})();
+
+// ---- UIHOVER: feather tick (0.04s) ----
+(function uihover() {
+  const n = N(0.04);
+  const x = new Float64Array(n);
+  let p = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    p += 1400 / SR;
+    x[i] = sine(p) * 0.4 * Math.exp(-t / 0.012);
+  }
+  writeWav('uihover.wav', normalize(x, 0.7));
+})();
+
+// ---- SAVESUCCESS: soft two-note confirm (0.3s) ----
+(function savesuccess() {
+  const n = N(0.3);
+  const x = new Float64Array(n);
+  [[660, 0], [990, 0.08]].forEach(([f, dt]) => {
+    let p = 0;
+    const s0 = Math.floor(dt * SR);
+    for (let j = s0; j < n; j++) {
+      const t = (j - s0) / SR;
+      p += f / SR;
+      x[j] += sine(p) * 0.35 * Math.exp(-t / 0.09);
+    }
+  });
+  writeWav('savesuccess.wav', normalize(x, 0.78));
+})();
+
+// ---- ERROR: dull buzz (0.18s) ----
+(function error() {
+  const n = N(0.18);
+  const x = new Float64Array(n);
+  let p = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    p += 160 / SR;
+    x[i] = sqr(p) * 0.4 * Math.exp(-t / 0.07);
+  }
+  writeWav('error.wav', normalize(Float64Array.from(lowpass(x, 1200)), 0.75));
+})();
+
+// ---- BELL: deep abyssal toll (2.4s) ----
+(function bell() {
+  const n = N(2.4);
+  const x = new Float64Array(n);
+  [[98, 0.5, 2.2], [147, 0.3, 1.8], [196, 0.25, 1.5], [294, 0.12, 1.0]].forEach(([f, a, d]) => {
+    let p = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / SR;
+      p += f / SR;
+      x[i] += sine(p) * a * Math.exp(-t / (d / 2.2));
+    }
+  });
+  writeWav('bell.wav', normalize(x, 0.8));
+})();
+
+// ---- GUNSHOTS: per-family shots ----
+(function gunshots() {
+  function shot(name, seed, dur, fn) {
+    const n = N(dur), R = rng(seed);
+    const x = new Float64Array(n);
+    fn(x, n, R);
+    writeWav(name + '.wav', normalize(x, 0.82));
+  }
+  shot('gun_pistol', 1001, 0.12, (x, n, R) => {
+    let p = 0;
+    for (let i = 0; i < n; i++) { const t = i / SR; p += (320 - 260 * (t / 0.12)) / SR; x[i] = saw(p) * 0.6 * Math.exp(-t / 0.035); }
+  });
+  shot('gun_shotgun', 1002, 0.3, (x, n, R) => {
+    for (let i = 0; i < n; i++) { const t = i / SR; x[i] = (R() * 2 - 1) * 0.8 * Math.exp(-t / 0.07); }
+    const lp = lowpass(x, 1400);
+    for (let i = 0; i < n; i++) x[i] = lp[i];
+  });
+  shot('gun_rifle', 1003, 0.1, (x, n) => {
+    let p = 0;
+    for (let i = 0; i < n; i++) { const t = i / SR; p += (480 - 390 * (t / 0.1)) / SR; x[i] = sqr(p) * 0.55 * Math.exp(-t / 0.03); }
+  });
+  shot('gun_harpoon', 1004, 0.25, (x, n) => {
+    let p = 0, p2 = 0;
+    for (let i = 0; i < n; i++) { const t = i / SR; p += (150 + 450 * (t / 0.25)) / SR; p2 += 90 / SR; x[i] = (sine(p) * 0.5 + sine(p2) * 0.3) * Math.exp(-t / 0.1); }
+  });
+  shot('gun_smg', 1005, 0.07, (x, n) => {
+    let p = 0;
+    for (let i = 0; i < n; i++) { const t = i / SR; p += (620 - 480 * (t / 0.07)) / SR; x[i] = sqr(p) * 0.45 * Math.exp(-t / 0.02); }
+  });
+  shot('gun_rail', 1006, 0.4, (x, n, R) => {
+    let p = 0;
+    for (let i = 0; i < n; i++) { const t = i / SR; p += (180 + 720 * (t / 0.4)) / SR; x[i] = (saw(p) * 0.5 + (R() * 2 - 1) * 0.2) * Math.exp(-t / 0.14); }
+  });
+  shot('gun_plasma', 1007, 0.2, (x, n) => {
+    let p = 0, p2 = 0;
+    for (let i = 0; i < n; i++) { const t = i / SR; p += (500 + 700 * (t / 0.2)) / SR; p2 += (200 - 140 * (t / 0.2)) / SR; x[i] = (sine(p) * 0.4 + sine(p2) * 0.3) * Math.exp(-t / 0.08); }
+  });
+  shot('gun_flame', 1008, 0.15, (x, n, R) => {
+    const raw = new Float64Array(n);
+    for (let i = 0; i < n; i++) raw[i] = R() * 2 - 1;
+    const lp = lowpass(raw, 900);
+    for (let i = 0; i < n; i++) { const t = i / SR; x[i] = lp[i] * 0.8 * Math.exp(-t / 0.06); }
+  });
+  shot('gun_launcher', 1009, 0.35, (x, n, R) => {
+    let p = 0;
+    for (let i = 0; i < n; i++) { const t = i / SR; p += (120 - 80 * (t / 0.35)) / SR; x[i] = (sine(p) * 0.6 + (R() * 2 - 1) * 0.35) * Math.exp(-t / 0.12); }
+  });
+})();
+
+// ---- SACRIFICE: dark choir swell + heart thump (2.2s) ----
+(function sacrifice() {
+  const n = N(2.2), R = rng(777);
+  const x = new Float64Array(n);
+  // low choir swell
+  [73.42, 87.31, 110.0, 130.81].forEach((f, vi) => {
+    let p = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / SR, k = t / 2.2;
+      p += f / SR;
+      const env = Math.sin(Math.PI * Math.min(1, k * 1.05));
+      x[i] += (saw(p) * 0.22 + sine(p * 0.5) * 0.18) * env;
+    }
+  });
+  // heart thumps, accelerating
+  [0.5, 0.95, 1.3, 1.58, 1.8].forEach(dt => {
+    let p = 0;
+    const s0 = Math.floor(dt * SR);
+    for (let i = s0; i < Math.min(n, s0 + Math.floor(0.22 * SR)); i++) {
+      const t = (i - s0) / SR;
+      p += (70 - 40 * Math.min(1, t / 0.2)) / SR;
+      x[i] += sine(p) * 0.5 * Math.exp(-t / 0.09);
+    }
+  });
+  // ash noise wash
+  const raw = new Float64Array(n);
+  for (let i = 0; i < n; i++) raw[i] = R() * 2 - 1;
+  const wash = lowpass(raw, 900);
+  for (let i = 0; i < n; i++) {
+    const k = i / n;
+    x[i] += wash[i] * 0.22 * Math.sin(Math.PI * k);
+  }
+  writeWav('sacrifice.wav', normalize(Float64Array.from(lowpass(x, 2400)), 0.85));
+})();
+
+// ---- THEME_CAVE: deep stone drone + drips (8s, seamless) ----
+(function themeCave() {
+  const DUR = 8, n = N(DUR);
+  const x = new Float64Array(n);
+  const drone = [36.71, 55.0, 73.42];
+  const dph = drone.map(() => 0);
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    let s = 0;
+    drone.forEach((f, vi) => {
+      dph[vi] += f / SR;
+      s += (sine(dph[vi]) * 0.7 + sine(dph[vi] * 0.5) * 0.3) * 0.14;
+    });
+    s *= 0.8 + 0.2 * Math.sin(2 * Math.PI * t / DUR);
+    x[i] = s;
+  }
+  // sparse drips, whole-cycle placed
+  const R = rng(808);
+  for (let d = 0; d < 5; d++) {
+    const at = Math.floor((d * 1.6 + 0.4) * SR);
+    let p = 0;
+    for (let i = at; i < Math.min(n, at + Math.floor(0.3 * SR)); i++) {
+      const t = (i - at) / SR;
+      p += (1400 - 900 * Math.min(1, t / 0.2)) / SR;
+      x[i] += sine(p) * 0.10 * Math.exp(-t / 0.08);
+    }
+  }
+  writeWav('theme_cave.wav', normalize(Float64Array.from(lowpass(x, 900)), 0.5));
+})();
+
+// ---- THEME_TEMPLE: airy choir + soft bell (9.6s, seamless) ----
+(function themeTemple() {
+  const DUR = 9.6, n = N(DUR);
+  const x = new Float64Array(n);
+  const voices = [
+    { f: 329.63, a: 0.10, cyc: 3 },
+    { f: 440.00, a: 0.08, cyc: 4 },
+    { f: 523.25, a: 0.06, cyc: 5 },
+  ];
+  const vph = voices.map(() => 0);
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    let s = 0;
+    voices.forEach((v, vi) => {
+      vph[vi] += v.f / SR;
+      const lfo = 0.65 + 0.35 * Math.sin(2 * Math.PI * v.cyc * t / DUR);
+      s += sine(vph[vi]) * v.a * lfo;
+    });
+    x[i] = s * (0.8 + 0.2 * Math.sin(2 * Math.PI * t / DUR));
+  }
+  // soft bell each 3.2s (whole cycles)
+  for (let rep = 0; rep < 3; rep++) {
+    const at = Math.floor(rep * 3.2 * SR);
+    let p = 0;
+    for (let i = at; i < Math.min(n, at + Math.floor(1.4 * SR)); i++) {
+      const t = (i - at) / SR;
+      p += 196 / SR;
+      x[i] += sine(p) * 0.10 * Math.exp(-t / 0.7);
+    }
+  }
+  writeWav('theme_temple.wav', normalize(x, 0.5));
+})();
+
+// ---- THEME_ISLE: bright breeze + plucks (8s, seamless) ----
+(function themeIsle() {
+  const DUR = 8, n = N(DUR), R = rng(909);
+  const x = new Float64Array(n);
+  const pad = [261.63, 329.63, 392.0, 523.25];
+  const pph = pad.map(() => 0);
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    let s = 0;
+    pad.forEach((f, vi) => {
+      pph[vi] += f / SR;
+      s += sine(pph[vi]) * 0.09 * (0.7 + 0.3 * Math.sin(2 * Math.PI * (vi + 1) * t / DUR));
+    });
+    x[i] = s;
+  }
+  // pentatonic plucks, whole-cycle placed
+  const notes = [523.25, 587.33, 659.25, 783.99, 880.0, 783.99, 659.25, 587.33];
+  notes.forEach((f, ni) => {
+    const at = Math.floor(ni * 1.0 * SR);
+    let p = 0;
+    for (let i = at; i < Math.min(n, at + Math.floor(0.5 * SR)); i++) {
+      const t = (i - at) / SR;
+      p += f / SR;
+      x[i] += sine(p) * 0.14 * Math.exp(-t / 0.16);
+    }
+  });
+  // gull-cry-ish chirps (pitched blips, whole cycles)
+  [[1.7, 2100], [4.3, 2400], [6.9, 1900]].forEach(([dt, f0]) => {
+    let p = 0;
+    const s0 = Math.floor(dt * SR);
+    for (let i = s0; i < Math.min(n, s0 + Math.floor(0.28 * SR)); i++) {
+      const t = (i - s0) / SR;
+      p += (f0 - 900 * Math.min(1, t / 0.2)) / SR;
+      x[i] += sine(p) * 0.07 * Math.exp(-t / 0.1);
+    }
+  });
+  // sea breeze wash
+  const raw = new Float64Array(n);
+  for (let i = 0; i < n; i++) raw[i] = R() * 2 - 1;
+  const br = lowpass(raw, 700);
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    x[i] += br[i] * 0.10 * (0.5 + 0.5 * Math.sin(2 * Math.PI * 2 * t / DUR));
+  }
+  writeWav('theme_isle.wav', normalize(Float64Array.from(lowpass(x, 3200)), 0.5));
+})();
+
 console.log('done ->', OUT);

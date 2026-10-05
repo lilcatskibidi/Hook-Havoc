@@ -241,11 +241,11 @@ const Achievements = {
             this.unlock('catch_shiny');
         }
         
-        // Rarity specific
-        if (fish.rarity === 'rare' && !this.unlocked.has('catch_rare')) this.unlock('catch_rare');
-        if (fish.rarity === 'epic' && !this.unlocked.has('catch_epic')) this.unlock('catch_epic');
-        if (fish.rarity === 'legendary' && !this.unlocked.has('catch_legendary')) this.unlock('catch_legendary');
-        if (fish.rarity === 'mythic' && !this.unlocked.has('catch_mythic')) this.unlock('catch_mythic');
+        // Rarity specific (fish null-guarded: callers may pass a bare id)
+        if (fish && fish.rarity === 'rare' && !this.unlocked.has('catch_rare')) this.unlock('catch_rare');
+        if (fish && fish.rarity === 'epic' && !this.unlocked.has('catch_epic')) this.unlock('catch_epic');
+        if (fish && fish.rarity === 'legendary' && !this.unlocked.has('catch_legendary')) this.unlock('catch_legendary');
+        if (fish && fish.rarity === 'mythic' && !this.unlocked.has('catch_mythic')) this.unlock('catch_mythic');
         
         // First catch
         if (!this.unlocked.has('first_catch')) this.unlock('first_catch');

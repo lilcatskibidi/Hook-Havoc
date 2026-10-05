@@ -1376,7 +1376,8 @@ const MultiplayerUI = {
             const verTag = $('mp-version-tag');
             if (verTag) {
                 const v = (typeof GAME_VERSION === 'string' && GAME_VERSION) ? GAME_VERSION : '1.2.5';
-                verTag.innerText = 'v' + v + ' · same version required to play together';
+                const s = (typeof GAME_SNAPSHOT === 'string' && GAME_SNAPSHOT) ? GAME_SNAPSHOT : v;
+                verTag.innerText = 'v' + v + ' · snapshot ' + s + ' · same snapshot required to play together';
             }
             if (!status) return;
             if (typeof PeerLink === 'undefined' || typeof Peer === 'undefined') {
@@ -2225,9 +2226,9 @@ const FishIndex = {
                         Render.drawFishModel(ctx, canvas.width / 2, canvas.height / 2, size, fish, { angle: -0.3 });
                     };
                     paint();
-                    // Repaint when opt-in art lands: player upload (by species
-                    // id) or explicit species.image. Procedural-only species
-                    // never fetch, so cards paint exactly once.
+                    // Repaint when id-based art lands: shipped
+                    // assets/fish/<id>.png or player upload. Misses fall
+                    // back to procedural (probed once per session).
                     try {
                         if (typeof FishImageLoader !== 'undefined') {
                             const wanted = FishImageLoader.resolveId
@@ -2488,6 +2489,13 @@ const Settings = {
         // 1.1.5: lighting only — the clock keeps ticking when OFF.
         set('set-daynight-val', this.data.dayNightFx !== false ? 'ON' : 'OFF', this.data.dayNightFx !== false);
         set('set-touch-val', this.data.touch.toUpperCase(), this.data.touch !== 'off');
+        try {
+            const cur = (typeof TouchControls !== 'undefined' && TouchControls.loadLayout) ? TouchControls.loadLayout() : { scale: 1 };
+            const ts = $('set-touchsize');
+            const tv = $('set-touchsize-val');
+            if (ts) ts.value = Math.round((cur.scale || 1) * 100);
+            if (tv) tv.innerText = `${Math.round((cur.scale || 1) * 100)}%`;
+        } catch (e) {}
         const _ur = $('set-uiscale');
         if (_ur) _ur.value = this.data.uiScale;
         const _uv = $('set-uiscale-val');
@@ -2595,6 +2603,39 @@ const Settings = {
             this.data.uiScale = Math.max(70, Math.min(130, Math.round(Number(uiSlider.value) || 100)));
             this.save(); this.applyUiScale();
         };
+        // Touch button size (80-160%) + layout edit/reset.
+        try {
+            const ts = $('set-touchsize');
+            const tv = $('set-touchsize-val');
+            const cur = (typeof TouchControls !== 'undefined' && TouchControls.loadLayout) ? TouchControls.loadLayout() : { scale: 1 };
+            if (ts) {
+                ts.value = Math.round((cur.scale || 1) * 100);
+                if (tv) tv.innerText = `${Math.round((cur.scale || 1) * 100)}%`;
+                ts.oninput = () => {
+                    const v = Math.max(80, Math.min(160, Math.round(Number(ts.value) || 100)));
+                    if (tv) tv.innerText = `${v}%`;
+                    try { if (typeof TouchControls !== 'undefined' && TouchControls.setScale) TouchControls.setScale(v / 100); } catch (e) {}
+                };
+            }
+        } catch (e) {}
+        on('set-touch-edit', () => {
+            try {
+                if (typeof TouchControls !== 'undefined') {
+                    TouchControls.setEditMode(!TouchControls._editMode);
+                    try { if (typeof audio !== 'undefined' && audio.playUIClick) audio.playUIClick(); } catch (err) {}
+                }
+            } catch (e) {}
+        });
+        on('set-touch-reset', () => {
+            try {
+                if (typeof TouchControls !== 'undefined' && TouchControls.resetLayout) TouchControls.resetLayout();
+                const ts = $('set-touchsize');
+                const tv = $('set-touchsize-val');
+                if (ts) ts.value = 100;
+                if (tv) tv.innerText = '100%';
+                try { if (typeof audio !== 'undefined' && audio.playUIClick) audio.playUIClick(); } catch (e) {}
+            } catch (e) {}
+        });
         const cycleLang = () => {
             this.data.lang = (this.data.lang === 'vi') ? 'en' : 'vi';
             this.save(); this.render();
@@ -2736,12 +2777,37 @@ const Intro = {
 };
 
 // Single source of truth for the displayed game version.
-const GAME_VERSION = '1.3.3';
+const GAME_VERSION = '1.4.0';
+// Snapshot (build) gate for multiplayer: same VERSION is not enough —
+// every shipped change bumps the trailing build (1.4.0.0001 → 0002 …)
+// so a stale tab / old zip can never share a room with the new build.
+// Room ids embed these digits AND the hello handshake carries the full
+// snapshot string for a human-readable reject.
+const GAME_SNAPSHOT = '1.4.0.0001';
 
 // Newest first. Shown in Menu > Updates.
 const CHANGELOG = [
     {
-        ver: 'v1.3.3', date: 'Oct 2026', tag: 'LATEST',
+        ver: 'v1.4.0', date: 'Oct 2026', tag: 'LATEST',
+        items: [
+            'STORMCALLER 3.5s intro cutscene on the 20th gull: storm warning, burning-feather omen, dive landing, freeze beat, STORMCALLER title card — then boss bar + theme',
+            'Stormcaller kit grows to 8: feather barrage (planted 5s hose), feather recall (pinned quills fly back 0.5s apart), gull call (5 real diving seagulls)',
+            'ALL 40 game sounds are now files in assets/audio (npm run gen-audio fills gaps, customs never overwritten) — swap any mp3/ogg/wav to reskin; full table in Readme.txt',
+            'LEVIATHAN PRIEST remake: 32 catchable mutations (blood fuels the chain) → Marlin trades 10 blood epic+ for the Heart of the Sea → cave sacrifice (3 blood + heart) forges a 100%-hook Bloodheart Lure → bell tolls + sky breach + real tsunami arrival',
+            'Priest two-phase hunt: sea gunfight to 50% then it storms ashore; land kit (scythe cone, bone-spike line, 15s heart overload, heavy-hit heart stun); 0 HP kneels for an E + SPACE heart-rip finisher looting crown (wild emperor tribute) + core',
+            'CRAFT tab with bait/armor/rod/gun sub-tabs + key-material recipes (priest cores forge Heartlance, Choir Repeater, Tithe rods, Tidefather armor); crowns cover emperor trophy gaps',
+            'VOID remake: 10th skill (converging star-orb that splits into 7), 7-shard gate → quartz shrine (rarity-void pillars, black-book riddles) → far-offshore portal with in-gate growth, single shore-arrival naming, pitch-black sea until it dies',
+            'HYDRA rework: hook tremor-to-breach arrival, hunting sea phase, storm + green sea, thunder-orb signature, tiered soldier/elite/royal calls, 10 deaths restore every sea',
+            'Fair fights: void tug QTE removed, cutscene bosses face you head-on, bosses named exactly once (shore thud instead), hooked bosses read the top bar (no glitchy catch bars)',
+            'Fish art resolves by species id (assets/fish/<id>.png, lazy probe) — hydra/void/priest PNGs wired',
+            'Local-only ADMIN console (F9): mythical fish, coins, all guns, storm intro, void/blood kits',
+            'Zone music: cave / shrine / isle ambient loops follow the map (boss theme still wins)',
+            'New AURORA + MONSOON weathers: mythic/legendary jackpots, mutation sky-surge (aurora x2.2), brighter storms and lightning',
+            'Fish-art manifest kills console 404s; blood sacrifice gets its own sound',
+        ],
+    },
+    {
+        ver: 'v1.3.3', date: 'Oct 2026', tag: '',
         items: [
             'Event-tide crafting inside the Bait/Armor tabs (have/need rows): Storm Chum, Moon Paste, Fog Mash, Dawn Cry + 4 craft-only armors, forged from specific special fish + coins — locked fish are never eaten',
             'Item hotbar now reads [F] (E stays interact/shop); dash tuned shorter',
@@ -2966,7 +3032,8 @@ const MainMenu = {
     stampVersion() {
         try {
             const v = (typeof GAME_VERSION === 'string' && GAME_VERSION) ? GAME_VERSION : 'v1.2.5';
-            const disp = v.startsWith('v') ? v : 'v' + v;
+            const s = (typeof GAME_SNAPSHOT === 'string' && GAME_SNAPSHOT) ? GAME_SNAPSHOT : '';
+            const disp = (v.startsWith('v') ? v : 'v' + v) + (s ? ' · #' + String(s).split('.').pop() : '');
             ['menu-ver-hero', 'menu-ver-foot', 'menu-ver-chip', 'changelog-ver'].forEach(id => {
                 const el = $(id);
                 if (el) el.innerText = disp;
@@ -3026,19 +3093,35 @@ const MainMenu = {
             // this would wipe an existing expedition.
             if (typeof SaveSystem !== 'undefined') {
                 const slot = (typeof state !== 'undefined' && state.saveSlot) || SaveSystem.getSlot();
+                const startFresh = () => {
+                    SaveSystem.wipe(slot);
+                    // Fresh run in the selected slot (records kept)
+                    SaveSystem.freshPlayer(state);
+                    SaveSystem.save(state, slot);
+                    if (typeof Intro !== 'undefined') Intro.show();
+                    else {
+                        self.hide();
+                        UI.updateStatusBanner('New game started. Cast your line!', 'Start', 'emerald');
+                    }
+                };
                 if (SaveSystem.exists(slot)) {
+                    try {
+                        if (typeof QtyModal !== 'undefined' && QtyModal.confirm) {
+                            QtyModal.confirm({
+                                title: `NEW GAME IN SLOT ${slot}?`,
+                                sub: "This wipes that slot's expedition (records kept).",
+                                okText: 'WIPE + START',
+                            }).then((ok) => { if (ok) startFresh(); });
+                            return;
+                        }
+                    } catch (e) {}
                     const okGo = window.confirm(`Start a NEW game in Slot ${slot}? This wipes that slot's expedition (records kept).`);
                     if (!okGo) return;
+                    startFresh();
+                    return;
                 }
-                SaveSystem.wipe(slot);
-                // Fresh run in the selected slot (records kept)
-                SaveSystem.freshPlayer(state);
-                SaveSystem.save(state, slot);
-            }
-            if (typeof Intro !== 'undefined') Intro.show();
-            else {
-                self.hide();
-                UI.updateStatusBanner('New game started. Cast your line!', 'Start', 'emerald');
+                startFresh();
+                return;
             }
         });
 
@@ -3046,18 +3129,33 @@ const MainMenu = {
             // SECOND button: explicit Start New Game (confirm on wipe).
             if (typeof SaveSystem === 'undefined') return;
             const slot = (typeof state !== 'undefined' && state.saveSlot) || SaveSystem.getSlot();
+            const startFresh = () => {
+                SaveSystem.wipe(slot);
+                SaveSystem.freshPlayer(state);
+                SaveSystem.save(state, slot);
+                if (typeof Intro !== 'undefined') Intro.show();
+                else {
+                    self.hide();
+                    UI.updateStatusBanner('New game started. Cast your line!', 'Start', 'emerald');
+                }
+            };
             if (SaveSystem.exists(slot)) {
+                try {
+                    if (typeof QtyModal !== 'undefined' && QtyModal.confirm) {
+                        QtyModal.confirm({
+                            title: `NEW GAME IN SLOT ${slot}?`,
+                            sub: "This wipes that slot's expedition (records kept).",
+                            okText: 'WIPE + START',
+                        }).then((ok) => { if (ok) startFresh(); });
+                        return;
+                    }
+                } catch (e) {}
                 const okGo = window.confirm(`Start a NEW game in Slot ${slot}? This wipes that slot's expedition (records kept).`);
                 if (!okGo) return;
-                SaveSystem.wipe(slot);
+                startFresh();
+                return;
             }
-            SaveSystem.freshPlayer(state);
-            SaveSystem.save(state, slot);
-            if (typeof Intro !== 'undefined') Intro.show();
-            else {
-                self.hide();
-                UI.updateStatusBanner('New game started. Cast your line!', 'Start', 'emerald');
-            }
+            startFresh();
         });
 
         on('btn-save-menu', () => {
@@ -3328,6 +3426,11 @@ if (typeof Feedback !== 'undefined') {
             MultiplayerUI.refreshMpLog();
         }
     } catch (e) {}
+}
+
+// Init in-game qty picker + confirm dialogs (replaces prompt/confirm)
+if (typeof QtyModal !== 'undefined') {
+    try { QtyModal.init(); } catch (e) {}
 }
 
 // Storage health: itch.io iframes / private mode can block localStorage

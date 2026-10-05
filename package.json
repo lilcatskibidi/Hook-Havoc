@@ -1,6 +1,6 @@
 {
   "name": "aquatic-havoc",
-  "version": "1.3.3",
+  "version": "1.4.0",
   "description": "Aquatic Havoc — Deep Sea Hunter with Online P2P Multiplayer",
   "main": "server.js",
   "scripts": {
@@ -9,6 +9,9 @@
     "dev": "node server.js",
     "build:protect": "node scripts/build-protect.mjs",
     "build:itch": "node scripts/build-itch.mjs",
+    "gen-audio": "node scripts/gen-audio.js",
+    "gen-fish-manifest": "node scripts/gen-fish-manifest.js",
+    "gen-audio-manifest": "node scripts/gen-audio-manifest.js",
     "check": "node scripts/check-load-order.mjs"
   },
   "dependencies": {

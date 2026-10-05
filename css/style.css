@@ -516,25 +516,17 @@ body {
     #fight-list-rows { max-height: 26vh !important; }
     #quest-tracker:not(.hidden) { display: block !important; top: 120px !important; left: 6px !important; width: 46vw !important; max-width: 230px !important; font-size: 11px !important; padding: 6px 8px !important; }
     #main-menu { padding: 8px !important; }
-    #touch-joy { bottom: 132px !important; width: 108px !important; height: 108px !important; }
+    #touch-joy { bottom: 132px !important; }
     #touch-btns { bottom: 126px !important; }
-    .touch-big { width: 70px !important; height: 70px !important; font-size: 13px !important; }
-    .touch-small { width: 46px !important; height: 46px !important; }
     .menu-grid { grid-template-columns: 1fr !important; }
     .boss-intro-name { font-size: clamp(38px, 12vw, 70px) !important; }
 }
 
 /* ============ DEVICE-TIER TOUCH SIZING (body[data-uitier]) ============
-   Viewport media queries can't tell a small phone from a small window;
-   the JS tier can (see TouchControls.applyUiTier). xs/sm = real phones:
-   touch controls shrink ~50% so they stop eating the screen. */
-body[data-uitier="xs"] #touch-joy, body[data-uitier="sm"] #touch-joy { width: 62px !important; height: 62px !important; bottom: 118px !important; left: 10px !important; }
-body[data-uitier="xs"] #touch-joy-knob, body[data-uitier="sm"] #touch-joy-knob { width: 28px !important; height: 28px !important; margin: -14px 0 0 -14px !important; }
+   Phones keep BIG gamepad pads (never shrink below thumb size);
+   --touch-scale (Settings) multiplies on top. */
+body[data-uitier="xs"] #touch-joy, body[data-uitier="sm"] #touch-joy { bottom: 118px !important; left: 10px !important; }
 body[data-uitier="xs"] #touch-btns, body[data-uitier="sm"] #touch-btns { bottom: 112px !important; right: 8px !important; }
-body[data-uitier="xs"] .touch-row-big, body[data-uitier="sm"] .touch-row-big { gap: 6px !important; margin-bottom: 6px !important; }
-body[data-uitier="xs"] .touch-row-small, body[data-uitier="sm"] .touch-row-small { gap: 5px !important; }
-body[data-uitier="xs"] .touch-big, body[data-uitier="sm"] .touch-big { width: 44px !important; height: 44px !important; font-size: 11px !important; }
-body[data-uitier="xs"] .touch-small, body[data-uitier="sm"] .touch-small { width: 32px !important; height: 32px !important; font-size: 11px !important; }
 
 /* ============ MANUAL UI SCALE (Settings → UI SIZE, Minecraft-style) ============
    #game-container carries --ui-scale (manual % × tier factor). Everything
@@ -549,24 +541,25 @@ body[data-uitier="xs"] .touch-small, body[data-uitier="sm"] .touch-small { width
 #intro-overlay > div, #main-menu .menu-card, #boot-overlay > div, #teleport-overlay > div {
     zoom: var(--ui-scale, 1);
 }
-#touch-ui { position: absolute; inset: 0; z-index: 25; pointer-events: none; }
+#touch-ui { position: absolute; inset: 0; z-index: 25; pointer-events: none; --touch-scale: 1; }
 #touch-ui.hidden { display: none; }
 #touch-joy {
     position: absolute; left: 14px; bottom: 110px;
-    width: 124px; height: 124px; border-radius: 50%;
+    width: calc(150px * var(--touch-scale)); height: calc(150px * var(--touch-scale)); border-radius: 50%;
     background: rgba(15,23,42,0.45); border: 2px solid rgba(56,189,248,0.4);
     box-shadow: 0 0 18px rgba(56,189,248,0.25), inset 0 0 24px rgba(0,0,0,0.5);
     pointer-events: auto; touch-action: none;
 }
 #touch-joy-knob {
     position: absolute; left: 50%; top: 50%;
-    width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%;
+    width: calc(64px * var(--touch-scale)); height: calc(64px * var(--touch-scale));
+    margin: calc(-32px * var(--touch-scale)) 0 0 calc(-32px * var(--touch-scale)); border-radius: 50%;
     background: radial-gradient(circle at 35% 30%, rgba(125,211,252,0.9), rgba(14,165,233,0.55));
     border: 2px solid rgba(186,230,253,0.7);
     box-shadow: 0 0 14px rgba(56,189,248,0.6);
 }
 #touch-btns { position: absolute; right: 12px; bottom: 104px; pointer-events: auto; touch-action: none; }
-.touch-row-big { display: flex; gap: 10px; justify-content: flex-end; margin-bottom: 10px; }
+.touch-row-big { display: flex; gap: 12px; justify-content: flex-end; margin-bottom: 12px; }
 .touch-row-small { display: flex; gap: 8px; justify-content: flex-end; }
 .touch-btn {
     border-radius: 50%; font-weight: 900; color: #f8fafc;
@@ -575,10 +568,24 @@ body[data-uitier="xs"] .touch-small, body[data-uitier="sm"] .touch-small { width
     touch-action: none; user-select: none; -webkit-user-select: none;
 }
 .touch-btn:active { filter: brightness(1.35); transform: scale(0.94); }
-.touch-big { width: 82px; height: 82px; font-size: 15px; letter-spacing: 0.05em; }
-.touch-fire { background: radial-gradient(circle at 35% 30%, rgba(239,68,68,0.85), rgba(127,29,29,0.85)); }
-.touch-cast { background: radial-gradient(circle at 35% 30%, rgba(56,189,248,0.85), rgba(12,74,110,0.9)); }
-.touch-small { width: 52px; height: 52px; font-size: 15px; background: rgba(30,41,59,0.85); }
+/* 4 main buttons: big gamepad-style pads */
+.touch-big { width: calc(96px * var(--touch-scale)); height: calc(96px * var(--touch-scale)); font-size: calc(16px * var(--touch-scale)); letter-spacing: 0.05em; }
+.touch-fire { background: radial-gradient(circle at 35% 30%, rgba(239,68,68,0.88), rgba(127,29,29,0.88)); border-color: rgba(252,165,165,0.5); }
+.touch-cast { background: radial-gradient(circle at 35% 30%, rgba(56,189,248,0.88), rgba(12,74,110,0.92)); border-color: rgba(125,211,252,0.5); }
+.touch-act { background: radial-gradient(circle at 35% 30%, rgba(52,211,153,0.88), rgba(6,78,59,0.9)); border-color: rgba(110,231,183,0.5); }
+.touch-dash { background: radial-gradient(circle at 35% 30%, rgba(251,191,36,0.88), rgba(120,53,15,0.9)); border-color: rgba(253,224,71,0.5); }
+/* Sub buttons: weapon switch sits in the corner row */
+.touch-small { width: calc(58px * var(--touch-scale)); height: calc(58px * var(--touch-scale)); font-size: calc(16px * var(--touch-scale)); background: rgba(30,41,59,0.88); }
+/* Button-layout edit mode: drag buttons anywhere, positions persist */
+#touch-ui.touch-edit .touch-btn, #touch-ui.touch-edit #touch-joy { outline: 2px dashed #fbbf24; outline-offset: 3px; }
+#touch-ui.touch-edit .touch-btn { pointer-events: auto; }
+.touch-edit-toggle {
+    position: absolute; right: 10px; top: 64px; z-index: 26;
+    width: 44px; height: 44px; border-radius: 12px;
+    background: rgba(15,23,42,0.85); color: #fbbf24; font-size: 20px; font-weight: 900;
+    border: 1px solid rgba(251,191,36,0.5); pointer-events: auto;
+}
+.touch-edit-toggle.hidden { display: none; }
 @media (max-width: 560px) {
     #touch-joy { bottom: 128px; }
     #touch-btns { bottom: 122px; }
@@ -631,6 +638,36 @@ body[data-uitier="xs"] .touch-small, body[data-uitier="sm"] .touch-small { width
 .island-intro-name { font-family: 'Teko', sans-serif; font-size: 44px; letter-spacing: 0.08em; color: #fff;
     text-shadow: 0 0 22px rgba(251,191,36,0.8), 0 3px 0 #000; line-height: 1; margin: 4px 0; }
 .island-intro-sub { font-size: 12px; font-weight: 600; color: #e2e8f0; max-width: 420px; }
+
+/* ================= QTY PICKER + CONFIRM MODALS =================
+   In-game replacements for window.prompt/confirm (fullscreen + mobile
+   safe). Overlays sit at z-50 above shop/inventory/casino. */
+#qtymodal-overlay, #confirmmodal-overlay { z-index: 50; }
+#qtymodal-overlay > div, #confirmmodal-overlay > div { zoom: var(--ui-scale, 1); }
+#qtymodal-field::-webkit-outer-spin-button, #qtymodal-field::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+#qtymodal-field { -moz-appearance: textfield; appearance: textfield; }
+#qtymodal-num { text-shadow: 0 0 16px rgba(251,191,36,0.6), 0 2px 0 #000; }
+
+/* ================= INVENTORY MODAL FX =================
+   Pop-in on every open (retriggered in Inventory.open) + staggered
+   row slide-ins + red FULL header + pulsing HUD bucket count. */
+.modal-pop { animation: modalPop 0.28s cubic-bezier(0.2, 1.4, 0.4, 1); }
+@keyframes modalPop {
+    0% { transform: scale(0.92) translateY(14px); opacity: 0; }
+    100% { transform: none; opacity: 1; }
+}
+.inv-row { animation: invRowIn 0.25s ease-out backwards; }
+@keyframes invRowIn {
+    0% { transform: translateX(18px); opacity: 0; }
+    100% { transform: none; opacity: 1; }
+}
+.inv-full { border-color: rgba(244,63,94,0.55) !important; animation: invFullPulse 1.4s ease-in-out infinite; }
+@keyframes invFullPulse {
+    0%, 100% { box-shadow: 0 0 0 rgba(244,63,94,0); }
+    50% { box-shadow: 0 0 18px rgba(244,63,94,0.45); }
+}
+.bucket-full { color: #f87171 !important; font-weight: 900; animation: bucketPulse 1s ease-in-out infinite; }
+@keyframes bucketPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
 /* ================= MAIN MENU REMAKE ================= */
 .menu-vignette { background: radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.55) 100%); }
@@ -728,21 +765,10 @@ body[data-uitier="xs"] .touch-small, body[data-uitier="sm"] .touch-small { width
 #touch-joy {
     left: max(14px, env(safe-area-inset-left, 0px));
     bottom: max(110px, calc(env(safe-area-inset-bottom, 0px) + 110px));
-    width: clamp(104px, 30vw, 132px);
-    height: clamp(104px, 30vw, 132px);
 }
 #touch-btns {
     right: max(12px, env(safe-area-inset-right, 0px));
     bottom: max(104px, calc(env(safe-area-inset-bottom, 0px) + 104px));
-}
-.touch-big {
-    width: clamp(66px, 19vw, 86px);
-    height: clamp(66px, 19vw, 86px);
-    font-size: clamp(12px, 3.6vw, 15px);
-}
-.touch-small {
-    width: clamp(44px, 12.5vw, 54px);
-    height: clamp(44px, 12.5vw, 54px);
 }
 /* xs — small phones: ultra-compact HUD, banner floats above the buttons */
 body[data-uitier="xs"] #top-hud { padding: 4px !important; gap: 4px !important; }
@@ -752,13 +778,10 @@ body[data-uitier="xs"] #drag-hud { width: 86vw !important; max-width: 260px !imp
 body[data-uitier="xs"] #weapon-toolbar .weapon-slot { width: 36px !important; height: 36px !important; }
 body[data-uitier="xs"] #active-weapon { padding: 6px !important; gap: 6px !important; }
 body[data-uitier="xs"] #active-weapon #weapon-desc { display: none !important; }
-/* md — large phones / small tablets: roomier targets */
-body[data-uitier="md"] .touch-big { width: 92px !important; height: 92px !important; font-size: 15px !important; }
-body[data-uitier="md"] .touch-small { width: 56px !important; height: 56px !important; }
-body[data-uitier="md"] #touch-joy { width: 140px !important; height: 140px !important; }
+/* md — large phones / small tablets: roomier targets (scale-aware) */
 /* landscape phones: pull controls in, keep the playfield clear */
 body[data-orient="land"] #touch-btns { bottom: max(70px, calc(env(safe-area-inset-bottom, 0px) + 70px)) !important; }
-body[data-orient="land"] #touch-joy { bottom: max(76px, calc(env(safe-area-inset-bottom, 0px) + 76px)) !important; width: 104px !important; height: 104px !important; }
+body[data-orient="land"] #touch-joy { bottom: max(76px, calc(env(safe-area-inset-bottom, 0px) + 76px)) !important; }
 body[data-orient="land"] #status-banner { top: 46px !important; bottom: auto !important; font-size: 11px !important; }
 /* Fight HUD stays bottom-CENTER in landscape too (compact): the top-right
    corner belongs to the fight list (fish HP cards). */

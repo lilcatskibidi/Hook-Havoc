@@ -48,7 +48,9 @@ const __AH_toggle = function () {
         title.innerText = 'ADMIN (localhost only)';
         __AH_panel.appendChild(title);
         [['Kit (lure+coins)', 'kit'], ['Hook hydra', 'hook'], ['Force P2 (49%)', 'p2'],
-         ['Land hydra P2', 'land'], ['Boss…', 'boss'], ['God', 'god'],
+         ['Land hydra P2', 'land'], ['Boss…', 'boss'], ['Void kit', 'voidkit'], ['Blood kit', 'bloodkit'],
+         ['Mythical 🐟', 'mythical'], ['Coins 999k', 'coins'], ['All guns', 'guns'],
+         ['Storm intro', 'storm'], ['God', 'god'],
          ['Heal', 'heal'], ['TP shore', 'shore'], ['Clear trash', 'clear'],
          ['Hydra 1hp', 'kill']].forEach(function (pair) {
             const label = pair[0], fn = pair[1];
@@ -97,6 +99,9 @@ let AH = {
             s.fishing.bobber = { x: s.player.x + 200, y: s.player.y };
             s.fishing.hookedFish = inst;
             inst.x = s.player.x + 300; inst.y = s.player.y;
+            inst._hydraRising = true;
+            inst._anchor = { x: inst.x, y: inst.y };
+            try { if (typeof Ritual !== 'undefined' && Ritual.startHydraStorm) Ritual.startHydraStorm(s); } catch (e) {}
             if (typeof Ritual !== 'undefined' && Ritual.bossIntro) Ritual.bossIntro(s, sp, inst.x, inst.y, inst, 10, 'rise');
             if (typeof Ritual !== 'undefined' && Ritual.fightCountdown) Ritual.fightCountdown(s, inst, { noTeleport: true, delaySec: 10 });
         } catch (e) { return __AH_say('hook failed: ' + e.message, '#f87171'); }
@@ -138,6 +143,7 @@ let AH = {
             s.monstersOnLand = s.monstersOnLand || [];
             s.monstersOnLand.push(m);
             s.activeBoss = m;
+            try { if (typeof Ritual !== 'undefined' && Ritual.startHydraStorm) Ritual.startHydraStorm(s); } catch (e) {}
             if (typeof Ritual !== 'undefined' && Ritual.fightCountdown) Ritual.fightCountdown(s, m);
         } catch (e) { return __AH_say('spawn failed: ' + e.message, '#f87171'); }
         __AH_say('LAND HYDRA (P2 moveset)', '#10b981');
@@ -147,11 +153,21 @@ let AH = {
     // cinematic beats, name reveal, delayed countdown) exactly like a
     // real ritual — minus the item cost. Defaults to the slow swim-in
     // from the sea edge, like every boss arrival.
+    // Void Leviathan always rides the NEW gate path (big offshore portal
+    // + fade-in + roar + swim), same as the shrine finale.
     boss(id, mode) {
         const s = __AH_st(); if (!s) return __AH_say('no state', '#f87171');
         try {
             if (typeof Ritual === 'undefined' || !Ritual.spawnBoss) return __AH_say('no Ritual', '#f87171');
             const bid = id || 'crimson_emperor';
+            if (bid === 'void_shepherd') {
+                try {
+                    const sp = (typeof FISH_SPECIES !== 'undefined' && FISH_SPECIES.find(x => x.id === 'void_shepherd')) || null;
+                    const m = Ritual.spawnVoidBossFromGate(s, sp);
+                    if (!m) return __AH_say('void spawn failed (boss alive?)', '#f87171');
+                } catch (e) { return __AH_say('void spawn failed: ' + e.message, '#f87171'); }
+                return __AH_say('void summoned via SPACE GATE cutscene (portal + fade + roar + swim)', '#a855f7');
+            }
             let def = null;
             try {
                 if (typeof RITUALS !== 'undefined') def = RITUALS.find(r => r.bossId === bid) || null;
@@ -166,6 +182,117 @@ let AH = {
             Ritual.fightCountdown(s, m, { delaySec: dur });
         } catch (e) { return __AH_say('spawn failed: ' + e.message, '#f87171'); }
         __AH_say('boss summoned with full cutscene: ' + (id || 'crimson_emperor'), '#10b981');
+    },
+
+    // Void shrine test kit: 7 shards + 4 shrine legendaries + 1 void key.
+    voidkit() {
+        const s = __AH_st(); if (!s) return __AH_say('no state', '#f87171');
+        try {
+            const p = s.player;
+            p.bucket = p.bucket || [];
+            for (let i = 0; i < 7; i++) {
+                if (typeof Ritual !== 'undefined' && Ritual.bucketItem) p.bucket.push(Ritual.bucketItem('shard'));
+            }
+            // One void-touched fish per rarity tier (common/rare/epic/legendary).
+            const tiers = ['common', 'rare', 'epic', 'legendary'];
+            tiers.forEach(rar => {
+                try {
+                    const pool = (typeof FISH_SPECIES !== 'undefined' && FISH_SPECIES.filter(x => x && !x.isBoss && x.rarity === rar)) || [];
+                    const base = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+                    if (base) {
+                        const inst = (typeof makeCatchInstance === 'function') ? makeCatchInstance(base, 0) : Object.assign({}, base);
+                        if (typeof applyMutation === 'function') applyMutation(inst, 'void');
+                        else { inst.mutation = 'void'; inst.name = 'Void ' + inst.name; }
+                        p.bucket.push(inst);
+                    }
+                } catch (e) {}
+            });
+            if (typeof Ritual !== 'undefined' && Ritual.bucketItem) p.bucket.push(Ritual.bucketItem('void_key'));
+            if (typeof Player !== 'undefined') Player.refreshHUD(s);
+            if (typeof SaveSystem !== 'undefined') SaveSystem.save(s);
+        } catch (e) { return __AH_say('voidkit failed: ' + e.message, '#f87171'); }
+        __AH_say('VOID KIT: 7 shards + void common/rare/epic/legendary + 1 key — open ritual, OPEN GATE, E in', '#a855f7');
+    },
+
+    // Priest chain test kit: 10 blood-mutated epic+ fish for Marlin.
+    bloodkit() {
+        const s = __AH_st(); if (!s) return __AH_say('no state', '#f87171');
+        try {
+            const p = s.player;
+            p.bucket = p.bucket || [];
+            const pool = (typeof FISH_SPECIES !== 'undefined')
+                ? FISH_SPECIES.filter(x => x && !x.isBoss && (x.rarity === 'epic' || x.rarity === 'legendary')) : [];
+            for (let i = 0; i < 10 && pool.length; i++) {
+                const base = pool[Math.floor(Math.random() * pool.length)];
+                const inst = (typeof makeCatchInstance === 'function') ? makeCatchInstance(base, 0) : Object.assign({}, base);
+                if (typeof applyMutation === 'function') applyMutation(inst, 'blood');
+                else { inst.mutation = 'blood'; inst.name = 'Blood ' + inst.name; }
+                p.bucket.push(inst);
+            }
+            if (typeof Player !== 'undefined') Player.refreshHUD(s);
+            if (typeof SaveSystem !== 'undefined') SaveSystem.save(s);
+        } catch (e) { return __AH_say('bloodkit failed: ' + e.message, '#f87171'); }
+        __AH_say('BLOOD KIT: 10 blood epic+ — trade Marlin, sacrifice at ritual', '#dc2626');
+    },
+
+    // Random mythical (non-boss) straight into the bucket.
+    mythical() {
+        const s = __AH_st(); if (!s) return __AH_say('no state', '#f87171');
+        try {
+            const pool = (typeof FISH_SPECIES !== 'undefined')
+                ? FISH_SPECIES.filter(x => x && !x.isBoss && x.rarity === 'mythic') : [];
+            if (!pool.length) return __AH_say('no mythics found', '#f87171');
+            const base = pool[Math.floor(Math.random() * pool.length)];
+            const inst = (typeof makeCatchInstance === 'function') ? makeCatchInstance(base, 5) : Object.assign({}, base);
+            s.player.bucket = s.player.bucket || [];
+            s.player.bucket.push(inst);
+            if (typeof Player !== 'undefined') Player.refreshHUD(s);
+            if (typeof SaveSystem !== 'undefined') SaveSystem.save(s);
+        } catch (e) { return __AH_say('mythical failed: ' + e.message, '#f87171'); }
+        __AH_say('MYTHICAL in bucket — sell / craft / admire', '#e879f9');
+    },
+
+    coins() {
+        const s = __AH_st(); if (!s) return __AH_say('no state', '#f87171');
+        try {
+            s.player.coins = Math.max(s.player.coins || 0, 999999);
+            if (typeof Player !== 'undefined') Player.refreshHUD(s);
+            if (typeof SaveSystem !== 'undefined') SaveSystem.save(s);
+        } catch (e) {}
+        __AH_say('999999c — go shopping', '#fbbf24');
+    },
+
+    // Every gun + full ammo, no stat changes.
+    guns() {
+        const s = __AH_st(); if (!s) return __AH_say('no state', '#f87171');
+        try {
+            const p = s.player;
+            if (typeof WEAPONS !== 'undefined') {
+                p.ownedWeapons = WEAPONS.map(w => w.id);
+                p.weaponAmmo = {};
+                WEAPONS.forEach(w => {
+                    const mx = (typeof CONFIG !== 'undefined' && CONFIG.MAX_AMMO && CONFIG.MAX_AMMO[w.id]);
+                    p.weaponAmmo[w.id] = (mx === Infinity || mx === undefined) ? Infinity : mx;
+                });
+            }
+            if (typeof Player !== 'undefined') { Player.refreshHUD(s); Player.refreshWeaponHUD(s); }
+            if (typeof UI !== 'undefined' && UI.renderWeaponToolbar) { try { UI.renderWeaponToolbar(s); } catch (e) {} }
+            if (typeof SaveSystem !== 'undefined') SaveSystem.save(s);
+        } catch (e) { return __AH_say('guns failed: ' + e.message, '#f87171'); }
+        __AH_say('ALL GUNS + full ammo', '#38bdf8');
+    },
+
+    // Stormcaller intro on demand (needs <20 kills state? forces it).
+    storm() {
+        const s = __AH_st(); if (!s) return __AH_say('no state', '#f87171');
+        try {
+            if (typeof EnemySpawner !== 'undefined' && EnemySpawner.startStormIntro) {
+                EnemySpawner.state = EnemySpawner.state || s;
+                EnemySpawner.startStormIntro();
+                return __AH_say('STORM INTRO playing — 3.5s', '#facc15');
+            }
+        } catch (e) { return __AH_say('storm failed: ' + e.message, '#f87171'); }
+        __AH_say('no spawner', '#f87171');
     },
 
     god() {
