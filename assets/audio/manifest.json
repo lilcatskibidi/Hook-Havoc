@@ -1,21 +1,151 @@
 {
     "_note": "Keys MUST match SoundEngine.ASSETS keys in js/audio.js (e.g. `ui`, not `ui_click`; aliases like thunder/splash/cast need their own entries even when they share a file). The audio loader reads this first so it never 404-probes missing formats (mp3/ogg/wav fallback only runs when this file is unreachable, e.g. file://). Regenerate by listing assets/audio/.",
-    "roar": ["mp3"],
-    "boss_roar": ["mp3"],
-    "skill_cast": ["wav"],
-    "skill_zap": ["wav"],
-    "skill_blast": ["wav"],
-    "throw": ["mp3"],
-    "water_touch": ["mp3"],
-    "reload": ["mp3"],
-    "thunder": ["wav"],
-    "explosion": ["wav"],
-    "splash": ["mp3"],
-    "cast": ["mp3"],
-    "coin": ["mp3"],
-    "hit": ["mp3"],
-    "ui": ["wav"],
-    "portal": ["mp3"],
-    "music": ["mp3"],
-    "boss_theme": ["mp3"]
+    "beach": [
+        "wav"
+    ],
+    "bell": [
+        "mp3"
+    ],
+    "boss_roar": [
+        "mp3"
+    ],
+    "boss_theme": [
+        "mp3"
+    ],
+    "bosskilled": [
+        "wav"
+    ],
+    "bubble": [
+        "wav"
+    ],
+    "cast": [
+        "mp3",
+        "wav"
+    ],
+    "coin": [
+        "mp3"
+    ],
+    "error": [
+        "mp3"
+    ],
+    "explosion": [
+        "mp3",
+        "wav"
+    ],
+    "fishdeath": [
+        "mp3"
+    ],
+    "fishscreech": [
+        "mp3"
+    ],
+    "gun_flame": [
+        "wav"
+    ],
+    "gun_harpoon": [
+        "wav"
+    ],
+    "gun_launcher": [
+        "mp3"
+    ],
+    "gun_pistol": [
+        "wav"
+    ],
+    "gun_plasma": [
+        "mp3",
+        "wav"
+    ],
+    "gun_rail": [
+        "mp3"
+    ],
+    "gun_rifle": [
+        "wav"
+    ],
+    "gun_shotgun": [
+        "mp3"
+    ],
+    "gun_smg": [
+        "wav"
+    ],
+    "hit": [
+        "mp3"
+    ],
+    "hurt": [
+        "mp3"
+    ],
+    "icecrack": [
+        "wav"
+    ],
+    "levelup": [
+        "mp3"
+    ],
+    "music": [
+        "mp3"
+    ],
+    "portal": [
+        "mp3"
+    ],
+    "reeltick": [
+        "wav"
+    ],
+    "reload": [
+        "mp3"
+    ],
+    "roar": [
+        "mp3"
+    ],
+    "sacrifice": [
+        "mp3"
+    ],
+    "savesuccess": [
+        "wav"
+    ],
+    "skill_blast": [
+        "wav"
+    ],
+    "skill_cast": [
+        "wav"
+    ],
+    "skill_zap": [
+        "wav"
+    ],
+    "snap": [
+        "wav"
+    ],
+    "splash": [
+        "mp3",
+        "wav"
+    ],
+    "tensionstress": [
+        "wav"
+    ],
+    "theme_cave": [
+        "mp3"
+    ],
+    "theme_isle": [
+        "mp3"
+    ],
+    "theme_temple": [
+        "mp3"
+    ],
+    "throw": [
+        "mp3"
+    ],
+    "thunder": [
+        "wav"
+    ],
+    "ui": [
+        "wav"
+    ],
+    "uihover": [
+        "wav"
+    ],
+    "victory": [
+        "mp3"
+    ],
+    "water_touch": [
+        "mp3"
+    ],
+    "whoosh": [
+        "mp3"
+    ]
 }
