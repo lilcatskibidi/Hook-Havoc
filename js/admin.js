@@ -48,7 +48,8 @@ const __AH_toggle = function () {
         title.innerText = 'ADMIN (localhost only)';
         __AH_panel.appendChild(title);
         [['Kit (lure+coins)', 'kit'], ['Hook hydra', 'hook'], ['Force P2 (49%)', 'p2'],
-         ['Land hydra P2', 'land'], ['Boss…', 'boss'], ['Void kit', 'voidkit'], ['Blood kit', 'bloodkit'],
+         ['Land hydra P2', 'land'], ['Boss…', 'boss'], ['Stormcaller 🐦', 'stormcaller'],
+         ['Void kit', 'voidkit'], ['Blood kit', 'bloodkit'],
          ['Mythical 🐟', 'mythical'], ['Coins 999k', 'coins'], ['All guns', 'guns'],
          ['Storm intro', 'storm'], ['God', 'god'],
          ['Heal', 'heal'], ['TP shore', 'shore'], ['Clear trash', 'clear'],
@@ -280,6 +281,24 @@ let AH = {
             if (typeof SaveSystem !== 'undefined') SaveSystem.save(s);
         } catch (e) { return __AH_say('guns failed: ' + e.message, '#f87171'); }
         __AH_say('ALL GUNS + full ammo', '#38bdf8');
+    },
+
+    // Full Stormcaller summon (seagull miniboss): same 3.5s intro cutscene
+    // + fight as 20 gull kills — no farming needed. 'storm' below only
+    // replays the sky cinematic without guaranteeing a boss.
+    stormcaller() {
+        const s = __AH_st(); if (!s) return __AH_say('no state', '#f87171');
+        try {
+            if (typeof EnemySpawner !== 'undefined' && EnemySpawner.spawnGullBoss) {
+                EnemySpawner.state = EnemySpawner.state || s;
+                const alive = (s.enemies || []).some(e => e && e.isBoss && e.enemyType === 'seagull' && (e.hp || 0) > 0);
+                if (alive || s._stormIntro) return __AH_say('stormcaller already active', '#fbbf24');
+                s.player.seagullKills = s.player.seagullKills || 0;
+                EnemySpawner.startStormIntro();
+                return __AH_say('STORMCALLER incoming — 3.5s intro', '#facc15');
+            }
+        } catch (e) { return __AH_say('stormcaller failed: ' + e.message, '#f87171'); }
+        __AH_say('no spawner', '#f87171');
     },
 
     // Stormcaller intro on demand (needs <20 kills state? forces it).

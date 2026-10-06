@@ -1818,10 +1818,60 @@ const PeerAnnounce = {
             // 'catch' announces are legacy/no-op: catches stay personal.
             if (msg.kind === 'boss' && msg.id) {
                 this._bossBannerOnly(state, msg);
+            } else if (msg.kind === 'countdown') {
+                this._countdownOnly();
             }
         } finally {
             this._suppress = false;
         }
+    },
+
+    // READY?/3-2-1/FIGHT overlay mirror for clients: visuals + blips
+    // only (no dormant, no bullet clearing — the host owns the fight).
+    // Dedupe: one fight = one overlay per 10s.
+    _countdownOnly() {
+        try {
+            const now = Date.now();
+            if (!this._bannerSeen) this._bannerSeen = {};
+            if (this._bannerSeen.countdown && now - this._bannerSeen.countdown < 10000) return;
+            this._bannerSeen.countdown = now;
+        } catch (e) {}
+        try {
+            const overlay = document.getElementById('fight-ready-overlay');
+            const text = document.getElementById('fight-ready-text');
+            if (!overlay || !text) return;
+            const show = (t, cls) => {
+                try {
+                    overlay.classList.remove('hidden');
+                    overlay.classList.remove('fight-ready-show');
+                    void overlay.offsetWidth;
+                    overlay.classList.add('fight-ready-show');
+                    text.innerText = t;
+                    text.className = 'fight-ready-text' + (cls ? ' ' + cls : '');
+                } catch (e) {}
+            };
+            const Tfn = (typeof T === 'function') ? T : ((k) => k);
+            show(Tfn('fight_ready'));
+            try { audio.playUIClick(); } catch (e) {}
+            const steps = ['3', '2', '1', Tfn('fight_go')];
+            steps.forEach((s, i) => {
+                setTimeout(() => {
+                    show(s, s === Tfn('fight_go') ? 'fight-ready-go' : '');
+                    try {
+                        if (s === Tfn('fight_go')) audio.playRoar();
+                        else audio.playUIClick();
+                    } catch (e) {}
+                    if (s === Tfn('fight_go')) {
+                        setTimeout(() => {
+                            try {
+                                overlay.classList.add('hidden');
+                                overlay.classList.remove('fight-ready-show');
+                            } catch (e) {}
+                        }, 650);
+                    }
+                }, 1300 + i * 800);
+            });
+        } catch (e) {}
     },
 
     // Banner + floating text only: no camera lock, no SFX — those stay

@@ -1,7 +1,7 @@
 /* ====================================================================
  * ItemSystem — buyable consumables (shop Items tab) + one equipped item
  * on F + dash slot. State: p.itemStock {id:count}, p.equippedItem id.
- * 16 items, cheap heals stack to 50, room-clearing ordnance caps at 5.
+ * 18 items, cheap heals stack to 50, most stack to 30, ordnance caps high.
  * Price scales with power (150c bandage → 4000c sunfall whistle).
  * Timed buffs live on the player (ironSkinT/rageT/swiftT/magnetT/luckT/
  * regenT/thornT) and decay in Player.update; hooks live in Combat
@@ -13,19 +13,21 @@ const ItemSystem = {
         { id: 'bandage', name: 'Bandage', icon: '🩹', desc: 'Restore 60 HP on use.', price: 150, max: 50 },
         { id: 'smoke', name: 'Smoke Bomb', icon: '💨', desc: 'Stun nearby threats 2.5s + dodge 1s.', price: 250, max: 50 },
         { id: 'adrenaline', name: 'Adrenaline', icon: '💉', desc: 'Reset dash cooldown + 1.5× speed for 8s.', price: 300, max: 30 },
-        { id: 'medkit', name: 'Medkit', icon: '⛑', desc: 'FULL heal + cleanse burn/slow.', price: 600, max: 20 },
-        { id: 'swift_tide', name: 'Swift Tide', icon: '🌊', desc: '+40% move speed for 20s. Stacks with adrenaline.', price: 700, max: 20 },
-        { id: 'magnet_charm', name: 'Magnet Charm', icon: '🧲', desc: 'Loot flies to you (3× magnet) for 60s.', price: 700, max: 20 },
-        { id: 'iron_skin', name: 'Ironskin Tonic', icon: '🛡', desc: 'Take 60% less damage for 12s.', price: 800, max: 20 },
-        { id: 'regen_kelp', name: 'Regen Kelp', icon: '🌿', desc: '+5 HP/s for 20s (100 HP total).', price: 850, max: 20 },
-        { id: 'lucky_lure', name: 'Lucky Lure', icon: '🍀', desc: '+2.0 fishing luck for 60s. Rarer bites!', price: 900, max: 20 },
-        { id: 'thorn_shell', name: 'Thorn Shell', icon: '🦔', desc: 'Reflect 50% damage back for 15s.', price: 1000, max: 15 },
-        { id: 'berserk', name: 'Berserk Rum', icon: '🍺', desc: '+50% bullet damage for 15s.', price: 1500, max: 15 },
-        { id: 'ghost_cloak', name: 'Ghost Cloak', icon: '👻', desc: 'Untouchable 4s + stun nearby 3s.', price: 2000, max: 10 },
-        { id: 'titan_heart', name: 'Titan Heart', icon: '💗', desc: 'Heal 150 + cleanse + 2s dodge.', price: 2500, max: 10 },
-        { id: 'storm_cell', name: 'Storm Cell', icon: '🌩', desc: 'Lightning smites threats near you (250 dmg + stun).', price: 3000, max: 10 },
-        { id: 'sunfall', name: 'Sunfall Whistle', icon: '☀', desc: '800 damage to EVERYTHING on screen. The sky answers.', price: 4000, max: 5 },
-        { id: 'timestop', name: 'Timestop Pocketwatch', icon: '⏳', desc: 'Freeze all threats 5s + reload free.', price: 3500, max: 5 },
+        { id: 'medkit', name: 'Medkit', icon: '⛑', desc: 'FULL heal + cleanse burn/slow.', price: 600, max: 30 },
+        { id: 'swift_tide', name: 'Swift Tide', icon: '🌊', desc: '+40% move speed for 20s. Stacks with adrenaline.', price: 700, max: 30 },
+        { id: 'magnet_charm', name: 'Magnet Charm', icon: '🧲', desc: 'Loot flies to you (3× magnet) for 60s.', price: 700, max: 30 },
+        { id: 'iron_skin', name: 'Ironskin Tonic', icon: '🛡', desc: 'Take 60% less damage for 12s.', price: 800, max: 30 },
+        { id: 'regen_kelp', name: 'Regen Kelp', icon: '🌿', desc: '+5 HP/s for 20s (100 HP total).', price: 850, max: 30 },
+        { id: 'lucky_lure', name: 'Lucky Lure', icon: '🍀', desc: '+2.0 fishing luck for 60s. Rarer bites!', price: 900, max: 30 },
+        { id: 'thorn_shell', name: 'Thorn Shell', icon: '🦔', desc: 'Reflect 50% damage back for 15s.', price: 1000, max: 30 },
+        { id: 'berserk', name: 'Berserk Rum', icon: '🍺', desc: '+50% bullet damage for 15s.', price: 1500, max: 30 },
+        { id: 'ghost_cloak', name: 'Ghost Cloak', icon: '👻', desc: 'Untouchable 4s + stun nearby 3s.', price: 2000, max: 30 },
+        { id: 'titan_heart', name: 'Titan Heart', icon: '💗', desc: 'Heal 150 + cleanse + 2s dodge.', price: 2500, max: 30 },
+        { id: 'storm_cell', name: 'Storm Cell', icon: '🌩', desc: 'Lightning smites threats near you (250 dmg + stun).', price: 3000, max: 30 },
+        { id: 'glue_bomb', name: 'Glue Bomb', icon: '🫧', desc: 'F primes a ghost preview (free). FIRE plants a close crescent goo wall (1000 HP, 45s, 3s cooldown). Blocks fish, foes, foe fire — and you. Your bullets fly through.', price: 1200, max: 30 },
+        { id: 'heal_burst', name: 'Heal Burst', icon: '💚', desc: 'Heal yourself + nearby crewmates 80 HP in a 420px burst.', price: 1800, max: 30 },
+        { id: 'sunfall', name: 'Sunfall Whistle', icon: '☀', desc: '800 damage to EVERYTHING on screen. The sky answers.', price: 4000, max: 30 },
+        { id: 'timestop', name: 'Timestop Pocketwatch', icon: '⏳', desc: 'Freeze all threats 5s + reload free.', price: 3500, max: 30 },
     ],
 
     def(id) {
@@ -102,12 +104,89 @@ const ItemSystem = {
             this.ensure(state);
             if (!this.def(id) || this.stock(state, id) <= 0) return false;
             state.player.equippedItem = (state.player.equippedItem === id) ? null : id;
+            // Switching gear kills the glue ghost (no cross-item haunting).
+            try { state.gluePrimed = false; } catch (e) {}
             try { audio.playUIClick(); } catch (e) {}
             if (typeof UI !== 'undefined' && UI.renderWeaponToolbar) {
                 try { UI.renderWeaponToolbar(state); } catch (e) {}
             }
             if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
             return true;
+        } catch (e) { return false; }
+    },
+
+    // ---- glue prime (F toggles the ghost; FIRE plants, eating 1) ----
+    _gluePrime(state, p) {
+        try {
+            const say = (txt, col) => {
+                try { Particles.showFloatingText(state, txt, p.x, p.y - 50, col || '#fff'); } catch (e) {}
+            };
+            // Toggle off.
+            if (state.gluePrimed) {
+                state.gluePrimed = false;
+                say('🫧 Ghost off — guns back.', '#94a3b8');
+                try { audio.playUIClick(); } catch (e) {}
+                return true;
+            }
+            // 3s placement cooldown gates re-priming (one wall per 3s).
+            const cd = (state.glueCdUntil || 0) - (state.time || 0);
+            if (cd > 0) {
+                say(`🫧 Glue recharging… ${Math.ceil(cd)}s`, '#fbbf24');
+                try { audio.playError(); } catch (e) {}
+                return false;
+            }
+            state.gluePrimed = true;
+            say('🫧 Ghost ON — FIRE to plant it!', '#7dd3fc');
+            try { audio.playUIClick(); } catch (e) {}
+            return true;
+        } catch (e) { return false; }
+    },
+
+    // ---- glue plant (FIRE while primed: eats 1, 3s cooldown) ----
+    plantGlue(state) {
+        try {
+            const p = state && state.player;
+            if (!p || p.isDead || state.paused) return false;
+            if (!state.gluePrimed) return false;
+            if ((p.itemCd || 0) > 0) return false;
+            const cd = (state.glueCdUntil || 0) - (state.time || 0);
+            if (cd > 0) return false;
+            this.ensure(state);
+            if (this.stock(state, 'glue_bomb') <= 0) {
+                state.gluePrimed = false;
+                return false;
+            }
+            p.itemStock.glue_bomb = this.stock(state, 'glue_bomb') - 1;
+            p.itemCd = 0.8;
+            state.gluePrimed = false; // ghost off — guns back immediately
+            let placed = false;
+            try {
+                if (typeof GlueWall !== 'undefined' && GlueWall.cast) placed = !!GlueWall.cast(state);
+            } catch (e) { placed = false; }
+            if (placed) {
+                state.glueCdUntil = (state.time || 0) + 3;
+                // Clients splatter locally for instant feedback AND forward
+                // the segs — the host owns the shared wall (anti-ghost).
+                try {
+                    if (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient() &&
+                        Multiplayer.sendGlueCast && state.glueWalls && state.glueWalls.length) {
+                        const w = state.glueWalls[state.glueWalls.length - 1];
+                        if (w && w.segs) Multiplayer.sendGlueCast(w.segs);
+                    }
+                } catch (e2) {}
+                try {
+                    Particles.showFloatingText(state, '🫧 GLUE WALL! Hold the line!', p.x, p.y - 50, '#7dd3fc');
+                    try { audio.playSplash(); } catch (e3) {}
+                } catch (e4) {}
+                if (typeof Player !== 'undefined') { try { Player.refreshHUD(state); } catch (e5) {} }
+                if (typeof UI !== 'undefined' && UI.renderWeaponToolbar) { try { UI.renderWeaponToolbar(state); } catch (e6) {} }
+                if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+                return true;
+            }
+            // Fizzle: refund + re-prime so the ghost survives.
+            p.itemStock.glue_bomb = this.stock(state, 'glue_bomb') + 1;
+            state.gluePrimed = true;
+            return false;
         } catch (e) { return false; }
     },
 
@@ -140,6 +219,9 @@ const ItemSystem = {
                 } catch (e) {}
                 return false;
             }
+            // Glue bomb: F only PRIMES the ghost (zero stock used). The
+            // actual plant happens on FIRE (see wantPlace) and eats 1.
+            if (id === 'glue_bomb') return this._gluePrime(state, p);
             p.itemStock[id] = this.stock(state, id) - 1;
             p.itemCd = 0.8;
             let ok = false;
@@ -274,6 +356,46 @@ const ItemSystem = {
                 say(hit > 0 ? `🌩 STORM SMITES ${hit}!` : '🌩 The sky rumbles...', '#fde047');
                 try { audio.playThunder(); } catch (e) { try { audio.playExplosion(); } catch (e2) {} }
                 ok = true;
+            } else if (id === 'glue_bomb') {
+                // Unreachable by design: F always primes (see intercept
+                // above), FIRE always plants via plantGlue() below. If some
+                // other caller lands here unprimed, refuse (no free walls).
+                try {
+                    Particles.showFloatingText(state, '🫧 Press F to prime the ghost first!', p.x, p.y - 50, '#7dd3fc');
+                } catch (e) {}
+            } else if (id === 'heal_burst') {
+                // AoE heal: you + every crewmate in the burst (host heals
+                // remotes directly; clients heal themselves, same as bandage).
+                let n = 0;
+                try {
+                    const R = 420;
+                    p.hp = Math.min(p.maxHp, (p.hp || 0) + 80);
+                    n = 1;
+                    try {
+                        let isHost = true;
+                        try { isHost = !(typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient()); } catch (e2) {}
+                        if (isHost) {
+                            for (const r of (state.remotePlayers || [])) {
+                                if (!r || r.isDead) continue;
+                                if (Math.hypot((r.x || 0) - p.x, (r.y || 0) - p.y) < R) {
+                                    r.hp = Math.min(r.maxHp || 100, (r.hp || 0) + 80);
+                                    n++;
+                                }
+                            }
+                        }
+                    } catch (e3) {}
+                    try {
+                        Particles.spawnParticles(state, p.x, p.y, '#4ade80', 30, { size: 6 });
+                        Particles.spawnParticles(state, p.x, p.y, '#bbf7d0', 18, { size: 4 });
+                        state.screenShake = Math.max(state.screenShake || 0, 6);
+                    } catch (e4) {}
+                    if (typeof Player !== 'undefined') { try { Player.refreshHUD(state); } catch (e5) {} }
+                } catch (e6) { n = 0; }
+                if (n > 0) {
+                    say(n > 1 ? `💚 HEAL BURST! +80 HP ×${n} crewmates!` : '💚 HEAL BURST! +80 HP!', '#4ade80');
+                    try { audio.playLevelUp(); } catch (e) {}
+                    ok = true;
+                }
             } else if (id === 'sunfall') {
                 let hit = 0;
                 try {

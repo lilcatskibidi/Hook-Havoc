@@ -1273,7 +1273,14 @@ const Ritual = {
             return false;
         }
         if (this.bossAlive(state)) {
-            Particles.showFloatingText(state, 'A boss already walks. Slay it first.', state.player.x, state.player.y - 50, '#f87171');
+            const n = this.enqueueBoss(state, { bossId: 'leviathan_priest' });
+            Particles.showFloatingText(state, `A boss already walks — priest rite queued #${n}.`, state.player.x, state.player.y - 50, '#fbbf24');
+            return false;
+        }
+        const rest = this.bossRestLeft(state);
+        if (rest > 0) {
+            const n = this.enqueueBoss(state, { bossId: 'leviathan_priest' });
+            Particles.showFloatingText(state, `Rest ${Math.ceil(rest)}s… priest rite queued #${n}.`, state.player.x, state.player.y - 50, '#fbbf24');
             return false;
         }
         if (this.countMutation(state, 'blood') < 3) {
@@ -1336,25 +1343,31 @@ const Ritual = {
                     timer: 0.3 + i * 0.25, color: i % 2 ? '#dc2626' : '#fbbf24', shake: 22,
                 });
             });
-            Particles.spawnParticles(state, rite.cx, rite.cy - 60, '#ef4444', 50, { size: 7 });
-            Particles.spawnParticles(state, rite.cx, rite.cy - 60, '#fbbf24', 30, { size: 5 });
-            Particles.spawnParticles(state, rite.cx, rite.cy - 60, '#7f1d1d', 30, { size: 6 });
-            state.screenShake = Math.max(state.screenShake || 0, 30);
-            // Blood flash, held 1.5s so the merge burns into the screen.
+            Particles.spawnParticles(state, rite.cx, rite.cy - 60, '#ef4444', 40, { size: 7 });
+            Particles.spawnParticles(state, rite.cx, rite.cy - 60, '#fbbf24', 24, { size: 5 });
+            Particles.spawnParticles(state, rite.cx, rite.cy - 60, '#7f1d1d', 24, { size: 6 });
+            state.screenShake = Math.max(state.screenShake || 0, 18);
+            // Merge beat: brief TRANSLUCENT red (game stays visible — the
+            // old opaque 1.5s hold read as a 3s freeze) + real i-frames so
+            // the explosion never kills you blind.
+            try {
+                if (state.player) state.player.iframes = Math.max(state.player.iframes || 0, 2.0);
+            } catch (eI) {}
+            // Blood flash, held 0.7s so the merge burns into the screen.
             try {
                 const fl = document.getElementById('flash-overlay');
                 if (fl) {
                     fl.classList.remove('active');
                     fl.style.transition = 'none';
-                    fl.style.background = '#b91c1c';
+                    fl.style.background = 'rgba(185,28,28,0.55)';
                     fl.style.opacity = '1';
                     setTimeout(() => {
                         try {
-                            fl.style.transition = 'opacity 0.8s';
+                            fl.style.transition = 'opacity 0.5s';
                             fl.style.opacity = '0';
-                            setTimeout(() => { try { fl.style.background = ''; } catch (e) {} }, 850);
+                            setTimeout(() => { try { fl.style.background = ''; } catch (e) {} }, 550);
                         } catch (e) {}
-                    }, 1500);
+                    }, 700);
                 }
             } catch (e) {}
             try { audio.playExplosion(); } catch (e2) {}
@@ -1697,6 +1710,71 @@ const Ritual = {
         return { sp, slain, lines, met };
     },
 
+    // ---- Boss queue + rest window ----
+    // One boss at a time: a summon attempted mid-fight (or mid-rest) joins
+    // the queue instead of failing silently. When a boss ends,
+    // noteBossEnded() opens a 10s breather, then calls the next queued
+    // challenger to perform their ritual (costs are paid at THEIR summon,
+    // never auto-spent here).
+    bossRestLeft(state) {
+        try {
+            const until = (state && state.bossRestUntil) || 0;
+            const left = until - (state.time || 0);
+            return left > 0 ? left : 0;
+        } catch (e) { return 0; }
+    },
+
+    queueWho(state) {
+        try {
+            if (typeof Multiplayer !== 'undefined' && Multiplayer.playerName) {
+                const n = Multiplayer.playerName();
+                if (n) return String(n);
+            }
+        } catch (e) {}
+        try { if (state && state.player && state.player.name) return String(state.player.name); } catch (e2) {}
+        return 'Someone';
+    },
+
+    enqueueBoss(state, ritual) {
+        try {
+            state.bossQueue = state.bossQueue || [];
+            const who = this.queueWho(state);
+            const bid = (ritual && ritual.bossId) || 'boss';
+            const dup = state.bossQueue.find(q => q && q.who === who && q.bossId === bid);
+            if (dup) return state.bossQueue.indexOf(dup) + 1;
+            state.bossQueue.push({ who, bossId: bid, at: state.time || 0 });
+            return state.bossQueue.length;
+        } catch (e) { return 1; }
+    },
+
+    // quiet=true: victory/fled paths already set their banner — keep it
+    // and only float the breather where the fight happened.
+    noteBossEnded(state, label, quiet) {
+        try {
+            state.bossRestUntil = (state.time || 0) + 10;
+            state.bossQueue = state.bossQueue || [];
+            const next = state.bossQueue.shift() || null;
+            if (!quiet) {
+                try {
+                    if (typeof UI !== 'undefined' && UI.updateStatusBanner) {
+                        UI.updateStatusBanner(
+                            next ? `Rest 10s… then ${next.who}, your ${next.bossId} ritual is next!`
+                                 : 'Rest 10s… the deep stirs again soon.',
+                            label || 'Boss ended', 'emerald');
+                    }
+                } catch (e2) {}
+            } else {
+                try {
+                    Particles.showFloatingText(state, next ? `Rest 10s… ${next.who} is next!` : 'Rest 10s…',
+                        state.player.x, state.player.y - 70, '#34d399');
+                } catch (e3) {}
+            }
+            try {
+                if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
+            } catch (eSave) {}
+        } catch (e) {}
+    },
+
     canSummon(state, ritual) {
         if (typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient()) {
             return { ok: false, why: 'Only the host can perform rituals.' };
@@ -1706,7 +1784,6 @@ const Ritual = {
         if (state.player && state.player.onIsland) {
             return { ok: false, why: 'No ritual ground here — sail back to the mainland beach.' };
         }
-        if (this.bossAlive(state)) return { ok: false, why: 'A boss already walks. Slay it first.' };
         // Void gate runs standing progress: an open gate (or unfinished
         // offerings) disables OPEN GATE so it can never wipe the shrine.
         try {
@@ -1732,6 +1809,17 @@ const Ritual = {
             const missing = rs.lines.filter(l => !l.wild && l.have < l.need).map(l => `${l.label} (have ${l.have})`);
             if (missing.length) return { ok: false, why: 'Missing: ' + missing.join(' · ') };
             return { ok: false, why: 'Missing trophy pieces (crowns cover gaps).' };
+        }
+        // Queue LAST: only a fully-paid ritual takes a number. Busy and
+        // rest both enqueue instead of failing.
+        if (this.bossAlive(state)) {
+            const n = this.enqueueBoss(state, ritual);
+            return { ok: false, why: `A boss already walks — queued #${n}. Rest 10s after it ends.` };
+        }
+        const rest = this.bossRestLeft(state);
+        if (rest > 0) {
+            const n = this.enqueueBoss(state, ritual);
+            return { ok: false, why: `Rest ${Math.ceil(rest)}s… queued #${n}, the floor opens soon.` };
         }
         return { ok: true };
     },
@@ -2205,6 +2293,25 @@ const Ritual = {
     // can move + shoot throughout — but the boss stays dormant (hence
     // invulnerable) until FIGHT lands, so early shots can't hurt it.
     // Hooked bosses reuse the same call (the angler never moved anyway).
+    // Sequencing fix: READY?/3-2-1 never starts on top of the giant
+    // name banner (it auto-removes after ~3s). Polls for the banner's
+    // removal, then runs the countdown — so short intros (Stormcaller
+    // 1.2s) no longer double-announce under their own title card.
+    _waitBannerThenCountdown(state, m, tries) {
+        try {
+            if (m && (m.isDead || (typeof m.hp === 'number' && m.hp <= 0))) return;
+            let banner = null;
+            try { banner = document.getElementById('boss-intro-banner'); } catch (e) {}
+            if (banner && (tries || 0) < 20) {
+                setTimeout(() => {
+                    try { this._waitBannerThenCountdown(state, m, (tries || 0) + 1); } catch (e) {}
+                }, 400);
+                return;
+            }
+            this.fightCountdown(state, m, {});
+        } catch (e) {}
+    },
+
     fightCountdown(state, m, opts) {
         try {
             // noTeleport is legacy (hook flow never teleported) — nobody is
@@ -2218,7 +2325,7 @@ const Ritual = {
                         // Boss died mid-intro (burn/posion ticked? no — still
                         // skip the countdown for a corpse.
                         if (m && (m.isDead || (typeof m.hp === 'number' && m.hp <= 0))) return;
-                        this.fightCountdown(state, m, {});
+                        this._waitBannerThenCountdown(state, m, 0);
                     } catch (e) {}
                 }, delayMs);
                 return;
@@ -2251,6 +2358,14 @@ const Ritual = {
             // 3-2-1 window even when the intro was short).
             try {
                 if (m) m.dormantUntil = Math.max(m.dormantUntil || 0, (state.time || 0) + 5.5);
+            } catch (e) {}
+            // Room mirror: clients run the same READY?/3-2-1 overlay
+            // (visuals only — sim stays host-owned). Host-only broadcast.
+            try {
+                if (typeof Multiplayer !== 'undefined' && Multiplayer.isHost && Multiplayer.roomCode &&
+                    typeof PeerLink !== 'undefined' && PeerLink.broadcast) {
+                    PeerLink.broadcast({ t: 'announce', kind: 'countdown', from: Multiplayer.localClientId || 'host' });
+                }
             } catch (e) {}
             show(T('fight_ready'));
             try { audio.playUIClick(); } catch (e) {}

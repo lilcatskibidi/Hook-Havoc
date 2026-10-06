@@ -576,6 +576,15 @@
                         <textarea id="feedback-log" rows="5" readonly
                             class="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2 text-[10px] font-mono text-slate-400"></textarea>
                     </div>
+                    <div>
+                        <div class="text-[10px] font-black tracking-widest text-slate-400 mb-1.5">DISCORD WEBHOOK (OPTIONAL · SAVED ON THIS DEVICE)</div>
+                        <div class="flex gap-2">
+                            <input id="feedback-webhook" type="text" inputmode="url" placeholder="https://discord.com/api/webhooks/… (empty = use built-in)"
+                                class="flex-1 min-w-0 bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500">
+                            <button id="btn-feedback-save-hook" class="px-3 py-2 bg-slate-700/70 hover:bg-slate-600/70 text-slate-200 font-bold rounded-xl transition-all border border-slate-600 text-xs whitespace-nowrap">SAVE</button>
+                        </div>
+                        <p class="text-[10px] text-slate-500 mt-1">On itch.io the official build already embeds the dev webhook — leave empty. Self-hosted builds: paste your own once.</p>
+                    </div>
                     <div id="feedback-status" class="text-[11px] font-bold text-slate-400 min-h-[1rem]"></div>
                 </div>
                 <div class="p-4 border-t border-slate-800/80 bg-slate-900/80 flex gap-2">
@@ -636,10 +645,27 @@
                 <button id="btn-pause-save" class="menu-btn bg-slate-700/50 hover:bg-slate-600/50">
                     <i class="fa-solid fa-floppy-disk mr-2"></i> <span data-lang="pause_save">Save Game</span>
                 </button>
+                <button id="btn-pause-settings" class="menu-btn bg-slate-700/50 hover:bg-slate-600/50">
+                    <i class="fa-solid fa-gear mr-2"></i> <span data-lang="menu_settings">Settings</span>
+                </button>
                 <button id="btn-pause-quit" class="menu-btn bg-slate-700/50 hover:bg-slate-600/50">
                     <i class="fa-solid fa-house mr-2"></i> <span data-lang="pause_quit">Leave to Main Menu</span>
                 </button>
                 <div id="pause-save-msg" class="text-center text-[11px] font-bold text-emerald-300 min-h-[1rem]"></div>
+            </div>
+        </div>
+
+        <!-- ================= PAUSE SETTINGS (in-game, game stays frozen) ================= -->
+        <div id="pause-settings" class="absolute inset-0 hidden items-center justify-center z-40 pointer-events-auto p-4" style="background: rgba(2,6,23,0.72);">
+            <div class="glass-panel w-full max-w-md rounded-3xl overflow-hidden border border-slate-500/40 shadow-2xl p-4 flex flex-col gap-2 max-h-[92%]">
+                <div class="flex items-center justify-between">
+                    <h2 class="font-header text-xl text-white font-bold tracking-wide"><i class="fa-solid fa-gear mr-2"></i><span data-lang="set_title">SETTINGS</span></h2>
+                    <button id="btn-pause-settings-back" class="text-slate-400 hover:text-white text-sm font-bold px-2 py-1">
+                        <i class="fa-solid fa-arrow-left mr-1"></i> <span data-lang="set_back">Back</span>
+                    </button>
+                </div>
+                <div id="pause-settings-slot" class="overflow-y-auto flex flex-col gap-2 pr-1 min-h-0"></div>
+                <p class="text-center text-[10px] text-slate-500 font-bold tracking-widest">GAME STAYS PAUSED WHILE OPEN</p>
             </div>
         </div>
 
@@ -1096,7 +1122,7 @@
                                 <button id="set-touch-edit" class="flex-1 px-2 py-2 rounded-xl text-xs font-black bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30">✥ MOVE BUTTONS</button>
                                 <button id="set-touch-reset" class="flex-1 px-2 py-2 rounded-xl text-xs font-black bg-slate-700/60 border border-slate-600 text-slate-200 hover:bg-slate-600/60">RESET POS</button>
                             </div>
-                            <p class="text-[10px] text-slate-500 mt-1.5">MOVE: drag any button / joystick anywhere — saved on this device. R auto-reloads.</p>
+                            <p class="text-[10px] text-slate-500 mt-1.5">MOVE: drag any button / joystick anywhere — saved on this device. Pinch with 2 fingers in MOVE mode to resize all buttons. Pinch the sea anytime to zoom. R auto-reloads.</p>
                         </div>
                         <div class="glass-panel-light px-3 py-2 rounded-xl">
                             <div class="flex items-center justify-between mb-1.5">

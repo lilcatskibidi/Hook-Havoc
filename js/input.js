@@ -114,6 +114,14 @@ const Input = {
             if (state.player && state.player.isDead) return;
             // No shooting during the boss-fight countdown.
             if (typeof state._fightFreezeUntil === 'number' && state.time < state._fightFreezeUntil) return;
+            // Glue primed: click PLANTS the wall at the ghost (eats 1).
+            try {
+                if (typeof GlueWall !== 'undefined' && GlueWall.wantPlace && GlueWall.wantPlace(state) &&
+                    typeof ItemSystem !== 'undefined' && ItemSystem.plantGlue) {
+                    ItemSystem.plantGlue(state);
+                    return;
+                }
+            } catch (err) {}
             state.mouse.isDown = true;
             WeaponSystem.shoot(state);
         });
@@ -273,6 +281,13 @@ const Input = {
         // The dead don't get menus — respawn first
         if (typeof state !== 'undefined' && state.player && state.player.isDead) return;
         const byId = (id) => document.getElementById(id);
+        // In-game settings overlay closes back to the pause menu first.
+        try {
+            if (typeof PauseMenu !== 'undefined' && PauseMenu.isSettingsOpen && PauseMenu.isSettingsOpen()) {
+                PauseMenu.closeSettings(true);
+                return;
+            }
+        } catch (e) {}
         if (typeof WorldSystem !== 'undefined' && WorldSystem.isBoatMenuOpen && WorldSystem.isBoatMenuOpen()) {
             WorldSystem.closeBoatMenu();
             return;

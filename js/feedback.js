@@ -260,6 +260,13 @@ const Feedback = {
             const modal = document.getElementById('feedback-modal');
             if (!modal) return;
             this.refreshLogPreview();
+            try {
+                const hook = document.getElementById('feedback-webhook');
+                if (hook && !hook.value) {
+                    const saved = localStorage.getItem(this.WEBHOOK_KEY) || '';
+                    if (saved) hook.value = saved;
+                }
+            } catch (e) {}
             const st = document.getElementById('feedback-status');
             if (st) {
                 const left = this.cooldownLeft();
@@ -331,6 +338,36 @@ const Feedback = {
         on('btn-feedback-lobby', () => this.open());
         on('btn-feedback-hud', () => this.open());
         on('feedback-close', () => this.close());
+        // Per-browser webhook override (itch.io players on self-hosted
+        // builds paste once; official builds ship one embedded).
+        try {
+            const hook = document.getElementById('feedback-webhook');
+            if (hook && !hook._bound) {
+                hook._bound = true;
+                try {
+                    const saved = localStorage.getItem(this.WEBHOOK_KEY) || '';
+                    if (saved) hook.value = saved;
+                } catch (e) {}
+            }
+        } catch (e) {}
+        on('btn-feedback-save-hook', () => {
+            const st = document.getElementById('feedback-status');
+            const hook = document.getElementById('feedback-webhook');
+            try {
+                this.setWebhook(hook ? hook.value : '');
+                if (st) {
+                    st.innerText = hook && hook.value.trim()
+                        ? 'Webhook saved on this device.'
+                        : 'Cleared — using the built-in webhook (or copy fallback).';
+                    st.className = 'text-[11px] font-bold text-emerald-300';
+                }
+            } catch (e) {
+                if (st) {
+                    st.innerText = (e && e.message) || 'Invalid webhook URL.';
+                    st.className = 'text-[11px] font-bold text-rose-300';
+                }
+            }
+        });
         on('btn-feedback-copy', async () => {
             const st = document.getElementById('feedback-status');
             const tx = document.getElementById('feedback-text');

@@ -770,9 +770,18 @@ body[data-uitier="xs"] #touch-btns, body[data-uitier="sm"] #touch-btns { bottom:
     right: max(12px, env(safe-area-inset-right, 0px));
     bottom: max(104px, calc(env(safe-area-inset-bottom, 0px) + 104px));
 }
-/* xs — small phones: ultra-compact HUD, banner floats above the buttons */
+/* xs — small phones: ultra-compact HUD, banner floats above the buttons.
+   Tutorial banner is text-first: single line, tiny key caps, no wrap. */
 body[data-uitier="xs"] #top-hud { padding: 4px !important; gap: 4px !important; }
-body[data-uitier="xs"] #status-banner { top: 56px !important; bottom: auto !important; font-size: 10px !important; max-width: 92vw !important; }
+body[data-uitier="xs"] #status-banner, body[data-uitier="sm"] #status-banner {
+    top: 52px !important; bottom: auto !important;
+    font-size: 9px !important; line-height: 1.35 !important;
+    max-width: 94vw !important; padding: 4px 8px !important;
+    border-radius: 10px !important; white-space: normal !important;
+}
+body[data-uitier="xs"] #status-banner .key, body[data-uitier="sm"] #status-banner .key {
+    font-size: 8px !important; padding: 0 4px !important; margin: 0 1px !important;
+}
 body[data-uitier="xs"] #tension-hud { width: 92vw !important; max-width: 300px !important; }
 body[data-uitier="xs"] #drag-hud { width: 86vw !important; max-width: 260px !important; }
 body[data-uitier="xs"] #weapon-toolbar .weapon-slot { width: 36px !important; height: 36px !important; }
@@ -842,7 +851,8 @@ body[data-orient="land"] #fight-list:not(.hidden) { display: block !important; m
 }
 #touch-joy-knob { transition: none; will-change: transform; }
 #touch-joy { touch-action: none; -webkit-tap-highlight-color: transparent; }
-/* Small screens: shrink every overlay family, not just the top HUD */
+/* Small screens: shrink every overlay family, not just the top HUD.
+   Settings + pause + feedback go near-fullscreen so rows fit phones. */
 @media (max-width: 760px), (max-height: 520px) {
     #boss-bar { width: 92vw !important; top: 2px !important; }
     #boss-bar .glass-panel { padding: 8px !important; }
@@ -851,10 +861,19 @@ body[data-orient="land"] #fight-list:not(.hidden) { display: block !important; m
     .catch-popup { padding: 8px 10px !important; font-size: 12px !important; }
     #tension-hud { width: min(64vw, 260px) !important; bottom: calc(env(safe-area-inset-bottom, 0px) + 168px) !important; }
     #drag-hud { width: min(60vw, 230px) !important; bottom: calc(env(safe-area-inset-bottom, 0px) + 118px) !important; }
-    #status-banner { top: 64px !important; bottom: auto !important; }
+    #status-banner { top: 60px !important; bottom: auto !important; font-size: 10px !important; padding: 5px 9px !important; max-width: 94vw !important; }
+    #status-banner .key { font-size: 9px !important; padding: 0 4px !important; }
     .death-title { font-size: 2rem !important; }
     #shop-modal .glass-panel, #casino-modal .glass-panel,
     #index-modal .glass-panel, #feedback-modal .glass-panel { border-radius: 16px !important; }
+    /* settings fit phones: full-width card, compact rows, tighter list */
+    #main-menu .menu-card { max-height: 94dvh !important; overflow-y: auto !important; }
+    #pause-settings > div { max-height: 94dvh !important; }
+    #pause-settings-slot, #settings-list { max-height: 62dvh !important; }
+    .menu-btn { padding: 8px 10px !important; font-size: 12px !important; }
+    .menu-btn.menu-mini { padding: 7px 9px !important; font-size: 11px !important; }
+    #pause-menu > div { padding: 14px !important; gap: 6px !important; }
+    #feedback-modal > div { max-height: 94dvh !important; }
 }
 /* xs phones: HUD HUD HUD — everything one notch smaller */
 body[data-uitier="xs"] #boss-bar { width: 94vw !important; }

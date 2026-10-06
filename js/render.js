@@ -360,6 +360,7 @@ const Render = {
         }
         this.drawDelayedBlasts(state, ctx);
         this.drawGroundLoot(state, ctx);
+        this.drawGlueWalls(state, ctx);
         this.drawBobber(state, ctx);
         this.drawHookedFish(state, ctx);
         this.drawLandMonsters(state, ctx);
@@ -946,6 +947,84 @@ const Render = {
             ctx.fillText(labelName, item.x, labelY);
             ctx.restore();
         });
+    },
+
+    // Glue walls: glossy BLUE crescent goo (pale blobs + white specular +
+    // HP arc). Dims as it melts or expires. Plus the ghost preview at the
+    // aim pose while a glue bomb is equipped (fire to plant it).
+    drawGlueWalls(state, ctx) {
+        try {
+            const walls = (typeof GlueWall !== 'undefined' && GlueWall.list)
+                ? GlueWall.list(state) : (state.glueWalls || []);
+            if (!walls || !walls.length) return;
+            const now = state.time || 0;
+            const HI = (typeof GlueWall !== 'undefined' && GlueWall.COL_HI) || '#bae6fd';
+            const MID = (typeof GlueWall !== 'undefined' && GlueWall.COL_MID) || '#38bdf8';
+            const DEEP = (typeof GlueWall !== 'undefined' && GlueWall.COL_DEEP) || 'rgba(12,74,110,0.9)';
+            for (const w of walls) {
+                if (!w || !w.segs) continue;
+                const hpK = Math.max(0, Math.min(1, (w.hp || 0) / (w.maxHp || 1000)));
+                const tLeft = Math.max(0, (w.until || 0) - now);
+                const alpha = Math.min(1, hpK * 1.2, tLeft < 5 ? tLeft / 5 : 1);
+                ctx.save();
+                ctx.globalAlpha = Math.max(0.15, alpha);
+                for (const s of w.segs) {
+                    // goo body
+                    const g = ctx.createRadialGradient(s.x - 8, s.y - 10, 4, s.x, s.y, 30);
+                    g.addColorStop(0, HI);
+                    g.addColorStop(0.45, MID);
+                    g.addColorStop(1, DEEP);
+                    ctx.fillStyle = g;
+                    ctx.beginPath();
+                    ctx.arc(s.x, s.y, 30, 0, Math.PI * 2);
+                    ctx.fill();
+                    // glossy highlight (keo keo ✨)
+                    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+                    ctx.beginPath();
+                    ctx.ellipse(s.x - 9, s.y - 11, 9, 5, -0.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                // HP arc over the middle segment
+                try {
+                    const mid = w.segs[Math.floor(w.segs.length / 2)];
+                    if (mid) {
+                        ctx.globalAlpha = Math.max(0.25, alpha);
+                        ctx.strokeStyle = hpK > 0.5 ? '#4ade80' : (hpK > 0.25 ? '#fbbf24' : '#ef4444');
+                        ctx.lineWidth = 5;
+                        ctx.beginPath();
+                        ctx.arc(mid.x, mid.y, 40, -Math.PI * 0.8, -Math.PI * 0.8 + Math.PI * 1.6 * hpK);
+                        ctx.stroke();
+                    }
+                } catch (e2) {}
+                ctx.restore();
+            }
+        } catch (e) {}
+        // Ghost preview: translucent crescent where the wall WILL land.
+        try {
+            if (typeof GlueWall === 'undefined' || !GlueWall.wantPlace || !GlueWall.wantPlace(state)) return;
+            const pose = GlueWall.aimPose ? GlueWall.aimPose(state) : null;
+            if (!pose) return;
+            const pulse = 0.30 + 0.12 * Math.sin((state.time || 0) * 6);
+            ctx.save();
+            ctx.globalAlpha = Math.max(0.15, pulse);
+            ctx.setLineDash([7, 6]);
+            ctx.strokeStyle = '#7dd3fc';
+            ctx.lineWidth = 2;
+            const N = 7;
+            for (let i = 0; i < N; i++) {
+                const a = pose.base + (i - (N - 1) / 2) * 0.24;
+                const x = pose.cx + Math.cos(a) * 110;
+                const y = pose.cy + Math.sin(a) * 110;
+                ctx.fillStyle = 'rgba(56,189,248,0.35)';
+                ctx.beginPath();
+                ctx.arc(x, y, 30, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(x, y, 30, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            ctx.restore();
+        } catch (e3) {}
     },
 
     // Per-rod bobber art. PNG (assets/bobbers/<model>.png or player

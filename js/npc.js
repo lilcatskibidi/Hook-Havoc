@@ -256,14 +256,25 @@ const NPC = {
 
     // ================= BOSS LORE =================
     bossText(state) {
-        const kills = state.player.seagullKills || 0;
+        // In a room the meter is SHARED (roomGullKills) — show that count
+        // so Marlin never disagrees with the summon. Solo: personal tally.
+        let kills = 0, shared = false;
+        try {
+            if (typeof Multiplayer !== 'undefined' && Multiplayer.roomCode) {
+                kills = state.roomGullKills || 0;
+                shared = true;
+            } else {
+                kills = state.player.seagullKills || 0;
+            }
+        } catch (e) { kills = (state.player && state.player.seagullKills) || 0; }
         const alive = (state.enemies || []).some(e => e && e.isBoss && e.enemyType === 'seagull' && (e.hp || 0) > 0);
         if (alive) {
             return `SHE IS HERE. Put down the rod, hunter — take up the gun. Her feathers cut like glass, her roar FREEZES you for 2 seconds, and her children dive like living missiles. Stay moving. Aim for the crown.`;
         }
         const r = kills % 20;
         const left = r === 0 ? 20 : 20 - r;
-        return `When the sky's children fall to human hands, their fury feeds the STORMCALLER. Slay gulls, and their mother will come for you.\n\nThe sky mourns ${r} of 20. ${left} more ${left === 1 ? 'gull' : 'gulls'} before SHE comes.\n\nHooked horrors from the deep? Same rule: shoot them weak, drag them beached, finish it on the sand.`;
+        const tag = shared ? ' (room total — every crewmate feeds it)' : '';
+        return `When the sky's children fall to human hands, their fury feeds the STORMCALLER. Slay gulls, and their mother will come for you.\n\nThe sky mourns ${r} of 20${tag}. ${left} more ${left === 1 ? 'gull' : 'gulls'} before SHE comes.\n\nHooked horrors from the deep? Same rule: shoot them weak, drag them beached, finish it on the sand.`;
     },
 
     rumors: [

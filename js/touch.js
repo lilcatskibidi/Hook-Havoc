@@ -123,7 +123,7 @@ const TouchControls = {
                     const joy = document.getElementById('touch-joy');
                     if (joy) this._makeDraggable(joy, '_joy');
                 }
-                const t = document.getElementById('touch-edit-toggle');
+                const el = document.getElementById('touch-edit-toggle');
                 if (t && !t._bound) {
                     t._bound = true;
                     t.addEventListener('click', (e) => {
@@ -131,6 +131,9 @@ const TouchControls = {
                         this.setEditMode(!this._editMode);
                     });
                 }
+                // Pinch-to-zoom on the canvas + pinch-to-resize buttons in
+                // edit mode (see _bindPinch below).
+                try { this._bindPinch(state); } catch (e) {}
             } catch (e) {}
         }
         // UI tier always applies (CSS hooks), even on desktop
@@ -312,6 +315,81 @@ const TouchControls = {
             window.addEventListener('mousemove', mv);
             window.addEventListener('mouseup', up);
         });
+    },
+
+    // ---- Pinch gestures (mobile, bug-safe by design) ----
+    // * 2 fingers on the CANVAS (not on buttons/joystick) = camera zoom,
+    //   same range as wheel/Z/X. Works in and out of edit mode.
+    // * 2 fingers on the TOUCH UI while EDIT MODE is on = resize all
+    //   buttons (global scale 0.8–1.6, persisted like the slider).
+    // Both ignore gestures with 1 or 3+ touches, and zoom locks to the
+    // pinch start value so a shaky finger can't spiral the camera.
+    _bindPinch(state) {
+        if (this._pinchBound) return;
+        this._pinchBound = true;
+        const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+        // --- canvas pinch = zoom ---
+        const cv = document.getElementById('gameCanvas');
+        if (cv) {
+            let z0 = 0, zoom0 = 1;
+            cv.addEventListener('touchstart', (e) => {
+                try {
+                    if (e.touches && e.touches.length === 2 && state && state.camera) {
+                        z0 = dist(e.touches[0], e.touches[1]) || 0;
+                        zoom0 = state.camera.targetZoom || 1;
+                    } else { z0 = 0; }
+                } catch (err) { z0 = 0; }
+            }, { passive: true });
+            cv.addEventListener('touchmove', (e) => {
+                try {
+                    if (!z0 || !e.touches || e.touches.length !== 2) return;
+                    if (!state || !state.camera || typeof CONFIG === 'undefined') return;
+                    e.preventDefault();
+                    const z = dist(e.touches[0], e.touches[1]) || 1;
+                    const nz = Utils.clamp(
+                        zoom0 * (z / Math.max(1, z0)),
+                        CONFIG.CAMERA_ZOOM_MIN, CONFIG.CAMERA_ZOOM_MAX);
+                    state.camera.targetZoom = Math.round(nz * 20) / 20;
+                    const zl = document.getElementById('zoom-level');
+                    if (zl) zl.innerText = (state.camera.targetZoom || 1).toFixed(1) + 'x';
+                } catch (err) {}
+            }, { passive: false });
+            const zend = () => { z0 = 0; };
+            cv.addEventListener('touchend', zend);
+            cv.addEventListener('touchcancel', zend);
+        }
+        // --- touch-ui pinch in edit mode = button size ---
+        const ui = document.getElementById('touch-ui');
+        if (ui) {
+            let r0 = 0, s0 = 1;
+            ui.addEventListener('touchstart', (e) => {
+                try {
+                    if (this._editMode && e.touches && e.touches.length === 2) {
+                        r0 = dist(e.touches[0], e.touches[1]) || 0;
+                        s0 = (this.loadLayout().scale || 1);
+                    } else { r0 = 0; }
+                } catch (err) { r0 = 0; }
+            }, { passive: true });
+            ui.addEventListener('touchmove', (e) => {
+                try {
+                    if (!this._editMode || !r0 || !e.touches || e.touches.length !== 2) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const r = dist(e.touches[0], e.touches[1]) || 1;
+                    this.setScale(s0 * (r / Math.max(1, r0)));
+                    try {
+                        const ts = document.getElementById('set-touchsize');
+                        const tv = document.getElementById('set-touchsize-val');
+                        const cur = Math.round((this.loadLayout().scale || 1) * 100);
+                        if (ts) ts.value = cur;
+                        if (tv) tv.innerText = cur + '%';
+                    } catch (err) {}
+                } catch (err) {}
+            }, { passive: false });
+            const rend = () => { r0 = 0; };
+            ui.addEventListener('touchend', rend);
+            ui.addEventListener('touchcancel', rend);
+        }
     },
 
     _bindJoystick(state) {
@@ -496,6 +574,21 @@ const TouchControls = {
         try {
             if (!state.player || state.player.isDead) return;
             if (typeof state._fightFreezeUntil === 'number' && state.time < state._fightFreezeUntil) return;
+            // Glue primed: FIRE plants the wall at the ghost (eats 1).
+            // Auto-aims the ghost: face the nearest threat before planting.
+            try {
+                if (typeof GlueWall !== 'undefined' && GlueWall.wantPlace && GlueWall.wantPlace(state) &&
+                    typeof ItemSystem !== 'undefined' && ItemSystem.plantGlue) {
+                    try {
+                        if (typeof GamepadControls !== 'undefined' && GamepadControls.autoAim) {
+                            const tgt = GamepadControls.autoAim(state, 750);
+                            if (tgt) { state.mouse.worldX = tgt.x; state.mouse.worldY = tgt.y; }
+                        }
+                    } catch (e2) {}
+                    ItemSystem.plantGlue(state);
+                    return;
+                }
+            } catch (e3) {}
             let tgt = null;
             try {
                 if (typeof GamepadControls !== 'undefined') tgt = GamepadControls.autoAim(state, 750);
@@ -545,13 +638,19 @@ const TouchControls = {
                 this._padKeys[k] = false;
             }
         }
-        // Held FIRE keeps semi-autos firing (autos already loop on isDown)
+        // Held FIRE keeps semi-autos firing (autos already loop on isDown).
+        // Glue equipped: planting happens ONCE per tap (down handler) —
+        // holding must not machine-plant the whole stock.
         if (this.fireHeld) {
             this.fireTimer -= delta;
             state.mouse.isDown = true;
             if (this.fireTimer <= 0) {
                 this.fireTimer = 0.28;
-                this.shootAimed(state);
+                let glue = false;
+                try {
+                    glue = !!(typeof GlueWall !== 'undefined' && GlueWall.wantPlace && GlueWall.wantPlace(state));
+                } catch (e) {}
+                if (!glue) this.shootAimed(state);
             }
         }
         // AUTO RELOAD on mobile: empty mag (non-pistol, non-reloading,

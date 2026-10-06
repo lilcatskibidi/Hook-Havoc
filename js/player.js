@@ -140,6 +140,11 @@ const Player = {
         p.y = Utils.clamp(p.y, B.MIN_Y + p.radius, B.MAX_Y - p.radius);
         }
 
+        // Glue walls are solid: the caster can't walk through their own goo.
+        try {
+            if (typeof GlueWall !== 'undefined' && GlueWall.collide) GlueWall.collide(state, p, p.radius || 16);
+        } catch (e) {}
+
         // Beach consumable timers
         if (p.baitTimer > 0) p.baitTimer = Math.max(0, p.baitTimer - delta);
         if (p.umbrellaTimer > 0) {
@@ -593,6 +598,11 @@ const Player = {
             } catch (e) {}
             try { audio.playRoar(); } catch (e) {}
             Particles.showFloatingText(state, '💀 "YOU ARE NOT STRONG ENOUGH TO BEAT ME."', bx, by, '#ef4444');
+            try {
+                if (typeof Ritual !== 'undefined' && Ritual.noteBossEnded) {
+                    Ritual.noteBossEnded(state, 'Boss fled', true);
+                }
+            } catch (e2) {}
             if (typeof UI !== 'undefined' && UI.updateStatusBanner) {
                 UI.updateStatusBanner('The boss spurns you and leaves. Train, gear up, try again.', 'Outmatched', 'rose');
             }

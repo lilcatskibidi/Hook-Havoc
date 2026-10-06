@@ -2411,6 +2411,18 @@ const Projectiles = {
             }
 
             // 2. Player Collision Check
+            // Glue wall intercepts hooked-fish skill shots first: the goo
+            // chips damage off its HP and swallows the shot. A void
+            // mega-orb still performs its programmed 7-orb split — AT the
+            // goo instead of at you (the children then chew the wall too).
+            try {
+                if (typeof GlueWall !== 'undefined' && GlueWall.bulletHit && GlueWall.bulletHit(state, proj)) {
+                    if (proj._voidMega) { try { Projectiles._detonateVoidMega(state, proj); } catch (e) {} }
+                    else { try { Particles.spawnParticles(state, proj.x, proj.y, '#7dd3fc', 8, { size: 4 }); } catch (e2) {} }
+                    state.projectiles.splice(i, 1);
+                    continue;
+                }
+            } catch (e) {}
             // Void mega-orb arrival: burst into 7 small orbs the moment it
             // reaches its locked target (even if the player already moved).
             if (proj._voidMega && typeof proj._voidTX === 'number') {

@@ -205,7 +205,7 @@ const EnemySpawner = {
                 } catch (err) {}
                 Particles.showFloatingText(st, '⛈ THE SKY DARKENS... LOOK UP!', p.x, p.y - 110, '#94a3b8');
             }
-            // — Scene 2: feather omen + shadow swoop (1.0–2.2s)
+            // — Scene 2: shadow swoop + lightning path (1.0–2.2s)
             if (!intro.s2 && e >= 1.0) {
                 intro.s2 = true;
                 try { audio.playBossRoar(); } catch (err) {}
@@ -216,49 +216,99 @@ const EnemySpawner = {
                     }
                 } catch (err) {}
                 st.screenShake = Math.max(st.screenShake || 0, 14);
-                Particles.showFloatingText(st, '🪶 BURNING FEATHERS... SOMETHING CROSSES THE SKY', p.x, p.y - 130, '#fbbf24');
+                // The shadow's flight path: over the angler, out to sea.
+                try {
+                    const wx = st.waterBoundaryX || 830;
+                    intro.path = [];
+                    const N = 8;
+                    for (let k = 0; k < N; k++) {
+                        const t = k / (N - 1);
+                        intro.path.push({
+                            x: (p.x - 420) + t * ((wx + 380) - (p.x - 420)),
+                            y: (p.y - 380) + Math.sin(t * Math.PI) * -60 + t * 260,
+                        });
+                    }
+                } catch (err2) { intro.path = null; }
+                intro.strikeI = 0;
+                intro.strikeT = 0;
+                Particles.showFloatingText(st, '🌑 A SHADOW CROSSES THE SKY...', p.x, p.y - 130, '#cbd5e1');
             }
             if (intro.s2 && e >= 1.0 && e < 2.2) {
-                // Burning feathers rain over the beach around the player.
-                for (let i = 0; i < 3; i++) {
-                    Particles.spawnParticles(st,
-                        p.x + (Math.random() - 0.5) * 700, p.y - 320 - Math.random() * 160,
-                        Math.random() < 0.5 ? '#3f3f46' : '#f59e0b', 1, { size: 4 });
-                }
-                if (Math.random() < 0.25) {
-                    Particles.spawnParticles(st, p.x + (Math.random() - 0.5) * 500, p.y - 260, '#a7f3d0', 2, { size: 3 });
-                }
+                // Shadow glides along its path — lightning strikes where it
+                // passes, the dark growing as it nears the sea.
+                try {
+                    const now = st.time || 0;
+                    if (intro.path && intro.strikeI < intro.path.length && now - (intro.strikeT || 0) >= 0.13) {
+                        intro.strikeT = now;
+                        const pt = intro.path[intro.strikeI++];
+                        const grow = 3 + intro.strikeI * 2;
+                        if (typeof Combat !== 'undefined' && Combat.strikeLightning) {
+                            Combat.strikeLightning(st, pt.x, pt.y, { color: '#a7f3d0', shake: 8 });
+                        } else { try { audio.playThunder(); } catch (err) {} }
+                        for (let i = 0; i < grow; i++) {
+                            Particles.spawnParticles(st,
+                                pt.x + (Math.random() - 0.5) * (40 + intro.strikeI * 22),
+                                pt.y + (Math.random() - 0.5) * 60,
+                                Math.random() < 0.5 ? '#1e293b' : '#f59e0b', 1, { size: 4 + intro.strikeI });
+                        }
+                    }
+                } catch (err) {}
             }
-            // — Scene 3: landing + freeze beat + title card (2.2–3.5s)
+            // — Scene 3: sea arrival + flock + landing (2.2–3.5s)
             if (!intro.s3 && e >= 2.2) {
                 intro.s3 = true;
+                const B = CONFIG.WORLD;
+                const wx = st.waterBoundaryX || 830;
+                const seaX = Utils.clamp(wx + 380, wx + 100, B.MAX_X - 60);
+                const seaY = Utils.clamp(p.y - 140, (B.MIN_Y || 40) + 120, B.MAX_Y - 60);
                 const boss = this.spawnGullBoss(true);
                 if (boss) {
-                    // Dive from top-right with lightning wings.
-                    const B = CONFIG.WORLD;
-                    boss.x = Utils.clamp(p.x + 420, (st.waterBoundaryX || 830) - 200, B.MAX_X - 60);
-                    boss.y = Math.max((B.MIN_Y || 40) + 120, p.y - 420);
-                    for (let i = 0; i < 3; i++) {
+                    // She rides in low over the sea, then slams down at the
+                    // arena — the dormancy glide + _introImpact land her.
+                    boss.x = seaX;
+                    boss.y = seaY;
+                    const ax = Utils.clamp(p.x + 180, (B.MIN_X || 40) + 60, wx - 60);
+                    const ay = Utils.clamp(p.y - 40, (B.MIN_Y || 40) + 120, B.MAX_Y - 60);
+                    const gd = Math.hypot(ax - seaX, ay - seaY) || 1;
+                    boss._swimIn = { x: ax, y: ay, spd: gd / 1.1 };
+                    boss._introImpact = true;
+                    boss.dormantUntil = (st.time || 0) + 1.3;
+                    // Her roar calls 5 swift escorts that dive in behind her.
+                    try { audio.playBossRoar(); } catch (err) {}
+                    try {
+                        const cfg = CONFIG.ENEMIES.SEAGULL;
+                        for (let k = 0; k < 5; k++) {
+                            (st.enemies = st.enemies || []).push({
+                                id: 'esc' + Date.now() + '_' + k + '_' + Math.floor(Math.random() * 1e6),
+                                enemyType: 'seagull',
+                                x: seaX - 60 - k * 46, y: seaY - 40 - (k % 2) * 50,
+                                vx: 0, vy: 0,
+                                hp: cfg.hp, maxHp: cfg.hp,
+                                damage: cfg.damage,
+                                speed: (cfg.speed || 140) * 1.5,
+                                diveSpeed: (cfg.diveSpeed || 300) * 1.5,
+                                diveCooldown: 0, diveTimer: 0.4 + k * 0.3,
+                                state: 'circling',
+                                targetX: p.x, targetY: p.y,
+                                circleAngle: Math.random() * Math.PI * 2,
+                                circleRadius: 170 + k * 24,
+                                circleDirection: (k % 2) ? 1 : -1,
+                                score: cfg.score, xp: cfg.xp,
+                                hitFlash: 0,
+                            });
+                        }
+                    } catch (err2) {}
+                    Particles.showFloatingText(st, '👁 HER FLOCK FOLLOWS — FASTER THAN ANY GULL', seaX, seaY - 70, '#fbbf24');
+                    for (let i = 0; i < 2; i++) {
                         setTimeout(() => {
                             try {
                                 if (typeof Combat !== 'undefined' && Combat.strikeLightning) {
-                                    Combat.strikeLightning(st, boss.x + (Math.random() - 0.5) * 160, boss.y, { color: '#fef08a', shake: 8 });
+                                    Combat.strikeLightning(st, seaX + (Math.random() - 0.5) * 160, seaY, { color: '#fef08a', shake: 8 });
                                 }
                             } catch (err) {}
                         }, i * 250);
                     }
                     try { audio.playThunder(); } catch (err) {}
-                    // Landing impact: dust + ring + shake, then the beat.
-                    st.delayedBlasts = st.delayedBlasts || [];
-                    st.delayedBlasts.push({
-                        x: boss.x, y: p.y, radius: 240, damage: 0,
-                        timer: 0.5, color: '#e2e8f0', shake: 22,
-                    });
-                    try {
-                        Particles.spawnParticles(st, boss.x, p.y, '#d6c79a', 30, { size: 6 });
-                        Particles.spawnParticles(st, boss.x, boss.y, '#fef08a', 20, { size: 4 });
-                    } catch (err) {}
-                    st.screenShake = Math.max(st.screenShake || 0, 24);
                     // Freeze beat: white flash + shake cut reads as 0.3s stop.
                     try {
                         const fl = document.getElementById('flash-overlay');
@@ -344,10 +394,10 @@ const EnemySpawner = {
             isBoss: true,
             bossName: 'STORMCALLER',
             x, y, vx: 0, vy: 0,
-            hp: 14000, maxHp: 14000,
-            damage: 70,
-            speed: (cfg.speed || 120) + 60,
-            diveSpeed: (cfg.diveSpeed || 300) + 150,
+            hp: 20000, maxHp: 20000,
+            damage: 85,
+            speed: (cfg.speed || 120) + 90,
+            diveSpeed: (cfg.diveSpeed || 300) + 220,
             diveCooldown: 0, diveTimer: 2,
             state: 'circling',
             targetX: p.x, targetY: p.y,
@@ -358,8 +408,8 @@ const EnemySpawner = {
             skillIdx: 0, // rotates: strike -> feathers -> roar
             hitCd: 0,
             enraged: false,
-            score: 4000,
-            xp: 2000,
+            score: 6500,
+            xp: 3000,
             hitFlash: 0,
         };
         this.state.enemies.push(gullBoss);
@@ -502,7 +552,7 @@ const EnemySpawner = {
                         x: e.x, y: e.y,
                         vx: Math.cos(a) * 520, vy: Math.sin(a) * 520,
                         hp: 30, maxHp: 30,
-                        damage: 45,
+                        damage: 55,
                         life: 4,
                         score: 0, xp: 10,
                         hitFlash: 0,
@@ -510,20 +560,20 @@ const EnemySpawner = {
                 }
                 Particles.showFloatingText(this.state, 'SEAGULL STRIKE!', e.x, e.y - 60, '#fbbf24');
                 try { audio.playFishScreech(); } catch (err) {}
-                e.skillCooldown = e.enraged ? 2.2 : 3.0;
+                e.skillCooldown = e.enraged ? 2.0 : 2.6;
             } else if (skill === 'feathers') {
                 if (typeof Combat !== 'undefined' && Combat.spawnBullet) {
                     const base = Math.atan2(p.y - e.y, p.x - e.x);
                     for (let i = -4; i <= 4; i++) {
                         const a = base + i * 0.14;
                         Combat.spawnBullet(this.state, e.x, e.y,
-                            Math.cos(a) * 420, Math.sin(a) * 420,
-                            { radius: 7, damage: 25, color: '#e2e8f0', life: 2.2 });
+                            Math.cos(a) * 440, Math.sin(a) * 440,
+                            { radius: 7, damage: 30, color: '#e2e8f0', life: 2.2 });
                     }
                 }
                 Particles.showFloatingText(this.state, 'FEATHER BARRAGE!', e.x, e.y - 60, '#e2e8f0');
                 try { audio.playWhoosh(); } catch (err) {}
-                e.skillCooldown = e.enraged ? 2.2 : 3.0;
+                e.skillCooldown = e.enraged ? 2.0 : 2.6;
             } else if (skill === 'featherBarrage') {
                 // Planted 5s channel: stands still and hoses feathers at
                 // the angler nonstop — keep moving or eat every quill.
@@ -549,7 +599,7 @@ const EnemySpawner = {
                     }
                 }
                 this.state.delayedBlasts.push({
-                    x: p.x, y: p.y, radius: 85, damage: e.enraged ? 70 : 55,
+                    x: p.x, y: p.y, radius: 100, damage: e.enraged ? 90 : 70,
                     timer: 0.7, color: '#fbbf24', shake: 18,
                     leaveHazard: false
                 });
@@ -711,9 +761,22 @@ const EnemySpawner = {
                 Particles.spawnParticles(this.state, e.x, e.y, '#e2e8f0', 1, { size: 2 });
             }
             const hit = Math.hypot(p.x - e.x, p.y - e.y) < (p.radius || 15) + 12;
-            if (hit) {
-                this.hitPlayer(e);
+            // Glue walls catch missiles mid-flight: detonate on the goo.
+            let wallHit = false;
+            try {
+                if (typeof GlueWall !== 'undefined' && GlueWall.missileHit && GlueWall.missileHit(this.state, e)) wallHit = true;
+            } catch (err) {}
+            if (hit || wallHit) {
+                if (hit) this.hitPlayer(e);
                 Particles.spawnParticles(this.state, e.x, e.y, '#f97316', 16, { size: 5 });
+                // Explosive payload: real AoE blast, not just a pop.
+                try {
+                    this.state.delayedBlasts = this.state.delayedBlasts || [];
+                    this.state.delayedBlasts.push({
+                        x: e.x, y: e.y, radius: 95, damage: 40,
+                        timer: 0.35, color: '#f97316', shake: 10,
+                    });
+                } catch (err2) {}
                 this.state.screenShake = Math.max(this.state.screenShake || 0, 10);
                 try { audio.playExplosion(); } catch (err) {}
                 this.state.enemies.splice(i, 1);
@@ -1441,18 +1504,40 @@ const EnemySpawner = {
             Particles.spawnParticles(this.state, enemy.x, enemy.y, '#e2e8f0', 30, { size: 4 });
             Particles.showFloatingText(this.state, `⛈ ${(enemy.bossName || 'BOSS')} SLAIN! ⛈`, enemy.x, enemy.y - 70, '#f59e0b');
             try { audio.playBossKilled(); } catch (e) {}
+            try {
+                if (typeof Ritual !== 'undefined' && Ritual.noteBossEnded) {
+                    Ritual.noteBossEnded(this.state, (enemy.bossName || 'BOSS') + ' slain');
+                }
+            } catch (e2) {}
         }
         // Every 20th gull calls down its mother (only while no boss lives).
         // Solo/host only: clients fight the host's shared Stormcaller
-        // instead of raising their own.
+        // instead of raising their own. In a room the counter is SHARED:
+        // every crewmate's kill feeds one room total (synced to clients).
         if (enemy.enemyType === 'seagull' && !enemy.isBoss && this.state.player) {
-            this.state.player.seagullKills = ((this.state.player.seagullKills || 0) + 1);
+            let kills = 0;
+            let inRoom = false;
+            try { inRoom = !!(typeof Multiplayer !== 'undefined' && Multiplayer.roomCode); } catch (e) {}
+            if (inRoom) {
+                this.state.roomGullKills = (this.state.roomGullKills || 0) + 1;
+                kills = this.state.roomGullKills;
+            } else {
+                this.state.player.seagullKills = ((this.state.player.seagullKills || 0) + 1);
+                kills = this.state.player.seagullKills;
+            }
             let canSummon = true;
             try {
                 canSummon = !(typeof Multiplayer !== 'undefined' && Multiplayer.isClient && Multiplayer.isClient());
             } catch (e) {}
-            if (this.state.player.seagullKills % 20 === 0 && canSummon && !this.gullBossActive()) {
-                this.startStormIntro();
+            if (kills % 20 === 0 && canSummon && !this.gullBossActive()) {
+                // Never crash another boss's fight (or the breather): the
+                // meter keeps counting and retries at the next multiple.
+                let floorOpen = true;
+                try {
+                    if (typeof Ritual !== 'undefined' && Ritual.bossAlive && Ritual.bossAlive(this.state)) floorOpen = false;
+                    else if (typeof Ritual !== 'undefined' && Ritual.bossRestLeft && Ritual.bossRestLeft(this.state) > 0) floorOpen = false;
+                } catch (e) {}
+                if (floorOpen) this.startStormIntro();
             }
             // Rarely shakes loose a Storm Egg (Hydra key) where it dies
             if (Math.random() < 0.06 && typeof Ritual !== 'undefined' && Ritual.awardItem) {

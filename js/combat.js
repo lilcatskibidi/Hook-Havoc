@@ -96,6 +96,7 @@ const Combat = {
         this.updateGroundHazards(state, delta);
         this.updateVoidPits(state, delta);
         this.updatePlayerStatus(state, delta);
+        try { if (typeof GlueWall !== 'undefined' && GlueWall.tick) GlueWall.tick(state, delta); } catch (e) {}
 
         if (p.isDead || p.hp <= 0) return;
 
@@ -246,6 +247,13 @@ const Combat = {
                         if (typeof SaveSystem !== 'undefined') SaveSystem.save(state);
                     } catch (e) {}
                     UI.updateStatusBanner(`${m.species.name} has fallen!`, 'Victory', 'emerald');
+                    // Queue + rest AFTER the victory banner so the breather
+                    // call-out isn't overwritten (it announces the next turn).
+                    try {
+                        if (typeof Ritual !== 'undefined' && Ritual.noteBossEnded) {
+                            Ritual.noteBossEnded(state, (m.species.name || 'Boss') + ' slain', true);
+                        }
+                    } catch (e0) {}
                 }
 
                 // Personal carcass on clients: tagged _local with a unique
@@ -530,6 +538,10 @@ const Combat = {
                 this.handleDirectMeleeContact(state, m, p, dist, dx, dy);
                 m.meleeCd = 0.6;
             }
+            // Glue walls are solid for beached monsters too.
+            try {
+                if (typeof GlueWall !== 'undefined' && GlueWall.collide) GlueWall.collide(state, m, size * 0.7);
+            } catch (e) {}
         }
 
         this.updateGroundLoot(state, delta);
@@ -1015,6 +1027,13 @@ const Combat = {
             }
 
             const dist = Math.hypot(p.x - b.x, p.y - b.y);
+            // Glue wall catches enemy fire first (pierce ignores the goo).
+            try {
+                if (typeof GlueWall !== 'undefined' && GlueWall.bulletHit && GlueWall.bulletHit(state, b)) {
+                    state.bullets.splice(i, 1);
+                    continue;
+                }
+            } catch (e) {}
             if (dist < (p.radius || 15) + (b.radius || 6)) {
                 const dealt = this.damagePlayer(state, b.damage || 5);
                 Particles.showFloatingText(state, `-${dealt}`, p.x, p.y - 25,
@@ -2299,3 +2318,195 @@ const Combat = {
 function sizeOffset(m) {
     return (m.species.size || 20) + 25;
 }
+
+// ============================================================
+//  GLUE WALL — crescent goo barrier from the Glue Bomb item.
+//  Blocks enemy bullets, hooked-fish drags, land monsters, enemies
+//  and the player (solid circle segments). Own bullets fly through.
+//  Enemy shots with a pierce flag ignore it; everything else chips
+//  its 500 HP and vanishes on impact, like hitting the player.
+//  state.glueWalls[]: {segs:[{x,y}], hp, maxHp, until}.
+// ============================================================
+const GlueWall = {
+    SEG_R: 30,
+    HP: 1000,
+    DUR: 45,
+    // Blue goo palette (was lime).
+    COL_HI: '#bae6fd',
+    COL_MID: '#38bdf8',
+    COL_DEEP: 'rgba(12,74,110,0.9)',
+
+    list(state) {
+        try {
+            if (!state) return [];
+            if (!Array.isArray(state.glueWalls)) state.glueWalls = [];
+            return state.glueWalls;
+        } catch (e) { return []; }
+    },
+
+    // Aim pose shared by cast() + the ghost preview: crescent center in
+    // front of the player + aim angle. Close (150px) so it lands nearby.
+    aimPose(state) {
+        try {
+            const p = state && state.player;
+            if (!p) return null;
+            let ax = 1, ay = 0;
+            try {
+                const dx = (state.mouse.worldX - p.x), dy = (state.mouse.worldY - p.y);
+                const d = Math.hypot(dx, dy);
+                if (d > 40) { ax = dx / d; ay = dy / d; }
+                else if (p.facing && p.facing < 0) { ax = -1; ay = 0; }
+            } catch (e) {}
+            const base = Math.atan2(ay, ax);
+            return { cx: p.x + Math.cos(base) * 150, cy: p.y + Math.sin(base) * 150, base };
+        } catch (e) { return null; }
+    },
+
+    // Fire-to-place: glue PRIMED via F + stock left + 3s cooldown clear
+    // => the fire button (mouse / touch / gamepad) plants the wall at
+    // the ghost instead of shooting. Unprimed clicks shoot normally.
+    wantPlace(state) {
+        try {
+            const p = state && state.player;
+            if (!p || p.isDead || state.paused) return false;
+            if ((p.itemCd || 0) > 0) return false;
+            if (!state.gluePrimed) return false;
+            if ((state.glueCdUntil || 0) - (state.time || 0) > 0) return false;
+            if (!p.equippedItem || p.equippedItem !== 'glue_bomb') return false;
+            if (typeof ItemSystem !== 'undefined' && ItemSystem.stock) {
+                return ItemSystem.stock(state, 'glue_bomb') > 0;
+            }
+            return (p.itemStock && p.itemStock.glue_bomb > 0) || false;
+        } catch (e) { return false; }
+    },
+
+    cast(state) {
+        try {
+            const p = state && state.player;
+            if (!p) return false;
+            const pose = this.aimPose(state);
+            if (!pose) return false;
+            const segs = [];
+            const N = 7;
+            for (let i = 0; i < N; i++) {
+                const a = pose.base + (i - (N - 1) / 2) * 0.24;
+                segs.push({
+                    x: Math.round(pose.cx + Math.cos(a) * 110),
+                    y: Math.round(pose.cy + Math.sin(a) * 110),
+                });
+            }
+            const walls = this.list(state);
+            walls.push({ segs, hp: this.HP, maxHp: this.HP, until: (state.time || 0) + this.DUR });
+            // One wall at a time per caster — the old goo DISSOLVES with a
+            // burst (never a silent swap, never a stack).
+            while (walls.length > 1) {
+                const old = walls.shift();
+                try {
+                    if (old && old.segs && old.segs[3]) {
+                        Particles.spawnParticles(state, old.segs[3].x, old.segs[3].y, '#38bdf8', 20, { size: 5 });
+                        Particles.showFloatingText(state, '🫧 Old goo dissolved!', old.segs[3].x, old.segs[3].y - 40, '#7dd3fc');
+                    }
+                } catch (eOld) {}
+            }
+            try {
+                Particles.spawnParticles(state, pose.cx, pose.cy, this.COL_MID, 26, { size: 6 });
+                try { audio.playSplash(); } catch (e2) {}
+            } catch (e3) {}
+            return true;
+        } catch (e) { return false; }
+    },
+
+    tick(state, delta) {
+        try {
+            const walls = this.list(state);
+            const now = state.time || 0;
+            for (let i = walls.length - 1; i >= 0; i--) {
+                const w = walls[i];
+                if (!w || (w.hp || 0) <= 0 || now >= (w.until || 0)) {
+                    if (w && (w.hp || 0) <= 0 && w.segs && w.segs[0]) {
+                        try {
+                            Particles.spawnParticles(state, w.segs[3].x, w.segs[3].y, '#38bdf8', 22, { size: 5 });
+                            Particles.showFloatingText(state, '🫧 Glue wall melted!', w.segs[3].x, w.segs[3].y - 40, '#7dd3fc');
+                        } catch (e2) {}
+                    }
+                    walls.splice(i, 1);
+                }
+            }
+        } catch (e) {}
+    },
+
+    // Solid-body push for circles (player / fish / monsters / enemies).
+    // Accumulates ALL overlapping segs in one pass (never single-push +
+    // return: adjacent segs would ping-pong the body forever). Net push
+    // points along the arc normal, so bodies slide OUT, never trapped.
+    collide(state, o, r) {
+        try {
+            if (!o) return false;
+            const R = (r || 15) + this.SEG_R;
+            const walls = this.list(state);
+            let px = 0, py = 0, hit = false;
+            for (const w of walls) {
+                if (!w || !w.segs) continue;
+                for (const s of w.segs) {
+                    const dx = o.x - s.x, dy = o.y - s.y;
+                    const d = Math.hypot(dx, dy);
+                    if (d < R) {
+                        hit = true;
+                        if (d > 0.01) {
+                            const push = R - d;
+                            px += (dx / d) * push;
+                            py += (dy / d) * push;
+                        } else {
+                            px += R; // dead-center: shove +x, neighbors refine
+                        }
+                    }
+                }
+            }
+            if (hit) { o.x += px; o.y += py; return true; }
+        } catch (e) {}
+        return false;
+    },
+
+    // Enemy bullet vs goo: pierce ignores, else chip + absorb.
+    bulletHit(state, b) {
+        try {
+            if (!b || b.pierce) return false;
+            const R = (b.radius || 6) + this.SEG_R;
+            const walls = this.list(state);
+            for (const w of walls) {
+                if (!w || !w.segs) continue;
+                for (const s of w.segs) {
+                    if (Math.hypot(b.x - s.x, b.y - s.y) < R) {
+                        w.hp -= (b.damage || 5);
+                        try {
+                            Particles.spawnParticles(state, b.x, b.y, '#7dd3fc', 6, { size: 4 });
+                        } catch (e2) {}
+                        return true;
+                    }
+                }
+            }
+        } catch (e) {}
+        return false;
+    },
+
+    // Missiles / contact enemies detonate on the goo (no pass-through).
+    missileHit(state, e) {
+        try {
+            if (!e) return false;
+            const R = 12 + this.SEG_R;
+            const walls = this.list(state);
+            for (const w of walls) {
+                if (!w || !w.segs) continue;
+                for (const s of w.segs) {
+                    if (Math.hypot(e.x - s.x, e.y - s.y) < R) {
+                        w.hp -= (e.damage || 45);
+                        return true;
+                    }
+                }
+            }
+        } catch (e2) {}
+        return false;
+    },
+};
+
+try { window.GlueWall = GlueWall; } catch (e) {}

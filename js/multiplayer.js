@@ -886,6 +886,9 @@ const Multiplayer = {
             case 'beachClaim':
                 if (this.isHost) this.handleBeachClaim(fromId, msg.fish);
                 break;
+            case 'glueCast':
+                if (this.isHost) this.handleGlueCast(fromId, msg.segs);
+                break;
             case 'syncRequest':
                 // Targeted reply (not broadcast): the requester alone gets
                 // a fresh snapshot — the classic host->client async answer.
@@ -1428,6 +1431,14 @@ const Multiplayer = {
             // Shared boss chances: ONE room counter (10). Host deaths bump
             // it locally (Player.die); client deaths arrive as notices.
             bossDeaths: this.state.bossDeaths || 0,
+            // Shared Stormcaller meter: ONE room gull counter (every
+            // crewmate's kill feeds it; host owns the summon at 20).
+            roomGullKills: this.state.roomGullKills || 0,
+            // Shared goo: host casts, everyone collides + renders.
+            glueWalls: (this.state.glueWalls || []).slice(0, 2).map(w => ({
+                segs: (w.segs || []).map(s => ({ x: RI(s.x), y: RI(s.y) })),
+                hp: RI(w.hp || 0), maxHp: w.maxHp || 500, until: w.until || 0,
+            })),
             activeBoss: this.state.activeBoss ? {
                 id: this.state.activeBoss.id,
                 species: this._slimSpecies(this.state.activeBoss.species),
@@ -1737,6 +1748,21 @@ const Multiplayer = {
             // Shared boss chances (ONE room counter — any death counts).
             if (typeof remoteState.bossDeaths === 'number') {
                 this.state.bossDeaths = Math.max(0, Math.min(99, remoteState.bossDeaths | 0));
+            }
+
+            // Shared Stormcaller meter (host-owned; display only).
+            if (typeof remoteState.roomGullKills === 'number') {
+                this.state.roomGullKills = Math.max(0, remoteState.roomGullKills | 0);
+            }
+
+            // Shared goo (host-owned; render + collide locally).
+            if (sameMap && Array.isArray(remoteState.glueWalls)) {
+                try {
+                    this.state.glueWalls = remoteState.glueWalls.map(w => ({
+                        segs: (w.segs || []).map(s => ({ x: s.x, y: s.y })),
+                        hp: w.hp || 0, maxHp: w.maxHp || 500, until: w.until || 0,
+                    }));
+                } catch (e) {}
             }
             
             // Screen shake
@@ -2647,6 +2673,38 @@ const Multiplayer = {
         if (this.state.groundLoot) {
             this.state.groundLoot = this.state.groundLoot.filter(l => l.id !== lootId);
         }
+    },
+
+    // Client splattered glue: host validates + owns the shared wall (one
+    // room wall at a time, same as local casts). Segs must sit near the
+    // caster's remote body or the cast is dropped (anti-teleport).
+    sendGlueCast(segs) {
+        if (!this.isClient() || !Array.isArray(segs)) return false;
+        let sent = false;
+        try {
+            if (typeof PeerLink !== 'undefined' && PeerLink.sendToHost({ type: 'glueCast', segs })) sent = true;
+        } catch (e) {}
+        return sent;
+    },
+
+    handleGlueCast(fromId, segs) {
+        try {
+            if (!this.isHost || !Array.isArray(segs) || segs.length !== 7) return;
+            fromId = this._normPid(fromId, 'glueCast');
+            if (!fromId) return;
+            const rp = (this.state.remotePlayers || {})[fromId];
+            const clean = [];
+            for (const s of segs) {
+                const x = Math.round(Number(s.x)), y = Math.round(Number(s.y));
+                if (!isFinite(x) || !isFinite(y)) return;
+                if (rp && Math.hypot(x - (rp.x || 0), y - (rp.y || 0)) > 700) return;
+                clean.push({ x, y });
+            }
+            if (typeof GlueWall === 'undefined') return;
+            const walls = GlueWall.list(this.state);
+            walls.push({ segs: clean, hp: GlueWall.HP, maxHp: GlueWall.HP, until: (this.state.time || 0) + GlueWall.DUR });
+            while (walls.length > 1) walls.shift();
+        } catch (e) {}
     },
 
     // Client beached a fish: host spawns it as a SHARED monster (or shared

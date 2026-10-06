@@ -1390,6 +1390,13 @@ const Fishing = {
         fish.x += fish.vx * delta;
         fish.y += fish.vy * delta;
 
+        // Hooked fish grind against glue walls instead of phasing through.
+        try {
+            if (typeof GlueWall !== 'undefined' && GlueWall.collide) {
+                GlueWall.collide(state, fish, ((fish.species && fish.species.size) || 30) * 0.7);
+            }
+        } catch (e) {}
+
         // TITAN SLAM landing (whale breach): the fish hangs skyward, then
         // comes down ON THE ANGLER — earthquake blast at the player's feet.
         // Sidestep the impact ring: it lands where you STAND, not where

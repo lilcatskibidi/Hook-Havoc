@@ -490,13 +490,25 @@ const UI = {
         // (line snapped — fight it with guns, reel it when weakened).
         let boss = null, bossKind = 'fish';
         const ab = state.activeBoss;
-        if (ab && ab.hp > 0 && state.monstersOnLand.includes(ab)) {
-            // Cinematic HP reveal: the bar stays hidden until the intro
-            // names the boss (Emperor 8s beat).
-            if (!(ab._hpHiddenUntil && (state.time || 0) < ab._hpHiddenUntil)) {
+        if (ab && (ab.hp || 0) > 0 && ab.species) {
+            // Reference equality only holds on the host sim — clients get a
+            // snapshot twin, so match by id or the bar hides for everyone
+            // except the summoner.
+            const onLand = state.monstersOnLand.includes(ab) ||
+                (state.monstersOnLand || []).some(m => m && ab.id && m.id === ab.id);
+            if (onLand) {
+                // Cinematic HP reveal: the bar stays hidden until the intro
+                // names the boss (Emperor 8s beat).
+                if (!(ab._hpHiddenUntil && (state.time || 0) < ab._hpHiddenUntil)) {
+                    boss = ab;
+                }
+            } else {
+                // Synced activeBoss with no local body yet (intake lag) —
+                // still show HP from the snapshot so clients aren't blind.
                 boss = ab;
             }
-        } else {
+        }
+        if (!boss) {
             const storm = (state.enemies || []).find(e => e && e.isBoss && (e.hp || 0) > 0);
             if (storm) { boss = storm; bossKind = 'storm'; }
             else {
@@ -1800,6 +1812,8 @@ const PauseMenu = {
         try {
             if (typeof state !== 'undefined' && state.player && state.player.isDead) return;
         } catch (e) {}
+        // Never stack pause on top of pause-settings.
+        try { this.closeSettings(false); } catch (e) {}
         const quit = $('btn-pause-quit');
         if (quit) {
             const span = quit.querySelector('span');
@@ -1825,6 +1839,57 @@ const PauseMenu = {
         } catch (e) {}
     },
 
+    // ---- In-game Settings (pause-settings overlay) ----
+    // Reuses the SAME #settings-list node + Settings bindings (no dup
+    // ids): the node is moved into the pause overlay while open and moved
+    // back afterwards. The game stays frozen (state.paused === true) the
+    // whole time — closing returns to the pause menu, never unpauses.
+    _settingsHome: null,
+
+    isSettingsOpen() {
+        const el = $('pause-settings');
+        return !!(el && !el.classList.contains('hidden'));
+    },
+
+    openSettings() {
+        const ov = $('pause-settings');
+        const slot = $('pause-settings-slot');
+        const list = $('settings-list');
+        if (!ov || !slot || !list) return;
+        try {
+            if (!this._settingsHome) {
+                this._settingsHome = { parent: list.parentNode, next: list.nextSibling };
+            }
+            slot.appendChild(list);
+            if (typeof Settings !== 'undefined') Settings.render();
+        } catch (e) {}
+        const pm = $('pause-menu');
+        if (pm) { pm.classList.add('hidden'); pm.classList.remove('flex'); }
+        ov.classList.remove('hidden');
+        ov.classList.add('flex');
+        try { if (typeof state !== 'undefined') state.paused = true; } catch (e) {}
+    },
+
+    closeSettings(backToPause) {
+        const ov = $('pause-settings');
+        if (!ov || ov.classList.contains('hidden')) return;
+        try {
+            const list = $('settings-list');
+            const home = this._settingsHome;
+            if (list && home && home.parent) {
+                if (home.next && home.next.parentNode === home.parent) home.parent.insertBefore(list, home.next);
+                else home.parent.appendChild(list);
+            }
+        } catch (e) {}
+        ov.classList.add('hidden');
+        ov.classList.remove('flex');
+        if (backToPause === false) return;
+        try {
+            const dead = state.player && state.player.isDead;
+            if (!dead) this.open();
+        } catch (e) {}
+    },
+
     bind() {
         const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
         on('btn-pause-resume', () => {
@@ -1844,6 +1909,7 @@ const PauseMenu = {
         on('btn-pause-quit', () => {
             try { audio.playUIClick(); } catch (e) {}
             this.close(false);
+            try { this.closeSettings(false); } catch (e) {}
             try {
                 if (typeof MultiplayerUI !== 'undefined' && window.Multiplayer && window.Multiplayer.roomCode) {
                     MultiplayerUI.forceExitMultiplayer();
@@ -1851,6 +1917,14 @@ const PauseMenu = {
                     MainMenu.show();
                 }
             } catch (e) {}
+        });
+        on('btn-pause-settings', () => {
+            try { audio.playUIClick(); } catch (e) {}
+            this.openSettings();
+        });
+        on('btn-pause-settings-back', () => {
+            try { audio.playUIClick(); } catch (e) {}
+            this.closeSettings(true);
         });
     }
 };
@@ -3331,7 +3405,8 @@ const MainMenu = {
                     // In-game ESC toggles the pause menu — it never jumps
                     // straight to the main menu anymore.
                     if (typeof PauseMenu !== 'undefined') {
-                        if (PauseMenu.isOpen()) PauseMenu.close(true);
+                        if (PauseMenu.isSettingsOpen && PauseMenu.isSettingsOpen()) PauseMenu.closeSettings(true);
+                        else if (PauseMenu.isOpen()) PauseMenu.close(true);
                         else PauseMenu.open();
                     }
                 }

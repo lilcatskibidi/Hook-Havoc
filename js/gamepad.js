@@ -107,6 +107,14 @@ const GamepadControls = {
             if (!state.player || state.player.isDead) return;
             if (typeof state._fightFreezeUntil === 'number' && state.time < state._fightFreezeUntil) return;
             if (typeof audio !== 'undefined' && audio.init) audio.init();
+            // Glue primed: RT PLANTS the wall at the ghost (eats 1).
+            try {
+                if (typeof GlueWall !== 'undefined' && GlueWall.wantPlace && GlueWall.wantPlace(state) &&
+                    typeof ItemSystem !== 'undefined' && ItemSystem.plantGlue) {
+                    ItemSystem.plantGlue(state);
+                    return;
+                }
+            } catch (e2) {}
             if (hold) state.mouse.isDown = true;
             if (typeof WeaponSystem !== 'undefined') WeaponSystem.shoot(state);
         } catch (e) {}
